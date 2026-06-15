@@ -318,6 +318,39 @@ function TerminalSurface({
     }
     terminal.open(container);
 
+    // Smart Ctrl+C / Ctrl+V (Linux-terminal style):
+    // - Ctrl+C with an active selection -> copy to clipboard and clear it
+    //   (otherwise fall through and send SIGINT as usual).
+    // - Ctrl+V -> paste clipboard content.
+    // This matches GNOME Terminal / KDE Konsole behaviour and avoids
+    // forcing Ctrl+Shift+C which most users on Windows do not know.
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+      const mod = event.ctrlKey || event.metaKey;
+      if (!mod || event.shiftKey || event.altKey) return true;
+      if (event.key === "c" || event.key === "C") {
+        if (terminal.hasSelection()) {
+          const text = terminal.getSelection();
+          if (text) {
+            void navigator.clipboard.writeText(text).catch(() => {});
+            terminal.clearSelection();
+            return false;
+          }
+        }
+        return true;
+      }
+      if (event.key === "v" || event.key === "V") {
+        navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (text) terminal.paste(text);
+          })
+          .catch(() => {});
+        return false;
+      }
+      return true;
+    });
+
     // GPU renderer with graceful fallback to the built-in DOM renderer.
     // We try WebGL first (closest to VS Code), and if the context is
     // ever lost or the addon refuses to load we just dispose it -- xterm
