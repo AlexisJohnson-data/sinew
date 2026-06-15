@@ -5975,8 +5975,11 @@ textarea {
   word-wrap: break-word;
   font-family: var(--font-ui);
   color: var(--text-0);
-  padding: 8px 11px;
-  background: var(--bg-2);
+  padding: 10px 13px;
+  /* Visible blue-tinted bubble so user messages stand out clearly from
+     assistant text on the near-black canvas. */
+  background: var(--accent-soft);
+  border: 1px solid rgba(59, 130, 246, 0.22);
   border-radius: var(--r-card);
   font-size: var(--fs-sm);
   line-height: 1.5;
@@ -5984,20 +5987,30 @@ textarea {
 }
 .user-text[data-rewindable="true"] {
   cursor: pointer;
-  transition: background 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease;
 }
 .user-text[data-rewindable="true"]:hover {
-  background: var(--bg-3);
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.32);
 }
 .user-text[data-rewindable="true"]:focus-visible {
   outline: none;
-  background: var(--bg-3);
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.32);
 }
 .user-text[data-rewriting="true"],
 .user-text[data-rewindable="true"][data-rewriting="true"]:hover,
 .user-text[data-rewindable="true"][data-rewriting="true"]:focus-visible {
   background: var(--bg-4);
+  border-color: var(--line-strong);
   color: var(--text-0);
+}
+
+/* Assistant messages: thin lavender accent rail on the left to give them
+   their own visual identity without adding a heavy bubble. */
+.msg[data-role="assistant"] .msg__body {
+  padding-left: 12px;
+  border-left: 2px solid var(--accent-2);
 }
 
 .compaction-summary__body {
@@ -6168,6 +6181,116 @@ textarea {
   color: inherit;
   font-size: inherit;
   overflow-wrap: normal;
+}
+
+/* Collapsed-panel rail (VS Code-style). When the user folds the sidebar
+   or the chat, the panel itself is hidden and a thin vertical strip is
+   shown in its place with a single button to re-expand. */
+.workbench-rail {
+  display: flex;
+  flex: 0 0 36px;
+  width: 36px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 8px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.workbench-rail[data-side="right"] {
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+.workbench-rail__btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.workbench-rail__btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--line-strong);
+}
+
+/* Small floating "collapse chat" button placed at the top-left of the
+   chat wrapper. It overlays the chat without modifying ChatPane itself. */
+.workbench-chat-wrap__collapse {
+  position: absolute;
+  top: 8px;
+  left: 6px;
+  z-index: 5;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease,
+    border-color 120ms ease;
+}
+.workbench-chat-wrap:hover .workbench-chat-wrap__collapse,
+.workbench-chat-wrap__collapse:focus-visible {
+  opacity: 1;
+}
+.workbench-chat-wrap__collapse:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--line-strong);
+}
+
+/* Code block wrapper with a floating "Copy" button (Claude.ai-style). */
+.md-codeblock {
+  position: relative;
+  margin: 8px 0;
+}
+.md-codeblock > pre {
+  margin: 0;
+}
+.md-codeblock__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.md-codeblock:hover .md-codeblock__copy,
+.md-codeblock__copy:focus-visible {
+  opacity: 1;
+}
+.md-codeblock__copy:hover {
+  background: var(--bg-4);
+  color: var(--text-0);
+}
+.md-codeblock__copy[data-copied="true"] {
+  opacity: 1;
+  color: var(--accent-hi);
+  border-color: var(--accent-dim);
 }
 .mermaid-diagram {
   box-sizing: border-box;

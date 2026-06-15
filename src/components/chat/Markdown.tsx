@@ -3,6 +3,7 @@ import {
   cloneElement,
   isValidElement,
   memo,
+  useState,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -11,6 +12,44 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { api } from "../../lib/ipc";
 import { MermaidDiagram } from "./MermaidDiagram";
+
+/**
+ * Wraps a fenced-code <pre> with a small "Copy" button (top-right) that
+ * copies the raw block text to the clipboard, with a transient "Copied!"
+ * feedback. Mirrors the Claude.ai chat UX so the user does not have to
+ * select the whole block manually.
+ */
+function CodeBlock({ children }: { children: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const text = childrenToString(children);
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => {
+        // Clipboard API can fail when the document is not focused; ignore
+        // silently rather than showing a confusing error to the user.
+      });
+  };
+  return (
+    <div className="md-codeblock">
+      <button
+        type="button"
+        className="md-codeblock__copy"
+        onClick={copy}
+        title={copied ? "Copied!" : "Copy code"}
+        data-copied={copied ? "true" : "false"}
+      >
+        {copied ? "Copied!" : "Copy"}
+      </button>
+      <pre>{children}</pre>
+    </div>
+  );
+}
 
 type Props = {
   text: string;
@@ -155,7 +194,7 @@ export const Markdown = memo(function Markdown({ text, onOpenFile }: Props) {
                 );
               }
             }
-            return <pre>{children}</pre>;
+            return <CodeBlock>{children}</CodeBlock>;
           },
           p({ children }) {
             return <p>{linkifyChildren(children, { onOpenFile })}</p>;

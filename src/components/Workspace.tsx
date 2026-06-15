@@ -57,7 +57,10 @@ type Props = {
 const INITIAL_LEFT = 280;
 const INITIAL_RIGHT = 420;
 const MIN_COL = 220;
-const MAX_COL_RATIO = 0.6;
+// Each column can grow to ~85% of the window width so the user can
+// effectively focus on the chat (or the file tree) without having to
+// fully collapse the other panels.
+const MAX_COL_RATIO = 0.85;
 const INITIAL_SPLIT_TOP = 0.55;
 const INITIAL_TERMINAL_HEIGHT = 240;
 const MIN_TERMINAL_HEIGHT = 140;
@@ -1722,6 +1725,11 @@ export function Workspace({
   const [leftWidth, setLeftWidth] = useState(INITIAL_LEFT);
   const [rightWidth, setRightWidth] = useState(INITIAL_RIGHT);
   const [topSplit, setTopSplit] = useState(INITIAL_SPLIT_TOP);
+  // VS Code-style collapse: when true the sidebar/chat is replaced by a
+  // thin vertical rail with a single button to re-expand it. The Splitter
+  // for that side is skipped while collapsed.
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
   const [terminalAvailable, setTerminalAvailable] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalFullHeight, setTerminalFullHeight] = useState(false);
@@ -1903,9 +1911,25 @@ export function Workspace({
       </div>
 
       <div className="main">
+        {leftCollapsed && (
+          <div className="workbench-rail" data-side="left">
+            <button
+              type="button"
+              className="workbench-rail__btn"
+              title="Show sidebar"
+              onClick={() => setLeftCollapsed(false)}
+            >
+              <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
+            </button>
+          </div>
+        )}
         <div
           className="sidebar"
-          style={{ width: leftWidth, flex: `0 0 ${leftWidth}px` }}
+          style={{
+            width: leftWidth,
+            flex: `0 0 ${leftWidth}px`,
+            display: leftCollapsed ? "none" : undefined,
+          }}
           ref={sidebarHeightRef}
         >
           <div
@@ -1953,6 +1977,18 @@ export function Workspace({
                         ? "solar:folder-open-linear"
                         : "solar:magnifer-linear"
                     }
+                    width={15}
+                    height={15}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="sidebar__head-btn"
+                  title="Collapse sidebar"
+                  onClick={() => setLeftCollapsed(true)}
+                >
+                  <Icon
+                    icon="solar:alt-arrow-left-linear"
                     width={15}
                     height={15}
                   />
@@ -2081,10 +2117,12 @@ export function Workspace({
             </div>
           </div>
         </div>
-        <Splitter
-          orientation="vertical"
-          onDelta={(delta) => setLeftWidth((v) => clampColumn(v + delta))}
-        />
+        {!leftCollapsed && (
+          <Splitter
+            orientation="vertical"
+            onDelta={(delta) => setLeftWidth((v) => clampColumn(v + delta))}
+          />
+        )}
         <div className="workbench-center">
           <div
             className="editor-shell"
@@ -2174,18 +2212,30 @@ export function Workspace({
             </div>
           )}
         </div>
-        <Splitter
-          orientation="vertical"
-          onDelta={(delta) => setRightWidth((v) => clampColumn(v - delta))}
-        />
+        {!rightCollapsed && (
+          <Splitter
+            orientation="vertical"
+            onDelta={(delta) => setRightWidth((v) => clampColumn(v - delta))}
+          />
+        )}
         <div
+          className="workbench-chat-wrap"
           style={{
             width: rightWidth,
             flex: `0 0 ${rightWidth}px`,
             minWidth: 0,
-            display: "flex",
+            display: rightCollapsed ? "none" : "flex",
+            position: "relative",
           }}
         >
+          <button
+            type="button"
+            className="workbench-chat-wrap__collapse"
+            title="Collapse chat"
+            onClick={() => setRightCollapsed(true)}
+          >
+            <Icon icon="solar:alt-arrow-right-linear" width={14} height={14} />
+          </button>
           <ChatPane
             workspacePath={workspacePath}
             conversationId={activeConv.id}
@@ -2209,6 +2259,18 @@ export function Workspace({
             dropZoneRef={chatDropZoneRef}
           />
         </div>
+        {rightCollapsed && (
+          <div className="workbench-rail" data-side="right">
+            <button
+              type="button"
+              className="workbench-rail__btn"
+              title="Show chat"
+              onClick={() => setRightCollapsed(false)}
+            >
+              <Icon icon="solar:alt-arrow-left-linear" width={16} height={16} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
