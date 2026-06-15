@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicU8, Ordering},
         Arc, Mutex as StdMutex,
     },
     thread,
@@ -31,6 +31,7 @@ use tokio::{
 };
 
 use crate::{
+    store::ShellPreference,
     tool_run::{diff_snapshots, snapshot_workspace, ToolRunResult, WorkspaceSnapshot},
     workspace::resolve_workspace_path,
 };
@@ -49,9 +50,15 @@ enum ShellKind {
     Bash,
     #[cfg(windows)]
     PowerShell,
+    #[cfg(windows)]
+    Wsl,
 }
 
 impl ShellKind {
+    // Used on Windows (PowerShell spawn path) and in tests; the resolved
+    // shell elsewhere goes through `from_preference`, so this is dead on a
+    // non-Windows non-test build.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn current() -> Self {
         #[cfg(windows)]
         {
@@ -63,12 +70,33 @@ impl ShellKind {
         }
     }
 
+    /// Resolve the shell to use from the user's persisted preference. On
+    /// non-Windows platforms the preference is ignored (always Bash); on
+    /// Windows, `Wsl` selects the default WSL distribution and anything else
+    /// keeps PowerShell 7+.
+    fn from_preference(pref: ShellPreference) -> Self {
+        #[cfg(windows)]
+        {
+            match pref {
+                ShellPreference::Wsl => Self::Wsl,
+                ShellPreference::Auto | ShellPreference::PowerShell => Self::PowerShell,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = pref;
+            Self::Bash
+        }
+    }
+
     fn display_name(self) -> &'static str {
         match self {
             #[cfg(not(windows))]
             Self::Bash => "Bash",
             #[cfg(windows)]
             Self::PowerShell => "PowerShell 7+",
+            #[cfg(windows)]
+            Self::Wsl => "Bash (WSL)",
         }
     }
 
@@ -78,6 +106,8 @@ impl ShellKind {
             Self::Bash => "Run a Bash command.",
             #[cfg(windows)]
             Self::PowerShell => "Run a PowerShell 7+ command.",
+            #[cfg(windows)]
+            Self::Wsl => "Run a Bash command inside WSL (Ubuntu).",
         }
     }
 
@@ -94,22 +124,66 @@ impl ShellKind {
             Self::Bash => "bash",
             #[cfg(windows)]
             Self::PowerShell => "PowerShell 7+",
+            #[cfg(windows)]
+            Self::Wsl => "bash",
         }
     }
 }
 
+/// Process-wide cache of the user's shell preference. Encoded as
+/// `0 = Auto`, `1 = PowerShell`, `2 = Wsl`. The desktop shell keeps this in
+/// sync with the persisted `ToolSettings.shell_preference` (at startup and
+/// whenever the user saves settings), so the agent core can resolve the active
+/// shell without threading the preference through every call site.
+static SHELL_PREFERENCE: AtomicU8 = AtomicU8::new(0);
+
+fn encode_shell_preference(pref: ShellPreference) -> u8 {
+    match pref {
+        ShellPreference::Auto => 0,
+        ShellPreference::PowerShell => 1,
+        ShellPreference::Wsl => 2,
+    }
+}
+
+fn decode_shell_preference(value: u8) -> ShellPreference {
+    match value {
+        1 => ShellPreference::PowerShell,
+        2 => ShellPreference::Wsl,
+        _ => ShellPreference::Auto,
+    }
+}
+
+/// Update the process-wide shell preference. Called by the desktop shell.
+pub fn set_shell_preference(pref: ShellPreference) {
+    SHELL_PREFERENCE.store(encode_shell_preference(pref), Ordering::Relaxed);
+}
+
+fn active_shell_preference() -> ShellPreference {
+    decode_shell_preference(SHELL_PREFERENCE.load(Ordering::Relaxed))
+}
+
+fn active_shell_kind() -> ShellKind {
+    ShellKind::from_preference(active_shell_preference())
+}
+
 pub fn active_shell_display_name() -> &'static str {
-    ShellKind::current().display_name()
+    active_shell_kind().display_name()
 }
 
 pub fn shell_system_prompt() -> &'static str {
-    #[cfg(windows)]
-    {
-        "Shell environment: Windows. The `bash` tool is backed by PowerShell 7+, not Bash or Windows PowerShell 5.1. Use PowerShell commands and syntax (`Get-ChildItem`, `Select-String`, `Get-Content`, `$env:VAR`, `;`, PowerShell pipelines). Do not use POSIX-only syntax such as `ls -la`, `grep`, `sed`, `awk`, `cat file | head`, or `/bin/bash` unless you explicitly know a compatibility layer is installed."
-    }
-    #[cfg(not(windows))]
-    {
-        "Shell environment: macOS/Linux. The `bash` tool is backed by Bash. Use POSIX/Bash commands and syntax."
+    match active_shell_kind() {
+        #[cfg(not(windows))]
+        ShellKind::Bash => {
+            "Shell environment: macOS/Linux. The `bash` tool is backed by Bash. Use POSIX/Bash commands and syntax."
+        }
+        #[cfg(windows)]
+        ShellKind::PowerShell => {
+            "Shell environment: Windows. The `bash` tool is backed by PowerShell 7+, not Bash or Windows PowerShell 5.1. Use PowerShell commands and syntax (`Get-ChildItem`, `Select-String`, `Get-Content`, `$env:VAR`, `;`, PowerShell pipelines). Do not use POSIX-only syntax such as `ls -la`, `grep`, `sed`, `awk`, `cat file | head`, or `/bin/bash` unless you explicitly know a compatibility layer is installed."
+        }
+        #[cfg(windows)]
+        ShellKind::Wsl => {
+            "Shell environment: WSL (Linux) on Windows. The `bash` tool runs inside your default WSL distribution (e.g. Ubuntu), not PowerShell. Use POSIX/Bash commands and syntax (`ls -la`, `grep`, `sed`, `awk`, `cat file | head`, `$VAR`, pipes). Paths are Linux paths; Windows drives are mounted under `/mnt` (e.g. `C:\\` is `/mnt/c`)."
+        }
     }
 }
 
@@ -119,6 +193,7 @@ pub struct BashTool {
     timeout: Duration,
     sessions: Arc<Mutex<HashMap<u64, BashSession>>>,
     next_session_id: Arc<AtomicU64>,
+    shell: ShellKind,
 }
 
 impl BashTool {
@@ -128,11 +203,12 @@ impl BashTool {
             timeout: DEFAULT_TIMEOUT,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             next_session_id: Arc::new(AtomicU64::new(1)),
+            shell: active_shell_kind(),
         }
     }
 
     pub fn descriptor(&self) -> ToolDescriptor {
-        let shell = ShellKind::current();
+        let shell = self.shell;
         ToolDescriptor {
             name: "bash".into(),
             description: shell.command_description().into(),
@@ -152,7 +228,7 @@ impl BashTool {
     }
 
     pub fn input_descriptor(&self) -> ToolDescriptor {
-        let shell = ShellKind::current();
+        let shell = self.shell;
         let session_id_description = format!(
             "Session id returned by {} while a process is still running.",
             shell.session_label()
@@ -228,7 +304,7 @@ impl BashTool {
                     return ToolRunResult::err(
                         format!(
                             "unknown {} session {}",
-                            ShellKind::current().session_label(),
+                            self.shell.session_label(),
                             parsed.session_id
                         ),
                         Vec::new(),
@@ -316,15 +392,29 @@ impl BashTool {
     ) -> Result<BashSession> {
         #[cfg(windows)]
         {
-            let shell_program = crate::powershell::ensure_powershell_7_executable().await?;
-            return spawn_windows_piped_session(
-                shell_program,
-                command,
-                cwd,
-                max_lifetime,
-                before,
-                || self.next_session_id.fetch_add(1, Ordering::Relaxed),
-            );
+            match self.shell {
+                ShellKind::Wsl => {
+                    return spawn_wsl_piped_session(
+                        command,
+                        cwd,
+                        max_lifetime,
+                        before,
+                        || self.next_session_id.fetch_add(1, Ordering::Relaxed),
+                    );
+                }
+                ShellKind::PowerShell => {
+                    let shell_program =
+                        crate::powershell::ensure_powershell_7_executable().await?;
+                    return spawn_windows_piped_session(
+                        shell_program,
+                        command,
+                        cwd,
+                        max_lifetime,
+                        before,
+                        || self.next_session_id.fetch_add(1, Ordering::Relaxed),
+                    );
+                }
+            }
         }
 
         #[cfg(not(windows))]
@@ -348,7 +438,7 @@ impl BashTool {
             builder.env("GH_PAGER", "cat");
 
             let mut child = pair.slave.spawn_command(builder).with_context(|| {
-                format!("unable to spawn {}", ShellKind::current().display_name())
+                format!("unable to spawn {}", self.shell.display_name())
             })?;
             drop(pair.slave);
 
@@ -433,7 +523,12 @@ impl BashTool {
         }
 
         let session_id = session.id;
-        let text = interactive_transcript(output.text, output.truncated, session_id);
+        let text = interactive_transcript(
+            output.text,
+            output.truncated,
+            session_id,
+            self.shell.session_label(),
+        );
         sessions.insert(session_id, session);
         ToolRunResult::ok(text, Vec::new())
     }
@@ -479,7 +574,7 @@ impl BashTool {
         }
         transcript.push_str(&format!(
             "\n[{} command timed out after {}s]",
-            ShellKind::current().display_name(),
+            self.shell.display_name(),
             session.max_lifetime.as_secs()
         ));
         ToolRunResult::err(transcript, file_changes)
@@ -605,6 +700,94 @@ fn spawn_windows_piped_session(
     })
 }
 
+/// Convert a (possibly canonicalized / extended-length) Windows path into the
+/// plain form `wsl.exe` understands. `wsl.exe` fails to translate verbatim
+/// `\\?\UNC\...` paths — it silently falls back to the WSL home directory — so
+/// the extended-length prefix must be stripped before the path is used as a
+/// working directory. `\\?\C:\...` is also normalized back to `C:\...`.
+#[cfg(windows)]
+pub fn wsl_working_directory(path: &Path) -> std::ffi::OsString {
+    let text = path.to_string_lossy();
+    let plain = text
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| text.strip_prefix(r"\\?\").map(str::to_string))
+        .unwrap_or_else(|| text.into_owned());
+    std::ffi::OsString::from(plain)
+}
+
+#[cfg(windows)]
+fn spawn_wsl_piped_session(
+    command: String,
+    cwd: PathBuf,
+    max_lifetime: Duration,
+    before: WorkspaceSnapshot,
+    next_id: impl FnOnce() -> u64,
+) -> Result<BashSession> {
+    let mut cmd = Command::new("wsl.exe");
+    cmd.arg("--")
+        .arg("bash")
+        .arg("-lc")
+        .arg(&command)
+        .current_dir(wsl_working_directory(&cwd))
+        .env("TERM", "dumb")
+        .env("NO_COLOR", "1")
+        .env("PAGER", "cat")
+        .env("GIT_PAGER", "cat")
+        .env("GH_PAGER", "cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = cmd
+        .spawn()
+        .context("unable to spawn WSL (is WSL installed with a default distribution?)")?;
+
+    let stdin = child.stdin.take().context("WSL stdin unavailable")?;
+    let stdout = child.stdout.take().context("WSL stdout unavailable")?;
+    let stderr = child.stderr.take().context("WSL stderr unavailable")?;
+
+    let writer = Arc::new(StdMutex::new(Box::new(stdin) as Box<dyn Write + Send>));
+    let killer = Arc::new(StdMutex::new(child.clone_killer()));
+    let (output_tx, output_rx) = mpsc::unbounded_channel();
+    let (exit_tx, exit_rx) = watch::channel(None);
+
+    spawn_pipe_reader(stdout, output_tx.clone());
+    spawn_pipe_reader(stderr, output_tx);
+
+    thread::spawn(move || {
+        let exit = match child.wait() {
+            Ok(status) => {
+                let display = status
+                    .code()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "terminated".to_string());
+                SessionExit {
+                    display,
+                    success: status.success(),
+                }
+            }
+            Err(err) => SessionExit {
+                display: err.to_string(),
+                success: false,
+            },
+        };
+        let _ = exit_tx.send(Some(exit));
+    });
+
+    Ok(BashSession {
+        id: next_id(),
+        writer,
+        killer,
+        output_rx,
+        exit_rx,
+        before,
+        started_at: Instant::now(),
+        max_lifetime,
+    })
+}
+
 #[cfg(windows)]
 fn spawn_pipe_reader(
     mut reader: impl Read + Send + 'static,
@@ -674,12 +857,10 @@ struct BashSession {
 
 impl BashSession {
     fn write(&self, bytes: &[u8]) -> std::result::Result<(), String> {
-        let mut writer = self.writer.lock().map_err(|_| {
-            format!(
-                "{} session writer unavailable",
-                ShellKind::current().session_label()
-            )
-        })?;
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| "shell session writer unavailable".to_string())?;
         writer.write_all(bytes).map_err(|err| err.to_string())?;
         writer.flush().map_err(|err| err.to_string())
     }
@@ -787,13 +968,17 @@ fn append_limited(bytes: &mut Vec<u8>, truncated: &mut bool, chunk: &[u8]) {
     }
 }
 
-fn interactive_transcript(mut text: String, truncated: bool, session_id: u64) -> String {
+fn interactive_transcript(
+    mut text: String,
+    truncated: bool,
+    session_id: u64,
+    session_label: &str,
+) -> String {
     if truncated {
         text.push_str("\n...[output truncated]");
     }
     text.push_str(&format!(
-        "\n[process still running: {} session {session_id}]\nUse bash_input with session_id {session_id} to send input or poll output. Include a newline when answering a prompt. Use kill=true to stop it.",
-        ShellKind::current().session_label()
+        "\n[process still running: {session_label} session {session_id}]\nUse bash_input with session_id {session_id} to send input or poll output. Include a newline when answering a prompt. Use kill=true to stop it."
     ));
     text
 }

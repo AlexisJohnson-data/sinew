@@ -172,6 +172,7 @@ export type ToolConfig = {
 
 export type ImageProvider = "gptImage2" | "nanoBanana2";
 export type WebSearchProvider = "linkup" | "classic";
+export type ShellPreference = "auto" | "powershell" | "wsl";
 
 export type ToolSettings = {
   tools: ToolConfig[];
@@ -183,6 +184,7 @@ export type ToolSettings = {
   nanoBananaApiKey: string;
   webSearchProvider: WebSearchProvider;
   linkupApiKey: string;
+  shellPreference: ShellPreference;
 };
 
 export type ProviderConnectionState =

@@ -239,6 +239,10 @@ pub(super) async fn save_tool_settings(
         .store
         .save_tool_settings_for_catalog(&input.settings, &catalog)
         .map_err(error_to_string)?;
+    // Apply the (possibly changed) shell preference immediately so the next
+    // turn and any newly spawned interactive terminal pick it up without a
+    // restart.
+    sinew_app::set_shell_preference(saved.shell_preference);
     Ok(tool_settings_view(&saved, &catalog))
 }
 

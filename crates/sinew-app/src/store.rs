@@ -214,6 +214,8 @@ pub struct ToolSettings {
     pub web_search_provider: WebSearchProvider,
     #[serde(default)]
     pub linkup_api_key: String,
+    #[serde(default)]
+    pub shell_preference: ShellPreference,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +234,21 @@ pub enum WebSearchProvider {
     #[default]
     #[serde(rename = "classic")]
     Classic,
+}
+
+/// User preference for which shell backs the `bash` tool and the interactive
+/// terminal. `Auto` keeps the historical behaviour (PowerShell 7+ on Windows,
+/// Bash elsewhere). `Wsl` routes both through the default WSL distribution on
+/// Windows; it has no effect on macOS/Linux, which always use Bash.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShellPreference {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "powershell")]
+    PowerShell,
+    #[serde(rename = "wsl")]
+    Wsl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +277,7 @@ pub struct ToolSettingsView {
     pub nano_banana_api_key: String,
     pub web_search_provider: WebSearchProvider,
     pub linkup_api_key: String,
+    pub shell_preference: ShellPreference,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -454,6 +472,7 @@ pub fn tool_settings_view(settings: &ToolSettings, catalog: &[ToolDescriptor]) -
         nano_banana_api_key: settings.nano_banana_api_key.clone(),
         web_search_provider: settings.web_search_provider,
         linkup_api_key: settings.linkup_api_key.clone(),
+        shell_preference: settings.shell_preference,
         tools: catalog
             .iter()
             .filter_map(|descriptor| {

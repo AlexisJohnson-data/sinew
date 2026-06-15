@@ -50,8 +50,16 @@ pub(super) async fn spawn_terminal(
         ))
         .map_err(error_to_string)?;
 
-    let mut command = default_terminal_command().await.map_err(error_to_string)?;
-    command.cwd(workspace_root.as_os_str());
+    let shell_preference = state
+        .store
+        .load_tool_settings()
+        .map(|settings| settings.shell_preference)
+        .unwrap_or_default();
+    let mut command = default_terminal_command(shell_preference)
+        .await
+        .map_err(error_to_string)?;
+    let cwd = terminal_working_directory(shell_preference, &workspace_root);
+    command.cwd(&cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("SINEW_WORKSPACE", workspace_root.as_os_str());
@@ -91,9 +99,17 @@ pub(super) async fn spawn_terminal(
     Ok(TerminalSpawnOutput { session_id })
 }
 
-async fn default_terminal_command() -> Result<CommandBuilder> {
+async fn default_terminal_command(
+    shell_preference: sinew_app::ShellPreference,
+) -> Result<CommandBuilder> {
     #[cfg(windows)]
     {
+        if matches!(shell_preference, sinew_app::ShellPreference::Wsl) {
+            // Bare `wsl.exe` launches the default distribution's login shell
+            // interactively; the working directory (set by the caller) lands
+            // the session inside the workspace.
+            return Ok(CommandBuilder::new("wsl.exe"));
+        }
         let shell = sinew_app::ensure_powershell_7_executable().await?;
         let mut command = CommandBuilder::new(shell.as_os_str());
         command.arg("-NoLogo");
@@ -105,8 +121,30 @@ async fn default_terminal_command() -> Result<CommandBuilder> {
     }
     #[cfg(not(windows))]
     {
+        let _ = shell_preference;
         Ok(CommandBuilder::new_default_prog())
     }
+}
+
+/// Resolve the working directory passed to the terminal shell. WSL needs the
+/// plain (non extended-length) path form because `wsl.exe` cannot translate a
+/// verbatim `\\?\UNC\...` working directory; every other shell keeps the
+/// canonical workspace path unchanged.
+fn terminal_working_directory(
+    shell_preference: sinew_app::ShellPreference,
+    workspace_root: &std::path::Path,
+) -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        if matches!(shell_preference, sinew_app::ShellPreference::Wsl) {
+            return sinew_app::wsl_working_directory(workspace_root);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = shell_preference;
+    }
+    workspace_root.as_os_str().to_os_string()
 }
 
 #[tauri::command]

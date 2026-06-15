@@ -5064,6 +5064,13 @@ textarea {
   background: var(--bg-3);
 }
 
+.settings-pane__field-hint {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
 .settings-pane__field {
   display: grid;
   gap: 4px;

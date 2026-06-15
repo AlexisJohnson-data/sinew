@@ -6,6 +6,7 @@ import { api } from "../lib/ipc";
 import { canonicalToolName } from "../lib/tools";
 import { Markdown } from "./chat/Markdown";
 import { SinewMark } from "./SinewMark";
+import { isWindowsPlatform } from "./WindowControls";
 import {
   MODELS,
   PROVIDERS,
@@ -36,6 +37,7 @@ import type {
   SkillSettings,
   SubAgentConfig,
   SubAgentSettings,
+  ShellPreference,
   ThinkingLevel,
   ToolConfig,
   ToolSettings,
@@ -101,9 +103,13 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   nanoBananaApiKey: "",
   webSearchProvider: "classic",
   linkupApiKey: "",
+  shellPreference: "auto",
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
+// The WSL shell option is only meaningful on Windows; elsewhere the `bash`
+// tool and terminal always use the native shell.
+const IS_WINDOWS = isWindowsPlatform();
 
 type Props = {
   workspacePath: string;
@@ -369,6 +375,12 @@ export function SettingsPane({ workspacePath }: Props) {
   const updateWebSearchProvider = useCallback((webSearchProvider: WebSearchProvider) => {
     setToolSettings((current) =>
       current ? { ...current, webSearchProvider } : current,
+    );
+  }, []);
+
+  const updateShellPreference = useCallback((shellPreference: ShellPreference) => {
+    setToolSettings((current) =>
+      current ? { ...current, shellPreference } : current,
     );
   }, []);
 
@@ -1377,6 +1389,7 @@ export function SettingsPane({ workspacePath }: Props) {
             onOpenAiImageApiKeyChange={updateOpenAiImageApiKey}
             onNanoBananaApiKeyChange={updateNanoBananaApiKey}
             onWebSearchProviderChange={updateWebSearchProvider}
+            onShellPreferenceChange={updateShellPreference}
             onLinkupApiKeyChange={updateLinkupApiKey}
             openAiStatus={openAiStatus}
           />
@@ -2116,6 +2129,7 @@ type ToolsSectionProps = {
   onOpenAiImageApiKeyChange: (value: string) => void;
   onNanoBananaApiKeyChange: (value: string) => void;
   onWebSearchProviderChange: (value: WebSearchProvider) => void;
+  onShellPreferenceChange: (value: ShellPreference) => void;
   onLinkupApiKeyChange: (value: string) => void;
   openAiStatus: OpenAiProviderStatus | null;
 };
@@ -2146,6 +2160,7 @@ function ToolsSection({
   onOpenAiImageApiKeyChange,
   onNanoBananaApiKeyChange,
   onWebSearchProviderChange,
+  onShellPreferenceChange,
   onLinkupApiKeyChange,
   openAiStatus,
 }: ToolsSectionProps) {
@@ -2158,6 +2173,7 @@ function ToolsSection({
   const nanoBananaApiKey = settings?.nanoBananaApiKey ?? "";
   const webSearchProvider = settings?.webSearchProvider ?? "classic";
   const linkupApiKey = settings?.linkupApiKey ?? "";
+  const shellPreference = settings?.shellPreference ?? "auto";
   const openAiConnected = openAiStatus?.connected === true;
   const subscriptionActive =
     imageProvider === "gptImage2" && openAiConnected && openaiImageUseSubscription;
@@ -2338,6 +2354,38 @@ function ToolsSection({
                   onChange={onLinkupApiKeyChange}
                 />
               )}
+            </section>
+          )}
+          {IS_WINDOWS && (
+            <section className="settings-pane__tool-group">
+              <div className="settings-pane__tool-group-head">
+                <h2>Terminal &amp; shell</h2>
+              </div>
+              <div
+                className="settings-pane__tool-provider-switch"
+                role="group"
+                aria-label="Shell"
+              >
+                <button
+                  type="button"
+                  data-active={shellPreference === "auto" ? "true" : "false"}
+                  onClick={() => onShellPreferenceChange("auto")}
+                >
+                  PowerShell
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPreference === "wsl" ? "true" : "false"}
+                  onClick={() => onShellPreferenceChange("wsl")}
+                >
+                  WSL (Ubuntu)
+                </button>
+              </div>
+              <p className="settings-pane__field-hint">
+                {shellPreference === "wsl"
+                  ? "The bash tool and the integrated terminal run inside your default WSL distribution. Requires WSL installed. Reopen the terminal after switching."
+                  : "The bash tool and the integrated terminal use PowerShell 7+ (default on Windows)."}
+              </p>
             </section>
           )}
           {groups.map((group) => (
@@ -4188,6 +4236,12 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
     webSearchProvider:
       settings.webSearchProvider === "linkup" ? "linkup" : "classic",
     linkupApiKey: settings.linkupApiKey ?? "",
+    shellPreference:
+      settings.shellPreference === "wsl"
+        ? "wsl"
+        : settings.shellPreference === "powershell"
+          ? "powershell"
+          : "auto",
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];

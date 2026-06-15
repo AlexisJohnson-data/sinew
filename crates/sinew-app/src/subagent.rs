@@ -511,6 +511,7 @@ fn import_claude_sub_agents(
             description: file.description,
             prompt: file.prompt,
             model: file.model,
+            hide_for_same_model: false,
             enabled: true,
             source: Some(file.source),
             source_path: Some(display_path_string(&file.source_path)),

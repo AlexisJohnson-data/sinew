@@ -28,7 +28,9 @@ pub use agent::{
     system_prompt_for_mode_with_plan_prompt, AgentEvent, AgentEventScope, AgentMode,
     ConversationEvent, EngineCommand, QuestionReply, TurnCancel, TurnContext,
 };
-pub use bash::{active_shell_display_name, shell_system_prompt, BashTool};
+pub use bash::{active_shell_display_name, set_shell_preference, shell_system_prompt, BashTool};
+#[cfg(windows)]
+pub use bash::wsl_working_directory;
 pub use compact::{compact_conversation_history, CompactConversationOutput};
 pub use edit::EditFileTool;
 pub use glob::GlobTool;
@@ -46,8 +48,8 @@ pub use skill::{
 pub use store::{
     tool_settings_view, AppStore, ConversationSummary, GoalWorkflowState, ModeModelSettings,
     OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, SavedConversation, ToolConfig,
-    ToolConfigView, ToolSettings, ToolSettingsView, TurnCheckpointRecord, WebSearchProvider,
-    WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT,
+    ShellPreference, ToolConfigView, ToolSettings, ToolSettingsView, TurnCheckpointRecord,
+    WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT,
 };
 pub use subagent::{
     import_sub_agents_from_provider, is_subagent_tool_name, subagent_system_prompt,

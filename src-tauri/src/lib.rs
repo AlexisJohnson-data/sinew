@@ -134,6 +134,15 @@ pub fn run() {
         .try_init();
 
     let store = AppStore::open_default().expect("unable to open app store");
+    // Sync the agent core's shell-preference cache from persisted settings so
+    // the very first turn (system prompt + bash tool) already reflects the
+    // user's choice (PowerShell vs WSL on Windows).
+    sinew_app::set_shell_preference(
+        store
+            .load_tool_settings()
+            .map(|settings| settings.shell_preference)
+            .unwrap_or_default(),
+    );
     let openrouter_models = store.load_openrouter_models().unwrap_or_default();
     let mut providers: HashMap<String, Arc<dyn Provider>> = HashMap::new();
     if let Ok(provider) = AnthropicProvider::from_default_sources() {
