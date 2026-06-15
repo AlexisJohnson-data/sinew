@@ -144,6 +144,8 @@ export type ServiceTier = "fast";
 
 export type ModeModelSettings = Record<AgentMode, ModelRef>;
 
+export type SubAgentSource = "workspace" | "global";
+
 export type SubAgentConfig = {
   id: string;
   name: string;
@@ -152,6 +154,8 @@ export type SubAgentConfig = {
   model: ModelRef;
   hideForSameModel: boolean;
   enabled: boolean;
+  source?: SubAgentSource | null;
+  sourcePath?: string | null;
 };
 
 export type SubAgentSettings = {
@@ -330,6 +334,31 @@ export type SkillConfig = {
 
 export type SkillSettings = {
   skills: SkillConfig[];
+};
+
+export type SkippedSkillImport = {
+  name: string;
+  reason: string;
+};
+
+export type ImportSkillsResult = {
+  imported: string[];
+  skipped: SkippedSkillImport[];
+};
+
+export type SkippedSubAgentImport = {
+  name: string;
+  reason: string;
+};
+
+export type ImportSubAgentsResult = {
+  imported: string[];
+  skipped: SkippedSubAgentImport[];
+};
+
+export type ImportSubAgentsOutput = {
+  settings: SubAgentSettings;
+  result: ImportSubAgentsResult;
 };
 
 export type PlanControl = "stopQuestions" | "updatePlan" | "implementPlan";

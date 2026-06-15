@@ -232,6 +232,8 @@ pub(super) fn team_agent_system_prompt_for_estimate(
         model: model.clone(),
         hide_for_same_model: false,
         enabled: true,
+        source: None,
+        source_path: None,
     };
     let base = subagent_system_prompt(base, &config_agent);
     format!(
