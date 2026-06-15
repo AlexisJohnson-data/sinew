@@ -67,6 +67,107 @@ function formatSkillDisplayPath(skill: InstalledSkill): string {
   return `${skill.rootLabel}/${folder}/SKILL.md`;
 }
 
+// ---- Skill thematic categorisation ----------------------------------
+// Skills carry no formal category in their SKILL.md frontmatter, so we
+// infer one from the skill's name + description with an ordered set of
+// keyword rules. Order matters: the first rule that matches wins, so
+// narrow / disambiguating topics (Security, Mobile, Testing) come before
+// broad ones (AI, Frontend, Backend) that share vocabulary.
+const SKILL_CATEGORIES = [
+  "AI & Agents",
+  "Security",
+  "DevOps & Cloud",
+  "Database",
+  "Testing",
+  "Mobile",
+  "Data & ML",
+  "Frontend & UI",
+  "Backend",
+  "Languages",
+  "Docs & Writing",
+  "Workflow",
+  "Other",
+] as const;
+type SkillCategory = (typeof SKILL_CATEGORIES)[number];
+
+const SKILL_CATEGORY_RULES: ReadonlyArray<[RegExp, SkillCategory]> = [
+  [
+    /\b(pentest|exploit|vuln|cve|owasp|kerberos|xss|sql-?injection|csrf|ssrf|idor|burp|metasploit|shodan|wireshark|firewall|cybersec|security|hardening|harden|sast|dast|fuzz|reverse|malware|red-?team|active-directory|smtp-?penetration|ssh-?penetration|wordpress-?penetration|cloud-?pen)/i,
+    "Security",
+  ],
+  [
+    /\b(ios|android|flutter|react-?native|expo|mobile|swiftui|swift|kotlin|unity|godot|unreal)\b/i,
+    "Mobile",
+  ],
+  [
+    /\b(database|db|postgres|mysql|mongo|redis|prisma|sqlite|nosql|sqlmap|neon|supabase|clickhouse|cqrs|sql-?optim|sql-?pro|sql-?migrat|event-?stor|projection-?patterns)/i,
+    "Database",
+  ],
+  [
+    /\b(test|tdd|jest|vitest|playwright|cypress|mock|e2e|qa|bats|fuzz|evaluation|agent-?eval|webapp-?testing)/i,
+    "Testing",
+  ],
+  [
+    /\b(aws|gcp|azure|kubernet|k8s|docker|terraform|helm|deploy|ci-?cd|gitops|cloudflare|wrangler|workers|cloud|infra|devops|serverless|istio|linkerd|service-?mesh|mtls|kong)\b/i,
+    "DevOps & Cloud",
+  ],
+  [
+    /\b(data-?engineer|data-?scientist|data-?storytelling|data-?quality|spark|etl|pipeline|warehouse|datalake|pandas|jupyter|ml-?engineer|machine-?learning|ml-?pipeline|mlops|rag|vector|embedding|similarity-?search|hybrid-?search|airflow)/i,
+    "Data & ML",
+  ],
+  [
+    /\b(ai|llm|gpt|claude|anthropic|agent|prompt|langchain|langgraph|mcp|context7|tool-?design|tool-?builder|voice-?agent|chatbot|copilot|model-?context|hugging-?face|crewai|inngest|llm-?app)\b/i,
+    "AI & Agents",
+  ],
+  [
+    /\b(frontend|ui|ux|css|html|tailwind|design|brand|brandkit|animate|polish|typeset|adapt|colorize|monaco|figma|stitch|react|vue|svelte|angular|nextjs|next-?js|nuxt|astro|component|shadcn|radix|emil-?design|impeccable|gpt-?taste|design-?taste)/i,
+    "Frontend & UI",
+  ],
+  [
+    /\b(api|backend|microservice|nest|fastapi|express|server-?management|grpc|graphql|rest-?api|monorepo|architect|cqrs|event-?sourc|saga-?orchestr)/i,
+    "Backend",
+  ],
+  [
+    /\b(python-?pro|rust-?pro|golang-?pro|go-?concurrenc|typescript-?pro|javascript-?pro|java-?pro|c-?pro|cpp-?pro|csharp-?pro|ruby-?pro|php-?pro|scala-?pro|haskell-?pro|elixir-?pro|julia-?pro|posix-?shell|bash-?pro|powershell|arm-?cortex)/i,
+    "Languages",
+  ],
+  [
+    /\b(docs|doc-?co|readme|copywriting|copy-?editing|tutorial|technical-?writing|writing|content-?marketer|seo|blog|markdown|beautiful-?prose|api-?documentation|reference-?builder)/i,
+    "Docs & Writing",
+  ],
+  [
+    /\b(brainstorm|debug|refactor|workflow|planning|conductor|review|context-?management|onboard|commit|finishing-a-development|requesting-code-review|using-git|kaizen|clean-?code|systematic-?debug)/i,
+    "Workflow",
+  ],
+];
+
+function categorizeSkill(skill: InstalledSkill): SkillCategory {
+  const haystack = `${skill.name} ${skill.description ?? ""}`.toLowerCase();
+  for (const [regex, category] of SKILL_CATEGORY_RULES) {
+    if (regex.test(haystack)) return category;
+  }
+  return "Other";
+}
+
+type SkillGroup = {
+  category: SkillCategory;
+  skills: InstalledSkill[];
+};
+
+function groupSkillsByCategory(skills: InstalledSkill[]): SkillGroup[] {
+  const buckets = new Map<SkillCategory, InstalledSkill[]>();
+  for (const skill of skills) {
+    const category = categorizeSkill(skill);
+    const bucket = buckets.get(category);
+    if (bucket) bucket.push(skill);
+    else buckets.set(category, [skill]);
+  }
+  return SKILL_CATEGORIES.filter((cat) => buckets.has(cat)).map((category) => ({
+    category,
+    skills: buckets.get(category)!,
+  }));
+}
+
 function formatSubAgentDisplayPath(agent: SubAgentConfig): string {
   if (!agent.sourcePath) return "Configured in Sinew";
   const normalized = agent.sourcePath.replace(/\\/g, "/");
@@ -912,6 +1013,29 @@ export function SettingsPane({ workspacePath }: Props) {
     });
   }, []);
 
+  /**
+   * Smart "toggle all" for the visible skill list: if any skill in the
+   * given subset is currently disabled, enable every one of them; otherwise
+   * disable every one. Passing `null` for `names` targets every skill.
+   */
+  const setSkillsEnabledBulk = useCallback(
+    (names: ReadonlySet<string> | null) => {
+      setSkills((current) => {
+        if (!current) return current;
+        const target = names
+          ? current.filter((skill) => names.has(skill.name))
+          : current;
+        if (target.length === 0) return current;
+        const anyDisabled = target.some((skill) => !skill.enabled);
+        return current.map((skill) => {
+          if (names && !names.has(skill.name)) return skill;
+          return { ...skill, enabled: anyDisabled };
+        });
+      });
+    },
+    [],
+  );
+
   const saveSkills = useCallback(async () => {
     if (!skills) return;
     setSkillsSaving(true);
@@ -1437,6 +1561,7 @@ export function SettingsPane({ workspacePath }: Props) {
             onCreate={() => void createSkill()}
             onImport={(provider) => void importSkills(provider)}
             onToggleSkill={toggleSkillEnabled}
+            onToggleSkillsBulk={setSkillsEnabledBulk}
             onRevealSkill={(skill) => void revealSkill(skill)}
             onDeleteSkill={(skill) => void deleteSkill(skill)}
             onSaveSkillContent={saveSkillContent}
@@ -3635,6 +3760,7 @@ type SkillsSectionProps = {
   onCreate: () => void;
   onImport: (provider: "claude" | "codex") => void;
   onToggleSkill: (name: string) => void;
+  onToggleSkillsBulk: (names: ReadonlySet<string> | null) => void;
   onRevealSkill: (skill: InstalledSkill) => void;
   onDeleteSkill: (skill: InstalledSkill) => void;
   onSaveSkillContent: (skill: InstalledSkill, content: string) => Promise<boolean>;
@@ -3658,6 +3784,7 @@ function SkillsSection({
   onCreate,
   onImport,
   onToggleSkill,
+  onToggleSkillsBulk,
   onRevealSkill,
   onDeleteSkill,
   onSaveSkillContent,
@@ -3665,6 +3792,8 @@ function SkillsSection({
   const total = allSkills?.length ?? 0;
   const visible = skills.length;
   const enabled = allSkills?.filter((skill) => skill.enabled).length ?? 0;
+  const allEnabled = total > 0 && enabled === total;
+  const groupedSkills = useMemo(() => groupSkillsByCategory(skills), [skills]);
 
   return (
     <>
@@ -3713,6 +3842,28 @@ function SkillsSection({
           <button
             type="button"
             className="settings-pane__btn"
+            onClick={() => onToggleSkillsBulk(null)}
+            disabled={loading || saving || deleting || total === 0}
+            title={
+              allEnabled
+                ? "Disable every skill"
+                : "Enable every skill"
+            }
+          >
+            <Icon
+              icon={
+                allEnabled
+                  ? "solar:eye-closed-linear"
+                  : "solar:check-square-linear"
+              }
+              width={13}
+              height={13}
+            />
+            <span>{allEnabled ? "Disable all" : "Enable all"}</span>
+          </button>
+          <button
+            type="button"
+            className="settings-pane__btn"
             data-primary="true"
             onClick={onSave}
             disabled={loading || saving || deleting || !dirty}
@@ -3747,61 +3898,91 @@ function SkillsSection({
           )}
 
           <div className="settings-pane__skill-scroll">
-            {skills.map((skill) => (
-              <div
-                key={skill.name}
-                className="settings-pane__skill-item"
-                data-active={selectedSkill?.name === skill.name ? "true" : "false"}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectSkill(skill.name)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onSelectSkill(skill.name);
-                }}
-              >
-                <div className="settings-pane__skill-row">
-                  <div className="settings-pane__subagent-list-head">
-                    <span className="settings-pane__skill-name">{skill.name}</span>
-                    <span
-                      className="settings-pane__skill-source"
-                      data-source={skill.source}
-                    >
-                      {skill.source === "workspace" ? "workspace" : "global"}
+            {groupedSkills.map((group) => {
+              const groupEnabled = group.skills.filter((s) => s.enabled).length;
+              const groupTotal = group.skills.length;
+              const groupAllOn = groupTotal > 0 && groupEnabled === groupTotal;
+              return (
+                <section
+                  key={group.category}
+                  className="settings-pane__skill-group"
+                >
+                  <header className="settings-pane__skill-group-head">
+                    <span className="settings-pane__skill-group-title">
+                      {group.category}
                     </span>
-                    <span
-                      className="settings-pane__skill-state"
-                      data-enabled={skill.enabled ? "true" : "false"}
-                    >
-                      {skill.enabled ? "enabled" : "off"}
+                    <span className="settings-pane__skill-group-count">
+                      {groupEnabled}/{groupTotal}
                     </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-pane__switch"
-                    role="switch"
-                    aria-checked={skill.enabled}
-                    aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
-                    data-on={skill.enabled ? "true" : "false"}
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleSkill(skill.name);
-                    }}
-                  >
-                    <span className="settings-pane__switch-thumb" />
-                  </button>
-                </div>
-                {skill.description && (
-                  <span className="settings-pane__skill-desc">
-                    {skill.description}
-                  </span>
-                )}
-              </div>
-            ))}
+                    <button
+                      type="button"
+                      className="settings-pane__skill-group-toggle"
+                      title={groupAllOn ? "Disable all in this category" : "Enable all in this category"}
+                      onClick={() =>
+                        onToggleSkillsBulk(new Set(group.skills.map((s) => s.name)))
+                      }
+                    >
+                      {groupAllOn ? "Disable all" : "Enable all"}
+                    </button>
+                  </header>
+                  {group.skills.map((skill) => (
+                    <div
+                      key={skill.name}
+                      className="settings-pane__skill-item"
+                      data-active={selectedSkill?.name === skill.name ? "true" : "false"}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onSelectSkill(skill.name)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        onSelectSkill(skill.name);
+                      }}
+                    >
+                      <div className="settings-pane__skill-row">
+                        <div className="settings-pane__subagent-list-head">
+                          <span className="settings-pane__skill-name">{skill.name}</span>
+                          <span
+                            className="settings-pane__skill-source"
+                            data-source={skill.source}
+                          >
+                            {skill.source === "workspace" ? "workspace" : "global"}
+                          </span>
+                          <span
+                            className="settings-pane__skill-state"
+                            data-enabled={skill.enabled ? "true" : "false"}
+                          >
+                            {skill.enabled ? "enabled" : "off"}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="settings-pane__switch"
+                          role="switch"
+                          aria-checked={skill.enabled}
+                          aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                          data-on={skill.enabled ? "true" : "false"}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleSkill(skill.name);
+                          }}
+                        >
+                          <span className="settings-pane__switch-thumb" />
+                        </button>
+                      </div>
+                      {skill.description && (
+                        <span className="settings-pane__skill-desc">
+                          {skill.description}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </section>
+              );
+            })}
             {!loading && visible === 0 && total > 0 && (
               <div className="settings-pane__muted settings-pane__muted--center">
                 No skills match.

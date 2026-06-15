@@ -4651,6 +4651,59 @@ textarea {
   padding-right: 2px;
 }
 
+/* Thematic category grouping. Each group has a sticky-feeling header so
+   the user can scan the list and act on a whole topic at once. */
+.settings-pane__skill-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-pane__skill-group + .settings-pane__skill-group {
+  margin-top: 8px;
+}
+.settings-pane__skill-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 9px 4px;
+  border-top: 1px solid var(--line-soft);
+}
+.settings-pane__skill-group:first-child .settings-pane__skill-group-head {
+  border-top: 0;
+}
+.settings-pane__skill-group-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  flex: 1 1 auto;
+}
+.settings-pane__skill-group-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+}
+.settings-pane__skill-group-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.settings-pane__skill-group-toggle:hover {
+  color: var(--text-0);
+  background: var(--bg-3);
+  border-color: var(--line-strong);
+}
+
 .settings-pane__skill-item {
   display: grid;
   gap: 3px;
