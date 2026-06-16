@@ -6301,6 +6301,16 @@ textarea {
 .workbench-center {
   position: relative;
 }
+/* When the user folds the center pane, collapse it into a thin rail
+   like the sidebar / chat rails (otherwise it would keep eating its
+   flex:1 share of the row and leave a big empty block). */
+.workbench-center[data-collapsed="true"] {
+  flex: 0 0 36px;
+  min-width: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
 .workbench-center__collapse {
   position: absolute;
   top: 8px;
@@ -6337,9 +6347,6 @@ textarea {
   align-items: flex-start;
   justify-content: center;
   padding-top: 12px;
-  background: var(--bg-1);
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
 }
 
 /* Small floating "collapse chat" button placed at the top-left of the

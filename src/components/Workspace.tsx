@@ -1731,22 +1731,32 @@ export function Workspace({
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   // When the user opens a full-pane view (Settings or Remote) the
-  // workbench needs all the horizontal room it can get. Auto-fold the
-  // sidebar at that point and restore the previous state when the
-  // full-pane view is closed. The chat stays visible so the user can
-  // keep an eye on / interact with it.
-  const sidebarBeforeFullPaneRef = useRef<boolean | null>(null);
+  // workbench needs all the horizontal room it can get, so Settings is
+  // not stuck behind the chat. Fold *both* the sidebar and the chat to
+  // bring the full-pane view to the front, then restore the previous
+  // collapse state when it closes — turning the tab click into a
+  // "front / back" toggle between Chat and Settings/Remote.
+  const collapseStateBeforeFullPaneRef = useRef<
+    { left: boolean; right: boolean } | null
+  >(null);
   useEffect(() => {
     const fullPaneActive = settingsActive || remoteActive;
-    if (fullPaneActive && sidebarBeforeFullPaneRef.current === null) {
-      sidebarBeforeFullPaneRef.current = leftCollapsed;
+    if (fullPaneActive && collapseStateBeforeFullPaneRef.current === null) {
+      collapseStateBeforeFullPaneRef.current = {
+        left: leftCollapsed,
+        right: rightCollapsed,
+      };
       setLeftCollapsed(true);
-    } else if (!fullPaneActive && sidebarBeforeFullPaneRef.current !== null) {
-      setLeftCollapsed(sidebarBeforeFullPaneRef.current);
-      sidebarBeforeFullPaneRef.current = null;
+      setRightCollapsed(true);
+    } else if (!fullPaneActive && collapseStateBeforeFullPaneRef.current !== null) {
+      const saved = collapseStateBeforeFullPaneRef.current;
+      setLeftCollapsed(saved.left);
+      setRightCollapsed(saved.right);
+      collapseStateBeforeFullPaneRef.current = null;
     }
     // Intentionally driven by Settings/Remote toggles only, not by manual
-    // sidebar changes the user may make while a full-pane view is open.
+    // sidebar / chat changes the user may make while a full-pane view is
+    // open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsActive, remoteActive]);
   // Center pane (editor + terminal) collapse — symmetrical with left /
