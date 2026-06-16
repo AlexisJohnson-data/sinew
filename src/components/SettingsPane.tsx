@@ -74,8 +74,7 @@ function formatSkillDisplayPath(skill: InstalledSkill): string {
 // narrow / disambiguating topics (Security, Mobile, Testing) come before
 // broad ones (AI, Frontend, Backend) that share vocabulary.
 const SKILL_CATEGORIES = [
-  "Design",
-  "Frontend & UI",
+  "Frontend & Design",
   "Mobile",
   "Backend",
   "Database",
@@ -91,15 +90,15 @@ const SKILL_CATEGORIES = [
 ] as const;
 type SkillCategory = (typeof SKILL_CATEGORIES)[number];
 
-// Rules are evaluated in declared order; first match wins. The order is
-// chosen so a skill explicitly tied to a visual / design surface
-// ("design", "brand", "typeset", "stitch"…) is classified there before
+// Rules are evaluated in declared order; first match wins. Frontend &
+// Design comes first so a skill explicitly tied to a web interface
+// ("design", "react", "tailwind", "figma"…) is classified there before
 // generic words like "agent" or "ai" — which often appear inside English
 // descriptions for unrelated topics — could pull it into AI & Agents.
 const SKILL_CATEGORY_RULES: ReadonlyArray<[RegExp, SkillCategory]> = [
   [
-    /\b(design|design-?system|design-?taste|brand|brandkit|typography|typeset|polish|colorize|animate|adapt|figma|stitch|impeccable|gpt-?taste|emil-?design|ui-?ux-?designer|ui-?ux-?pro|industrial-?brutalist|minimalist-?ui|frontend-?slides|web-?design|brand-?guidelines|mobile-?design|interactive-?portfolio|illustration|3d-?web|kpi-?dashboard|banner|canvas-?design)/i,
-    "Design",
+    /\b(design|design-?system|design-?taste|brand|brandkit|typography|typeset|polish|colorize|animate|adapt|figma|stitch|impeccable|gpt-?taste|emil-?design|ui-?ux-?designer|ui-?ux-?pro|industrial-?brutalist|minimalist-?ui|frontend-?slides|web-?design|brand-?guidelines|mobile-?design|interactive-?portfolio|illustration|3d-?web|kpi-?dashboard|banner|canvas-?design|react|reactjs|next-?js|nextjs|nuxt|astro|svelte|vue|angular|tailwind|shadcn|radix|monaco|frontend|web-?artifacts|browser-?extension|html-?injection|form-?cro|landing|seo-?fundamentals|popup-?cro|signup-?flow|component-?library|wcag|aria|css|html)/i,
+    "Frontend & Design",
   ],
   [
     /\b(pentest|exploit|vuln|cve|owasp|kerberos|xss|sql-?injection|csrf|ssrf|idor|burp|metasploit|shodan|wireshark|firewall|cybersec|security|hardening|harden|sast|dast|fuzz|reverse|malware|red-?team|active-directory|smtp-?penetration|ssh-?penetration|wordpress-?penetration|cloud-?pen|privilege-?escalation|threat-?model|attack-?tree|stride-?analysis)/i,
@@ -124,10 +123,6 @@ const SKILL_CATEGORY_RULES: ReadonlyArray<[RegExp, SkillCategory]> = [
   [
     /\b(data-?engineer|data-?scientist|data-?storytelling|data-?quality|spark|etl|warehouse|datalake|pandas|jupyter|ml-?engineer|machine-?learning|ml-?pipeline|mlops|rag|vector-?(database|search|index)|embedding|similarity-?search|hybrid-?search|airflow|computer-?vision)/i,
     "Data & ML",
-  ],
-  [
-    /\b(react|reactjs|next-?js|nextjs|nuxt|astro|svelte|vue|angular|tailwind|shadcn|radix|monaco|frontend|web-?artifacts|browser-?extension|html-?injection|form-?cro|landing|seo-?fundamentals|popup-?cro|signup-?flow|component-?library|wcag|aria|css|html)/i,
-    "Frontend & UI",
   ],
   [
     /\b(ai-?(agent|wrapper|engineer|product)|llm|gpt-?(?!taste)|claude|anthropic|agent-?(orchestration|memory|tool|evaluation|manager|sdk)|prompt-?engineer|langchain|langgraph|mcp-?builder|context7|tool-?design|tool-?builder|voice-?agent|chatbot|copilot|model-?context|hugging-?face|crewai|llm-?app|rag-?implementation|rag-?engineer|autonomous-?agent|multi-?agent)/i,
