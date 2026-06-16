@@ -4665,8 +4665,23 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 9px 4px;
+  width: 100%;
+  padding: 7px 9px 6px;
+  appearance: none;
+  background: transparent;
+  border: 0;
   border-top: 1px solid var(--line-soft);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.settings-pane__skill-group-head:hover {
+  background: var(--bg-3);
+}
+.settings-pane__skill-group-head:focus-visible {
+  outline: none;
+  background: var(--bg-3);
 }
 .settings-pane__skill-group:first-child .settings-pane__skill-group-head {
   border-top: 0;
@@ -4686,7 +4701,8 @@ textarea {
   color: var(--text-3);
 }
 .settings-pane__skill-group-toggle {
-  appearance: none;
+  display: inline-flex;
+  align-items: center;
   background: transparent;
   border: 1px solid var(--line);
   color: var(--text-3);

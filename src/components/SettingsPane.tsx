@@ -74,15 +74,16 @@ function formatSkillDisplayPath(skill: InstalledSkill): string {
 // narrow / disambiguating topics (Security, Mobile, Testing) come before
 // broad ones (AI, Frontend, Backend) that share vocabulary.
 const SKILL_CATEGORIES = [
-  "AI & Agents",
-  "Security",
-  "DevOps & Cloud",
-  "Database",
-  "Testing",
-  "Mobile",
-  "Data & ML",
+  "Design",
   "Frontend & UI",
+  "Mobile",
   "Backend",
+  "Database",
+  "DevOps & Cloud",
+  "Security",
+  "Testing",
+  "AI & Agents",
+  "Data & ML",
   "Languages",
   "Docs & Writing",
   "Workflow",
@@ -90,9 +91,18 @@ const SKILL_CATEGORIES = [
 ] as const;
 type SkillCategory = (typeof SKILL_CATEGORIES)[number];
 
+// Rules are evaluated in declared order; first match wins. The order is
+// chosen so a skill explicitly tied to a visual / design surface
+// ("design", "brand", "typeset", "stitch"…) is classified there before
+// generic words like "agent" or "ai" — which often appear inside English
+// descriptions for unrelated topics — could pull it into AI & Agents.
 const SKILL_CATEGORY_RULES: ReadonlyArray<[RegExp, SkillCategory]> = [
   [
-    /\b(pentest|exploit|vuln|cve|owasp|kerberos|xss|sql-?injection|csrf|ssrf|idor|burp|metasploit|shodan|wireshark|firewall|cybersec|security|hardening|harden|sast|dast|fuzz|reverse|malware|red-?team|active-directory|smtp-?penetration|ssh-?penetration|wordpress-?penetration|cloud-?pen)/i,
+    /\b(design|design-?system|design-?taste|brand|brandkit|typography|typeset|polish|colorize|animate|adapt|figma|stitch|impeccable|gpt-?taste|emil-?design|ui-?ux-?designer|ui-?ux-?pro|industrial-?brutalist|minimalist-?ui|frontend-?slides|web-?design|brand-?guidelines|mobile-?design|interactive-?portfolio|illustration|3d-?web|kpi-?dashboard|banner|canvas-?design)/i,
+    "Design",
+  ],
+  [
+    /\b(pentest|exploit|vuln|cve|owasp|kerberos|xss|sql-?injection|csrf|ssrf|idor|burp|metasploit|shodan|wireshark|firewall|cybersec|security|hardening|harden|sast|dast|fuzz|reverse|malware|red-?team|active-directory|smtp-?penetration|ssh-?penetration|wordpress-?penetration|cloud-?pen|privilege-?escalation|threat-?model|attack-?tree|stride-?analysis)/i,
     "Security",
   ],
   [
@@ -100,43 +110,43 @@ const SKILL_CATEGORY_RULES: ReadonlyArray<[RegExp, SkillCategory]> = [
     "Mobile",
   ],
   [
-    /\b(database|db|postgres|mysql|mongo|redis|prisma|sqlite|nosql|sqlmap|neon|supabase|clickhouse|cqrs|sql-?optim|sql-?pro|sql-?migrat|event-?stor|projection-?patterns)/i,
+    /\b(database|postgres|mysql|mongo|redis|prisma|sqlite|nosql|sqlmap|neon|supabase|clickhouse|cqrs|sql-?optim|sql-?pro|sql-?migrat|event-?stor|projection-?patterns|dbt|orm|graphify)/i,
     "Database",
   ],
   [
-    /\b(test|tdd|jest|vitest|playwright|cypress|mock|e2e|qa|bats|fuzz|evaluation|agent-?eval|webapp-?testing)/i,
+    /\b(test|tdd|jest|vitest|playwright|cypress|mock|e2e|qa|bats|evaluation|webapp-?testing|test-?automator|test-?fixing|verification-?before|sast|dast)/i,
     "Testing",
   ],
   [
-    /\b(aws|gcp|azure|kubernet|k8s|docker|terraform|helm|deploy|ci-?cd|gitops|cloudflare|wrangler|workers|cloud|infra|devops|serverless|istio|linkerd|service-?mesh|mtls|kong)\b/i,
+    /\b(aws|gcp|azure|kubernet|k8s|docker|terraform|helm|deploy|ci-?cd|gitops|cloudflare|wrangler|workers|cloud|infra|devops|serverless|istio|linkerd|service-?mesh|mtls|prometheus|grafana|github-?actions|gitlab-?ci|circleci|nginx|loki)/i,
     "DevOps & Cloud",
   ],
   [
-    /\b(data-?engineer|data-?scientist|data-?storytelling|data-?quality|spark|etl|pipeline|warehouse|datalake|pandas|jupyter|ml-?engineer|machine-?learning|ml-?pipeline|mlops|rag|vector|embedding|similarity-?search|hybrid-?search|airflow)/i,
+    /\b(data-?engineer|data-?scientist|data-?storytelling|data-?quality|spark|etl|warehouse|datalake|pandas|jupyter|ml-?engineer|machine-?learning|ml-?pipeline|mlops|rag|vector-?(database|search|index)|embedding|similarity-?search|hybrid-?search|airflow|computer-?vision)/i,
     "Data & ML",
   ],
   [
-    /\b(ai|llm|gpt|claude|anthropic|agent|prompt|langchain|langgraph|mcp|context7|tool-?design|tool-?builder|voice-?agent|chatbot|copilot|model-?context|hugging-?face|crewai|inngest|llm-?app)\b/i,
-    "AI & Agents",
-  ],
-  [
-    /\b(frontend|ui|ux|css|html|tailwind|design|brand|brandkit|animate|polish|typeset|adapt|colorize|monaco|figma|stitch|react|vue|svelte|angular|nextjs|next-?js|nuxt|astro|component|shadcn|radix|emil-?design|impeccable|gpt-?taste|design-?taste)/i,
+    /\b(react|reactjs|next-?js|nextjs|nuxt|astro|svelte|vue|angular|tailwind|shadcn|radix|monaco|frontend|web-?artifacts|browser-?extension|html-?injection|form-?cro|landing|seo-?fundamentals|popup-?cro|signup-?flow|component-?library|wcag|aria|css|html)/i,
     "Frontend & UI",
   ],
   [
-    /\b(api|backend|microservice|nest|fastapi|express|server-?management|grpc|graphql|rest-?api|monorepo|architect|cqrs|event-?sourc|saga-?orchestr)/i,
+    /\b(ai-?(agent|wrapper|engineer|product)|llm|gpt-?(?!taste)|claude|anthropic|agent-?(orchestration|memory|tool|evaluation|manager|sdk)|prompt-?engineer|langchain|langgraph|mcp-?builder|context7|tool-?design|tool-?builder|voice-?agent|chatbot|copilot|model-?context|hugging-?face|crewai|llm-?app|rag-?implementation|rag-?engineer|autonomous-?agent|multi-?agent)/i,
+    "AI & Agents",
+  ],
+  [
+    /\b(api|backend|microservice|nest|fastapi|express|server-?management|grpc|graphql|rest-?api|monorepo|architect|cqrs|event-?sourc|saga-?orchestr|durable-?objects|workflow-?orchestration|distributed)/i,
     "Backend",
   ],
   [
-    /\b(python-?pro|rust-?pro|golang-?pro|go-?concurrenc|typescript-?pro|javascript-?pro|java-?pro|c-?pro|cpp-?pro|csharp-?pro|ruby-?pro|php-?pro|scala-?pro|haskell-?pro|elixir-?pro|julia-?pro|posix-?shell|bash-?pro|powershell|arm-?cortex)/i,
+    /\b(python-?pro|rust-?pro|golang-?pro|go-?concurrenc|typescript-?(pro|expert|advanced)|javascript-?(pro|mastery|testing)|java-?pro|c-?pro|cpp-?pro|csharp-?pro|ruby-?pro|php-?pro|scala-?pro|haskell-?pro|elixir-?pro|julia-?pro|posix-?shell|bash-?(pro|defensive|linux)|powershell-?windows|arm-?cortex|sql-?pro|dotnet)/i,
     "Languages",
   ],
   [
-    /\b(docs|doc-?co|readme|copywriting|copy-?editing|tutorial|technical-?writing|writing|content-?marketer|seo|blog|markdown|beautiful-?prose|api-?documentation|reference-?builder)/i,
+    /\b(docs-?architect|doc-?coauthoring|readme|copywriting|copy-?editing|tutorial|technical-?writing|beautiful-?prose|api-?documentation|reference-?builder|changelog|content-?marketer|content-?creator|social-?content|blog|markdown|writing|email-?sequence)/i,
     "Docs & Writing",
   ],
   [
-    /\b(brainstorm|debug|refactor|workflow|planning|conductor|review|context-?management|onboard|commit|finishing-a-development|requesting-code-review|using-git|kaizen|clean-?code|systematic-?debug)/i,
+    /\b(brainstorm|debug|refactor|workflow-?automation|planning|conductor|review|context-?(management|optimization|degradation)|onboard|commit|finishing-a-development|requesting-code-review|using-git|kaizen|clean-?code|systematic-?debug|track-?management|adapt|dispatching|parallel-?agents|tdd-?orchestrator|using-superpowers|writing-?plans|verification-?before-?completion)/i,
     "Workflow",
   ],
 ];
@@ -3795,6 +3805,25 @@ function SkillsSection({
   const allEnabled = total > 0 && enabled === total;
   const groupedSkills = useMemo(() => groupSkillsByCategory(skills), [skills]);
 
+  // Accordion state: a category is collapsed by default; clicking the
+  // header toggles it. While the user is filtering, every group is
+  // force-expanded so search results are never hidden behind a closed
+  // accordion. The state is per-section-render lifetime; persisting it
+  // across reloads isn't worth the complexity here.
+  const [expandedCategories, setExpandedCategories] = useState<Set<SkillCategory>>(
+    () => new Set(),
+  );
+  const filterActive = filter.trim().length > 0;
+  const isCategoryOpen = (cat: SkillCategory) =>
+    filterActive || expandedCategories.has(cat);
+  const toggleCategoryOpen = (cat: SkillCategory) =>
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+
   return (
     <>
       <header className="settings-pane__header">
@@ -3902,30 +3931,54 @@ function SkillsSection({
               const groupEnabled = group.skills.filter((s) => s.enabled).length;
               const groupTotal = group.skills.length;
               const groupAllOn = groupTotal > 0 && groupEnabled === groupTotal;
+              const open = isCategoryOpen(group.category);
               return (
                 <section
                   key={group.category}
                   className="settings-pane__skill-group"
+                  data-open={open ? "true" : "false"}
                 >
-                  <header className="settings-pane__skill-group-head">
+                  <button
+                    type="button"
+                    className="settings-pane__skill-group-head"
+                    aria-expanded={open}
+                    onClick={() => toggleCategoryOpen(group.category)}
+                  >
+                    <Icon
+                      icon={
+                        open
+                          ? "solar:alt-arrow-down-linear"
+                          : "solar:alt-arrow-right-linear"
+                      }
+                      width={12}
+                      height={12}
+                    />
                     <span className="settings-pane__skill-group-title">
                       {group.category}
                     </span>
                     <span className="settings-pane__skill-group-count">
                       {groupEnabled}/{groupTotal}
                     </span>
-                    <button
-                      type="button"
+                    <span
                       className="settings-pane__skill-group-toggle"
+                      role="button"
+                      tabIndex={0}
                       title={groupAllOn ? "Disable all in this category" : "Enable all in this category"}
-                      onClick={() =>
-                        onToggleSkillsBulk(new Set(group.skills.map((s) => s.name)))
-                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleSkillsBulk(new Set(group.skills.map((s) => s.name)));
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.stopPropagation();
+                        event.preventDefault();
+                        onToggleSkillsBulk(new Set(group.skills.map((s) => s.name)));
+                      }}
                     >
                       {groupAllOn ? "Disable all" : "Enable all"}
-                    </button>
-                  </header>
-                  {group.skills.map((skill) => (
+                    </span>
+                  </button>
+                  {open && group.skills.map((skill) => (
                     <div
                       key={skill.name}
                       className="settings-pane__skill-item"
