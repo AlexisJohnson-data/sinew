@@ -1730,6 +1730,29 @@ export function Workspace({
   // for that side is skipped while collapsed.
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  // When the user opens a full-pane view (Settings or Remote) the
+  // workbench needs all the horizontal room it can get. Auto-fold the
+  // sidebar at that point and restore the previous state when the
+  // full-pane view is closed. The chat stays visible so the user can
+  // keep an eye on / interact with it.
+  const sidebarBeforeFullPaneRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const fullPaneActive = settingsActive || remoteActive;
+    if (fullPaneActive && sidebarBeforeFullPaneRef.current === null) {
+      sidebarBeforeFullPaneRef.current = leftCollapsed;
+      setLeftCollapsed(true);
+    } else if (!fullPaneActive && sidebarBeforeFullPaneRef.current !== null) {
+      setLeftCollapsed(sidebarBeforeFullPaneRef.current);
+      sidebarBeforeFullPaneRef.current = null;
+    }
+    // Intentionally driven by Settings/Remote toggles only, not by manual
+    // sidebar changes the user may make while a full-pane view is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsActive, remoteActive]);
+  // Center pane (editor + terminal) collapse — symmetrical with left /
+  // right rails. When folded the workbench shows just the sidebar and
+  // chat next to each other, with a thin rail in place of the editor.
+  const [centerCollapsed, setCenterCollapsed] = useState(false);
   const [terminalAvailable, setTerminalAvailable] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalFullHeight, setTerminalFullHeight] = useState(false);
@@ -2123,7 +2146,39 @@ export function Workspace({
             onDelta={(delta) => setLeftWidth((v) => clampColumn(v + delta))}
           />
         )}
-        <div className="workbench-center">
+        <div
+          className="workbench-center"
+          data-collapsed={centerCollapsed ? "true" : "false"}
+        >
+          {centerCollapsed ? (
+            <div className="workbench-center-rail">
+              <button
+                type="button"
+                className="workbench-rail__btn"
+                title="Show editor"
+                onClick={() => setCenterCollapsed(false)}
+              >
+                <Icon
+                  icon="solar:square-double-alt-arrow-up-linear"
+                  width={16}
+                  height={16}
+                />
+              </button>
+            </div>
+          ) : (
+            <>
+          <button
+            type="button"
+            className="workbench-center__collapse"
+            title="Collapse editor"
+            onClick={() => setCenterCollapsed(true)}
+          >
+            <Icon
+              icon="solar:square-double-alt-arrow-down-linear"
+              width={14}
+              height={14}
+            />
+          </button>
           <div
             className="editor-shell"
             data-hidden={terminalVisible && terminalFullHeight ? "true" : "false"}
@@ -2210,6 +2265,8 @@ export function Workspace({
                 <Icon icon="solar:square-alt-arrow-up-linear" width={14} height={14} />
               </button>
             </div>
+          )}
+            </>
           )}
         </div>
         {!rightCollapsed && (

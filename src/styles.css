@@ -6294,6 +6294,54 @@ textarea {
   border-color: var(--line-strong);
 }
 
+/* Center pane (editor + terminal) collapse — small floating button
+   on top-right of the editor area, and a thin rail with an expand
+   button when folded so the user can swap to a sidebar + chat only
+   layout without dragging the splitters down to 0. */
+.workbench-center {
+  position: relative;
+}
+.workbench-center__collapse {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  z-index: 5;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease,
+    border-color 120ms ease;
+}
+.workbench-center:hover .workbench-center__collapse,
+.workbench-center__collapse:focus-visible {
+  opacity: 0.7;
+}
+.workbench-center__collapse:hover {
+  opacity: 1;
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--line-strong);
+}
+.workbench-center-rail {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
 /* Small floating "collapse chat" button placed at the top-left of the
    chat wrapper. It overlays the chat without modifying ChatPane itself. */
 .workbench-chat-wrap__collapse {
