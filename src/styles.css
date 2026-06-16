@@ -6075,11 +6075,15 @@ textarea {
   color: var(--text-0);
 }
 
-/* Assistant messages: thin lavender accent rail on the left to give them
-   their own visual identity without adding a heavy bubble. */
-.msg[data-role="assistant"] .msg__body {
-  padding-left: 12px;
-  border-left: 2px solid var(--accent-2);
+/* iMessage-style alignment: the user message floats to the right inside
+   a coloured bubble, the assistant message stays plain on the left.
+   The role itself (user/assistant) is conveyed by position + bubble
+   colour, no extra decoration needed. */
+.msg[data-role="user"] {
+  align-items: flex-end;
+}
+.msg[data-role="user"] .user-text {
+  max-width: 80%;
 }
 
 .compaction-summary__body {
