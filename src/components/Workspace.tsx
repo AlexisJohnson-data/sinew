@@ -1740,10 +1740,6 @@ export function Workspace({
   // for that side is skipped while collapsed.
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  // Center pane (editor + terminal) collapse — symmetrical with left /
-  // right rails. When folded the workbench shows just the sidebar and
-  // chat next to each other, with a thin rail in place of the editor.
-  const [centerCollapsed, setCenterCollapsed] = useState(false);
   const [terminalAvailable, setTerminalAvailable] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalFullHeight, setTerminalFullHeight] = useState(false);
@@ -1843,6 +1839,10 @@ export function Workspace({
       ? tabs[activeTabIndex].relativePath
       : null;
   const terminalVisible = terminalAvailable && terminalOpen;
+  // Center pane visibility: the editor + terminal area only shows up
+  // when there is at least one file tab open, or the terminal is
+  // toggled on. Otherwise the workbench is sidebar + chat only.
+  const editorShellVisible = tabs.length > 0 || terminalVisible;
   const activeConversationIsStreaming = streamingConversationIds.has(
     activeConv.id,
   );
@@ -2142,39 +2142,8 @@ export function Workspace({
             onDelta={(delta) => setLeftWidth((v) => clampColumn(v + delta))}
           />
         )}
-        <div
-          className="workbench-center"
-          data-collapsed={centerCollapsed ? "true" : "false"}
-        >
-          {centerCollapsed ? (
-            <div className="workbench-center-rail">
-              <button
-                type="button"
-                className="workbench-rail__btn"
-                title="Show editor"
-                onClick={() => setCenterCollapsed(false)}
-              >
-                <Icon
-                  icon="solar:square-double-alt-arrow-up-linear"
-                  width={16}
-                  height={16}
-                />
-              </button>
-            </div>
-          ) : (
-            <>
-          <button
-            type="button"
-            className="workbench-center__collapse"
-            title="Collapse editor"
-            onClick={() => setCenterCollapsed(true)}
-          >
-            <Icon
-              icon="solar:square-double-alt-arrow-down-linear"
-              width={14}
-              height={14}
-            />
-          </button>
+        {editorShellVisible && (
+        <div className="workbench-center">
           <div
             className="editor-shell"
             data-hidden={terminalVisible && terminalFullHeight ? "true" : "false"}
@@ -2262,10 +2231,9 @@ export function Workspace({
               </button>
             </div>
           )}
-            </>
-          )}
         </div>
-        {!rightCollapsed && (
+        )}
+        {editorShellVisible && !rightCollapsed && (
           <Splitter
             orientation="vertical"
             onDelta={(delta) => setRightWidth((v) => clampColumn(v - delta))}
@@ -2275,7 +2243,7 @@ export function Workspace({
           className="workbench-chat-wrap"
           style={{
             width: rightWidth,
-            flex: `0 0 ${rightWidth}px`,
+            flex: editorShellVisible ? `0 0 ${rightWidth}px` : "1 1 0",
             minWidth: 0,
             display: rightCollapsed ? "none" : "flex",
             position: "relative",
