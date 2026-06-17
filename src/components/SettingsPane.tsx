@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Icon } from "@iconify/react";
 import { Wrench } from "lucide-react";
+import { emit } from "@tauri-apps/api/event";
 import { api } from "../lib/ipc";
 import { canonicalToolName } from "../lib/tools";
 import { Markdown } from "./chat/Markdown";
@@ -210,6 +211,7 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   webSearchProvider: "classic",
   linkupApiKey: "",
   shellPreference: "auto",
+  notificationsEnabled: true,
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -429,6 +431,10 @@ export function SettingsPane({ workspacePath }: Props) {
       setSavedToolSettingsJson(toolSettingsFingerprint(saved));
       setToolsStatus("Saved");
       window.dispatchEvent(new CustomEvent(TOOL_SETTINGS_CHANGED_EVENT));
+      // Cross-window: Settings now lives in its own Tauri window, so the
+      // main workbench needs an explicit Tauri event to pick up changes
+      // like the notifications toggle.
+      void emit(TOOL_SETTINGS_CHANGED_EVENT, saved).catch(() => undefined);
     } catch (err) {
       setToolsStatus(err instanceof Error ? err.message : String(err));
     } finally {
@@ -483,6 +489,15 @@ export function SettingsPane({ workspacePath }: Props) {
       current ? { ...current, webSearchProvider } : current,
     );
   }, []);
+
+  const updateNotificationsEnabled = useCallback(
+    (notificationsEnabled: boolean) => {
+      setToolSettings((current) =>
+        current ? { ...current, notificationsEnabled } : current,
+      );
+    },
+    [],
+  );
 
   const updateShellPreference = useCallback((shellPreference: ShellPreference) => {
     setToolSettings((current) =>
@@ -1519,6 +1534,7 @@ export function SettingsPane({ workspacePath }: Props) {
             onNanoBananaApiKeyChange={updateNanoBananaApiKey}
             onWebSearchProviderChange={updateWebSearchProvider}
             onShellPreferenceChange={updateShellPreference}
+            onNotificationsEnabledChange={updateNotificationsEnabled}
             onLinkupApiKeyChange={updateLinkupApiKey}
             openAiStatus={openAiStatus}
           />
@@ -2260,6 +2276,7 @@ type ToolsSectionProps = {
   onNanoBananaApiKeyChange: (value: string) => void;
   onWebSearchProviderChange: (value: WebSearchProvider) => void;
   onShellPreferenceChange: (value: ShellPreference) => void;
+  onNotificationsEnabledChange: (value: boolean) => void;
   onLinkupApiKeyChange: (value: string) => void;
   openAiStatus: OpenAiProviderStatus | null;
 };
@@ -2291,6 +2308,7 @@ function ToolsSection({
   onNanoBananaApiKeyChange,
   onWebSearchProviderChange,
   onShellPreferenceChange,
+  onNotificationsEnabledChange,
   onLinkupApiKeyChange,
   openAiStatus,
 }: ToolsSectionProps) {
@@ -2304,6 +2322,7 @@ function ToolsSection({
   const webSearchProvider = settings?.webSearchProvider ?? "classic";
   const linkupApiKey = settings?.linkupApiKey ?? "";
   const shellPreference = settings?.shellPreference ?? "auto";
+  const notificationsEnabled = settings?.notificationsEnabled ?? true;
   const openAiConnected = openAiStatus?.connected === true;
   const subscriptionActive =
     imageProvider === "gptImage2" && openAiConnected && openaiImageUseSubscription;
@@ -2486,6 +2505,36 @@ function ToolsSection({
               )}
             </section>
           )}
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>Notifications</h2>
+            </div>
+            <div
+              className="settings-pane__tool-provider-switch"
+              role="group"
+              aria-label="Desktop notifications"
+            >
+              <button
+                type="button"
+                data-active={notificationsEnabled ? "true" : "false"}
+                onClick={() => onNotificationsEnabledChange(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                data-active={!notificationsEnabled ? "true" : "false"}
+                onClick={() => onNotificationsEnabledChange(false)}
+              >
+                Off
+              </button>
+            </div>
+            <p className="settings-pane__field-hint">
+              {notificationsEnabled
+                ? "Sinew pings the taskbar and sends an OS notification when the agent finishes a turn or asks a question and the window is not focused."
+                : "Sinew stays silent. You'll need to come back to the window to know an answer is ready."}
+            </p>
+          </section>
           {IS_WINDOWS && (
             <section className="settings-pane__tool-group">
               <div className="settings-pane__tool-group-head">
@@ -4471,6 +4520,7 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
         : settings.shellPreference === "powershell"
           ? "powershell"
           : "auto",
+    notificationsEnabled: settings.notificationsEnabled !== false,
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];

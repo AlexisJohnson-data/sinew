@@ -18,6 +18,7 @@ import { AIThinkingBlock } from "./AIThinkingBlock";
 import { FileChangeBlock } from "./FileChangeBlock";
 import { FileLinkedText, Markdown } from "./Markdown";
 import { ChatSearch } from "./ChatSearch";
+import { pingUserAttention } from "../../lib/notify";
 import { useChatSearch } from "./useChatSearch";
 import { PlanningNextMoveBlock } from "./PlanningNextMoveBlock";
 import { Questionnaire, type QuestionItem } from "./Questionnaire";
@@ -1633,6 +1634,36 @@ export function ChatPane({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [searchOpen]);
+  // Ping the user when the agent asks them a question while the window
+  // is unfocused. We keep track of the question block ids we've already
+  // pinged so streaming token updates on the same question don't fire
+  // a second notification — and drop ids that are no longer running so
+  // a future re-ask of the same id (extremely unlikely) re-pings.
+  const askedQuestionIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const runningIds = new Set<string>();
+    for (const block of view.blocks) {
+      if (
+        block.kind === "tool" &&
+        isToolName(block.name, "question") &&
+        block.status === "running"
+      ) {
+        runningIds.add(block.id);
+        if (!askedQuestionIdsRef.current.has(block.id)) {
+          askedQuestionIdsRef.current.add(block.id);
+          void pingUserAttention(
+            "Sinew is asking",
+            "The agent needs your input.",
+          );
+        }
+      }
+    }
+    // Forget question ids that no longer correspond to a running block,
+    // so the ref doesn't accumulate over time.
+    for (const id of Array.from(askedQuestionIdsRef.current)) {
+      if (!runningIds.has(id)) askedQuestionIdsRef.current.delete(id);
+    }
+  }, [view.blocks]);
   const scrollAnimationRef = useRef<number | null>(null);
   const autoScrollingRef = useRef(false);
   const stickToBottomRef = useRef(true);

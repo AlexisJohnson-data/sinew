@@ -24,6 +24,10 @@ import { RemotePanel } from "./RemotePanel";
 import { SearchPane } from "./SearchPane";
 import { QuickOpen } from "./QuickOpen";
 import { ChatPane, type ExternalDropFeed } from "./chat/ChatPane";
+import {
+  pingUserAttention,
+  setNotificationsEnabled,
+} from "../lib/notify";
 import { SinewMark } from "./SinewMark";
 import { UpdateBadge } from "./UpdateBadge";
 import { WindowControls, isWindowsPlatform } from "./WindowControls";
@@ -315,6 +319,10 @@ export function Workspace({
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
   const [fileTreeRefreshToken, setFileTreeRefreshToken] = useState(0);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  // Tracks when a streaming turn started so we can skip the "agent
+  // finished" desktop notification for trivial fast exchanges (the user
+  // is still actively typing and looking at the window).
+  const streamingStartedAtRef = useRef<Map<string, number>>(new Map());
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
   const [pendingRootCreate, setPendingRootCreate] = useState<
     "file" | "directory" | null
@@ -336,6 +344,41 @@ export function Workspace({
     handle.startCreateRoot(pendingRootCreate);
     setPendingRootCreate(null);
   }, [pendingRootCreate, fileSearchOpen]);
+
+  // Keep the notification subsystem in sync with the user preference.
+  // Load once on mount, then react to cross-window save events emitted
+  // by the Settings sub-window (which lives in its own Tauri window now,
+  // so a simple `window.dispatchEvent` doesn't reach us).
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listToolSettings(workspacePath)
+      .then((settings) => {
+        if (cancelled) return;
+        setNotificationsEnabled(settings.notificationsEnabled ?? true);
+      })
+      .catch(() => {
+        // Best effort — default stays "on" if the load fails.
+      });
+    let unlisten: UnlistenFn | null = null;
+    void listen<{ notificationsEnabled?: boolean }>(
+      "sinew:tool-settings-changed",
+      (event) => {
+        if (cancelled) return;
+        const value = event.payload?.notificationsEnabled;
+        if (typeof value === "boolean") setNotificationsEnabled(value);
+      },
+    )
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [workspacePath]);
 
   const startRootCreate = useCallback(
     (kind: "file" | "directory") => {
@@ -1130,10 +1173,11 @@ export function Workspace({
       const activeIds = new Set(workspaceTurns.map((turn) => turn.conversationId));
       setStreamingConversationIds((prev) => {
         let changed = false;
+        const justFinished: string[] = [];
         for (const id of prev) {
           if (!activeIds.has(id)) {
             changed = true;
-            break;
+            justFinished.push(id);
           }
         }
         if (!changed) {
@@ -1143,6 +1187,24 @@ export function Workspace({
               break;
             }
           }
+        }
+        // Record start times for newly streaming turns so we can later
+        // decide whether the turn ran long enough to deserve a ping.
+        const now = Date.now();
+        for (const id of activeIds) {
+          if (!prev.has(id) && !streamingStartedAtRef.current.has(id)) {
+            streamingStartedAtRef.current.set(id, now);
+          }
+        }
+        // Fire one ping per turn that just transitioned to idle, but
+        // only for turns that ran long enough to be worth flagging
+        // (skip quick exchanges where the user is still watching).
+        for (const id of justFinished) {
+          const startedAt = streamingStartedAtRef.current.get(id);
+          streamingStartedAtRef.current.delete(id);
+          if (!startedAt) continue;
+          if (now - startedAt < 5_000) continue;
+          void pingUserAttention("Sinew", "Agent finished its turn.");
         }
         return changed ? activeIds : prev;
       });

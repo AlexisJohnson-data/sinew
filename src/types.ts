@@ -185,6 +185,7 @@ export type ToolSettings = {
   webSearchProvider: WebSearchProvider;
   linkupApiKey: string;
   shellPreference: ShellPreference;
+  notificationsEnabled: boolean;
 };
 
 export type ProviderConnectionState =

@@ -195,7 +195,7 @@ pub struct WorkspaceBootstrap {
     pub mode_model_settings: ModeModelSettings,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSettings {
     #[serde(default)]
@@ -216,6 +216,32 @@ pub struct ToolSettings {
     pub linkup_api_key: String,
     #[serde(default)]
     pub shell_preference: ShellPreference,
+    /// Master switch for desktop notifications (turn end + agent
+    /// questions). Defaults to `true` on a fresh install — users who
+    /// dislike pings can opt out from Settings.
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
+}
+
+fn default_notifications_enabled() -> bool {
+    true
+}
+
+impl Default for ToolSettings {
+    fn default() -> Self {
+        Self {
+            tools: Vec::new(),
+            plan_mode_prompt: String::new(),
+            image_provider: ImageProvider::default(),
+            openai_image_use_subscription: false,
+            openai_image_api_key: String::new(),
+            nano_banana_api_key: String::new(),
+            web_search_provider: WebSearchProvider::default(),
+            linkup_api_key: String::new(),
+            shell_preference: ShellPreference::default(),
+            notifications_enabled: default_notifications_enabled(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,6 +304,7 @@ pub struct ToolSettingsView {
     pub web_search_provider: WebSearchProvider,
     pub linkup_api_key: String,
     pub shell_preference: ShellPreference,
+    pub notifications_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -473,6 +500,7 @@ pub fn tool_settings_view(settings: &ToolSettings, catalog: &[ToolDescriptor]) -
         web_search_provider: settings.web_search_provider,
         linkup_api_key: settings.linkup_api_key.clone(),
         shell_preference: settings.shell_preference,
+        notifications_enabled: settings.notifications_enabled,
         tools: catalog
             .iter()
             .filter_map(|descriptor| {
