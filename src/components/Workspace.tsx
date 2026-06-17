@@ -531,22 +531,32 @@ export function Workspace({
     );
   }, []);
 
-  const openSettings = useCallback((section?: "providers") => {
-    setRemoteActive(false);
-    setSettingsOpen(true);
-    setSettingsActive(true);
-    // Pickup hook for SettingsPane: when the caller wants to land on a
-    // specific section (e.g. the composer's "Connect a provider" CTA),
-    // fan it out via a window event so the pane can react regardless of
-    // whether it just mounted or was already open.
-    if (section) {
-      window.dispatchEvent(
-        new CustomEvent("sinew:open-settings-section", {
-          detail: { section },
-        }),
-      );
-    }
-  }, []);
+  const openSettings = useCallback(
+    (section?: "providers") => {
+      // Settings now lives in its own dedicated Tauri window. We forward
+      // the workspace path so the pane can scope settings to it, and
+      // pass `section` so the URL parameter selects the right tab on
+      // first mount (the existing in-pane `sinew:open-settings-section`
+      // event remains supported for already-open windows).
+      void api
+        .openSecondaryWindow({
+          view: "settings",
+          workspacePath,
+          section,
+        })
+        .catch((err) =>
+          console.error("[settings-window] failed to open", err),
+        );
+      if (section) {
+        window.dispatchEvent(
+          new CustomEvent("sinew:open-settings-section", {
+            detail: { section },
+          }),
+        );
+      }
+    },
+    [workspacePath],
+  );
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -1730,35 +1740,6 @@ export function Workspace({
   // for that side is skipped while collapsed.
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  // When the user opens a full-pane view (Settings or Remote) the
-  // workbench needs all the horizontal room it can get, so Settings is
-  // not stuck behind the chat. Fold *both* the sidebar and the chat to
-  // bring the full-pane view to the front, then restore the previous
-  // collapse state when it closes — turning the tab click into a
-  // "front / back" toggle between Chat and Settings/Remote.
-  const collapseStateBeforeFullPaneRef = useRef<
-    { left: boolean; right: boolean } | null
-  >(null);
-  useEffect(() => {
-    const fullPaneActive = settingsActive || remoteActive;
-    if (fullPaneActive && collapseStateBeforeFullPaneRef.current === null) {
-      collapseStateBeforeFullPaneRef.current = {
-        left: leftCollapsed,
-        right: rightCollapsed,
-      };
-      setLeftCollapsed(true);
-      setRightCollapsed(true);
-    } else if (!fullPaneActive && collapseStateBeforeFullPaneRef.current !== null) {
-      const saved = collapseStateBeforeFullPaneRef.current;
-      setLeftCollapsed(saved.left);
-      setRightCollapsed(saved.right);
-      collapseStateBeforeFullPaneRef.current = null;
-    }
-    // Intentionally driven by Settings/Remote toggles only, not by manual
-    // sidebar / chat changes the user may make while a full-pane view is
-    // open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsActive, remoteActive]);
   // Center pane (editor + terminal) collapse — symmetrical with left /
   // right rails. When folded the workbench shows just the sidebar and
   // chat next to each other, with a thin rail in place of the editor.
@@ -1884,11 +1865,16 @@ export function Workspace({
         >
           <button
             className="titlebar__btn titlebar__btn--remote"
-            data-on={remoteActive || remoteStatus?.enabled ? "true" : "false"}
+            data-on={remoteStatus?.enabled ? "true" : "false"}
             onClick={() => {
-              setRemoteOpen(true);
-              setRemoteActive(true);
-              setSettingsActive(false);
+              void api
+                .openSecondaryWindow({
+                  view: "remote",
+                  workspacePath,
+                })
+                .catch((err) =>
+                  console.error("[remote-window] failed to open", err),
+                );
             }}
             title="Remote access"
           >

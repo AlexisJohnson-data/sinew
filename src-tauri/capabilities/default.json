@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Main desktop capability",
-  "windows": ["main", "sinew-window-*"],
+  "windows": ["main", "sinew-window-*", "secondary-*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

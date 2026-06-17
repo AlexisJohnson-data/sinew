@@ -43,6 +43,34 @@ pub(super) async fn open_new_window(app: AppHandle) -> std::result::Result<(), S
     create_new_window(&app).map_err(error_to_string)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct OpenSecondaryWindowInput {
+    pub(super) view: String,
+    pub(super) workspace_path: Option<String>,
+    pub(super) section: Option<String>,
+}
+
+#[tauri::command]
+pub(super) async fn open_secondary_window(
+    app: AppHandle,
+    input: OpenSecondaryWindowInput,
+) -> std::result::Result<(), String> {
+    let title = match input.view.as_str() {
+        "settings" => "Sinew — Settings",
+        "remote" => "Sinew — Remote",
+        _ => "Sinew",
+    };
+    create_secondary_window(
+        &app,
+        &input.view,
+        input.workspace_path.as_deref(),
+        input.section.as_deref(),
+        title,
+    )
+    .map_err(error_to_string)
+}
+
 #[tauri::command]
 pub(super) async fn reset_window_title(
     window: tauri::WebviewWindow,

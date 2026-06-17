@@ -6256,6 +6256,24 @@ textarea {
   overflow-wrap: normal;
 }
 
+/* Secondary windows: dedicated Tauri windows that host a single
+   full-pane view (Settings or Remote) loaded from the same React
+   bundle. They get the native OS decorations so the system close
+   button is enough — we just fill the window. */
+.app-secondary {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  background: var(--bg-0);
+  color: var(--text-0);
+  overflow: hidden;
+}
+.app-secondary > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Collapsed-panel rail (VS Code-style). When the user folds the sidebar
    or the chat, the panel itself is hidden and a thin vertical strip is
    shown in its place with a single button to re-expand. */

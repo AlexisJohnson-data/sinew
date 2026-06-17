@@ -140,6 +140,15 @@ export const api = {
   openNewWindow() {
     return invoke<void>("open_new_window");
   },
+  /** Open Settings / Remote in a dedicated secondary window. If a
+   * window for that view is already open it is focused instead. */
+  openSecondaryWindow(input: {
+    view: "settings" | "remote";
+    workspacePath?: string;
+    section?: string;
+  }) {
+    return invoke<void>("open_secondary_window", { input });
+  },
   resetWindowTitle() {
     return invoke<void>("reset_window_title");
   },

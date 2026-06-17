@@ -1,6 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { SettingsPane } from "./components/SettingsPane";
+import { RemotePanel } from "./components/RemotePanel";
 import "./styles.css";
 import "./lib/customIcons";
 import { api } from "./lib/ipc";
@@ -63,8 +65,31 @@ const openAnchorExternally = (event: MouseEvent) => {
 window.addEventListener("click", openAnchorExternally);
 window.addEventListener("auxclick", openAnchorExternally);
 
+// Secondary-window routing. The Tauri backend spawns dedicated windows
+// for Settings / Remote with `?view=settings|remote` in the URL. We
+// short-circuit React here so those windows skip the boot / updater
+// flow and render only the requested pane — no editor, no chat,
+// nothing else competing for the space.
+function pickRoot(): React.ReactNode {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  if (view === "settings") {
+    return (
+      <div className="app-secondary app-secondary--settings">
+        <SettingsPane workspacePath={params.get("workspace") ?? ""} />
+      </div>
+    );
+  }
+  if (view === "remote") {
+    return (
+      <div className="app-secondary app-secondary--remote">
+        <RemotePanel />
+      </div>
+    );
+  }
+  return <App />;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  <React.StrictMode>{pickRoot()}</React.StrictMode>,
 );

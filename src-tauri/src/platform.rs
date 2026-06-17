@@ -148,6 +148,54 @@ pub(super) fn create_new_window_detached(app: &AppHandle) {
     });
 }
 
+/// Open (or focus) a secondary window dedicated to a single full-pane
+/// view — Settings or Remote. The same React bundle is loaded but the
+/// `?view=<kind>` URL parameter steers `App.tsx` to render just that
+/// pane (no editor, no chat). One window per `view`: a second call with
+/// the same `view` simply focuses the existing one.
+pub(super) fn create_secondary_window(
+    app: &AppHandle,
+    view: &str,
+    workspace_path: Option<&str>,
+    section: Option<&str>,
+    title: &str,
+) -> Result<()> {
+    let label = format!("secondary-{view}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let mut query = format!("view={}", url_encode_value(view));
+    if let Some(path) = workspace_path {
+        query.push_str(&format!("&workspace={}", url_encode_value(path)));
+    }
+    if let Some(section) = section {
+        query.push_str(&format!("&section={}", url_encode_value(section)));
+    }
+    let url = format!("index.html?{query}");
+
+    // Secondary windows keep the native OS decorations so the user gets
+    // a system close button without us having to ship a custom titlebar
+    // for every dedicated view. This is the simplest path on Windows
+    // where `decorations(false)` would otherwise leave the window with
+    // no way to close it.
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(PathBuf::from(url)))
+        .title(title)
+        .inner_size(1100.0, 780.0)
+        .min_inner_size(720.0, 520.0)
+        .resizable(true)
+        .center();
+
+    let window = builder
+        .build()
+        .context("unable to create secondary window")?;
+    let _ = window.set_focus();
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn focus_existing_window(app: &AppHandle) -> bool {
     let mut windows = app.webview_windows();
@@ -174,6 +222,30 @@ pub(super) fn apply_window_title(window: &tauri::WebviewWindow, folder_name: &st
     if let Err(err) = window.set_title(title) {
         tracing::warn!(%err, label = %window.label(), "unable to update window title");
     }
+}
+
+/// Percent-encode a value for use inside an internal query string sent
+/// to the same React bundle. Only the characters that are unsafe inside
+/// a URL query (and the percent itself) are escaped; everything else is
+/// passed through verbatim to keep the URL readable in DevTools and
+/// avoid pulling a full url-encoding crate for a one-off helper.
+fn url_encode_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/'
+            | b':' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 pub(super) fn next_window_label(app: &AppHandle) -> String {
