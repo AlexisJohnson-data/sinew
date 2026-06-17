@@ -198,13 +198,12 @@ fn to_linux_path(windows_path: &str) -> Option<String> {
         && (bytes.len() == 2 || bytes[2] == b'\\' || bytes[2] == b'/')
     {
         let drive = (bytes[0] as char).to_ascii_lowercase();
-        let rest = if bytes.len() > 2 {
-            &windows_path[2..].replace('\\', "/")
+        let after_drive = if bytes.len() > 2 {
+            windows_path[2..].replace('\\', "/")
         } else {
-            ""
-        }
-        .trim_start_matches('/')
-        .to_string();
+            String::new()
+        };
+        let rest = after_drive.trim_start_matches('/');
         return Some(if rest.is_empty() {
             format!("/mnt/{drive}")
         } else {
