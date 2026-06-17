@@ -1664,6 +1664,32 @@ export function ChatPane({
       if (!runningIds.has(id)) askedQuestionIdsRef.current.delete(id);
     }
   }, [view.blocks]);
+  // Plan mode and Goal mode reach "user, take a look" moments through
+  // their own state machine, not via tool calls. Watch those transitions
+  // and ping just like we do for questions, so the user is never stuck
+  // waiting for the agent without knowing it.
+  const prevPlanStatusRef = useRef(planWorkflow.status);
+  useEffect(() => {
+    const previous = prevPlanStatusRef.current;
+    prevPlanStatusRef.current = planWorkflow.status;
+    if (previous !== "planReady" && planWorkflow.status === "planReady") {
+      void pingUserAttention(
+        "Sinew · Plan ready",
+        "The agent finalised the plan and needs your call on how to proceed.",
+      );
+    }
+  }, [planWorkflow.status]);
+  const prevGoalStatusRef = useRef(goalWorkflow.status);
+  useEffect(() => {
+    const previous = prevGoalStatusRef.current;
+    prevGoalStatusRef.current = goalWorkflow.status;
+    if (previous !== "complete" && goalWorkflow.status === "complete") {
+      void pingUserAttention(
+        "Sinew · Goal complete",
+        "The agent finished its Goal-mode run.",
+      );
+    }
+  }, [goalWorkflow.status]);
   const scrollAnimationRef = useRef<number | null>(null);
   const autoScrollingRef = useRef(false);
   const stickToBottomRef = useRef(true);
