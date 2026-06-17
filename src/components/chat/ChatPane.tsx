@@ -17,6 +17,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AIThinkingBlock } from "./AIThinkingBlock";
 import { FileChangeBlock } from "./FileChangeBlock";
 import { FileLinkedText, Markdown } from "./Markdown";
+import { ChatSearch } from "./ChatSearch";
+import { useChatSearch } from "./useChatSearch";
 import { PlanningNextMoveBlock } from "./PlanningNextMoveBlock";
 import { Questionnaire, type QuestionItem } from "./Questionnaire";
 import {
@@ -450,6 +452,8 @@ export function ChatPane({
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dropActive, setDropActive] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [optimisticModeSelectionsByConversation, setOptimisticModeSelectionsByConversation] =
     useState<Map<string, PartialModeModelSelections>>(() => new Map());
   const [mode, setMode] = useState<AgentMode>(() =>
@@ -1591,6 +1595,44 @@ export function ChatPane({
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const bodyContentRef = useRef<HTMLDivElement | null>(null);
+  const chatSearch = useChatSearch(
+    bodyRef as React.RefObject<HTMLElement>,
+    searchOpen ? searchQuery : "",
+    history,
+    isStreaming,
+  );
+
+  // Global Ctrl/Cmd+F → open the chat search bar. Skipped when Monaco
+  // has focus so its own Find widget keeps working inside the editor.
+  // Esc closes the bar (it also closes from inside the input via the
+  // ChatSearch component itself, which is the expected behaviour).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const primary = event.metaKey || event.ctrlKey;
+      if (
+        primary &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "f"
+      ) {
+        const target = event.target as Element | null;
+        if (target?.closest(".monaco-editor")) return;
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "Escape" && searchOpen) {
+        // Only swallow Escape when the search bar is open, otherwise
+        // we'd interfere with other Esc-driven UX (closing menus, etc.).
+        const target = event.target as Element | null;
+        if (target?.closest(".chat-search")) return; // handled by the input
+        event.preventDefault();
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [searchOpen]);
   const scrollAnimationRef = useRef<number | null>(null);
   const autoScrollingRef = useRef(false);
   const stickToBottomRef = useRef(true);
@@ -3237,6 +3279,21 @@ export function ChatPane({
         </span>
         <span className="chat-head__dot" data-status={displayView.status} />
       </div>
+      {searchOpen && (
+        <ChatSearch
+          query={searchQuery}
+          total={chatSearch.total}
+          current={chatSearch.current}
+          onQueryChange={setSearchQuery}
+          onNext={chatSearch.next}
+          onPrev={chatSearch.prev}
+          onClose={() => {
+            setSearchOpen(false);
+            setSearchQuery("");
+            chatSearch.reset();
+          }}
+        />
+      )}
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-body__content" ref={bodyContentRef}>
           {displayView.blocks.length === 0 && !showPlanningNextMove ? (

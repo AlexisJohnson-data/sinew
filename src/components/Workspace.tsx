@@ -22,6 +22,7 @@ import { SettingsPane } from "./SettingsPane";
 import { TerminalPanel } from "./TerminalPanel";
 import { RemotePanel } from "./RemotePanel";
 import { SearchPane } from "./SearchPane";
+import { QuickOpen } from "./QuickOpen";
 import { ChatPane, type ExternalDropFeed } from "./chat/ChatPane";
 import { SinewMark } from "./SinewMark";
 import { UpdateBadge } from "./UpdateBadge";
@@ -313,6 +314,7 @@ export function Workspace({
   const [settingsActive, setSettingsActive] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
   const [fileTreeRefreshToken, setFileTreeRefreshToken] = useState(0);
+  const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
   const [pendingRootCreate, setPendingRootCreate] = useState<
     "file" | "directory" | null
@@ -907,6 +909,17 @@ export function Workspace({
       ) {
         event.preventDefault();
         setFileSearchOpen(true);
+      }
+      if (
+        hasPrimaryModifier &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "p"
+      ) {
+        // Quick Open file palette. preventDefault stops the WebView's
+        // built-in Ctrl+P (Print) from interfering.
+        event.preventDefault();
+        setQuickOpenVisible(true);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -2293,6 +2306,24 @@ export function Workspace({
           </div>
         )}
       </div>
+      <QuickOpen
+        open={quickOpenVisible}
+        workspacePath={workspacePath}
+        refreshToken={fileTreeRefreshToken}
+        onClose={() => setQuickOpenVisible(false)}
+        onPick={(entry, line) => {
+          const reveal =
+            line && line.number > 0
+              ? {
+                  lineNumber: line.number,
+                  columnStart: line.column ?? 1,
+                  columnEnd: line.column ?? 1,
+                  query: "",
+                }
+              : undefined;
+          void openFile(entry, reveal);
+        }}
+      />
     </div>
   );
 }

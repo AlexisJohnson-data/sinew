@@ -6344,6 +6344,234 @@ textarea {
   border-color: var(--line-strong);
 }
 
+/* In-chat search bar (Ctrl+F when focus is anywhere outside Monaco).
+   The bar slides under the chat header, the actual highlights are
+   painted by the CSS Custom Highlight API (see ::highlight rules
+   below) so React never has to render match wrappers. */
+.chat-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+}
+.chat-search__input {
+  flex: 1 1 auto;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  padding: 2px 0;
+}
+.chat-search__input::placeholder {
+  color: var(--text-3);
+}
+.chat-search__counter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  min-width: 44px;
+  text-align: right;
+}
+.chat-search__counter[data-zero="true"] {
+  color: var(--danger, #ef4444);
+}
+.chat-search__counter[data-empty="true"] {
+  display: none;
+}
+.chat-search__btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.chat-search__btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--line-strong);
+}
+.chat-search__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  border-color: transparent;
+}
+.chat-search__btn--close {
+  margin-left: 4px;
+}
+
+/* CSS Custom Highlight API: every match gets a soft accent tint, the
+   focused match a stronger contrast so the user spots it immediately.
+   Falls back gracefully on engines that don't ship ::highlight (the
+   text is still scrolled into view by `useChatSearch`). */
+::highlight(chat-search) {
+  background-color: var(--accent-soft);
+  color: var(--text-0);
+}
+::highlight(chat-search-current) {
+  background-color: var(--accent-dim);
+  color: var(--text-0);
+}
+
+/* Quick Open (Ctrl+P) — a focused modal palette to jump to any file in
+   the workspace via fuzzy search. Mirrors the Cursor / VS Code "Go to
+   file" UX so the muscle memory transfers immediately. */
+.quick-open__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(8, 9, 11, 0.62);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+}
+.quick-open {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(72vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.quick-open__input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+}
+.quick-open__input {
+  flex: 1 1 auto;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding: 2px 0;
+}
+.quick-open__input::placeholder {
+  color: var(--text-3);
+}
+.quick-open__line-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-hi);
+  padding: 2px 6px;
+  background: var(--accent-soft);
+  border-radius: 4px;
+}
+.quick-open__list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+.quick-open__row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-med);
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+}
+.quick-open__row[data-active="true"] {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.quick-open__row-icon {
+  color: var(--text-3);
+}
+.quick-open__row[data-active="true"] .quick-open__row-icon {
+  color: var(--text-1);
+}
+.quick-open__row-name {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.quick-open__row-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-open__match {
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+.quick-open__row[data-active="true"] .quick-open__match {
+  color: var(--text-0);
+}
+.quick-open__muted,
+.quick-open__error {
+  padding: 10px 12px;
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.quick-open__error {
+  color: var(--danger, #ef4444);
+}
+.quick-open__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.quick-open__hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.quick-open__hints kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
 /* Code block wrapper with a floating "Copy" button (Claude.ai-style). */
 .md-codeblock {
   position: relative;
