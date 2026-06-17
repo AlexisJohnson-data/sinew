@@ -8,6 +8,10 @@ pub(super) async fn open_workspace(
 ) -> std::result::Result<WorkspaceBootstrap, String> {
     let workspace_root =
         normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    // Refresh the workspace-derived shell cache so `Auto` users get the
+    // right shell (PowerShell vs WSL on Windows) for this project without
+    // having to touch the global preference. No-op on macOS/Linux.
+    sinew_app::set_active_shell_for_workspace(&workspace_root);
     let mut bootstrap = state
         .store
         .bootstrap_workspace(&workspace_root, &state.default_model, &state.system_prompt)
@@ -69,6 +73,145 @@ pub(super) async fn open_secondary_window(
         title,
     )
     .map_err(error_to_string)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PrepareMigrationInput {
+    pub(super) source_path: String,
+    pub(super) target_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PrepareMigrationOutput {
+    pub(super) source_windows: String,
+    pub(super) target_windows: String,
+    pub(super) source_linux: String,
+    pub(super) target_linux: String,
+    pub(super) target_existed: bool,
+    pub(super) target_was_non_empty: bool,
+    pub(super) prompt: String,
+}
+
+/// Validate the source folder, ensure the target folder exists (creating
+/// it if missing), and produce the Linux-side paths the migration agent
+/// will use inside its bash tool. The frontend then opens the target as
+/// a workspace and feeds `prompt` to a fresh Goal-mode conversation.
+#[tauri::command]
+pub(super) async fn prepare_migration_target(
+    input: PrepareMigrationInput,
+) -> std::result::Result<PrepareMigrationOutput, String> {
+    let source = std::path::PathBuf::from(input.source_path.trim());
+    let target = std::path::PathBuf::from(input.target_path.trim());
+
+    if source.as_os_str().is_empty() {
+        return Err("source path cannot be empty".into());
+    }
+    if target.as_os_str().is_empty() {
+        return Err("target path cannot be empty".into());
+    }
+
+    let source = source
+        .canonicalize()
+        .map_err(|err| format!("source folder is not accessible: {err}"))?;
+    if !source.is_dir() {
+        return Err("source is not a folder".into());
+    }
+    if source == target {
+        return Err("source and target are the same folder".into());
+    }
+    if target.starts_with(&source) {
+        return Err("target is inside the source folder".into());
+    }
+
+    let mut target_existed = false;
+    let mut target_was_non_empty = false;
+    if target.exists() {
+        target_existed = true;
+        if !target.is_dir() {
+            return Err("target exists and is not a folder".into());
+        }
+        target_was_non_empty = std::fs::read_dir(&target)
+            .map_err(|err| format!("unable to inspect target folder: {err}"))?
+            .next()
+            .is_some();
+    } else {
+        std::fs::create_dir_all(&target)
+            .map_err(|err| format!("unable to create target folder: {err}"))?;
+    }
+
+    let source_windows = strip_verbatim_prefix(&source.to_string_lossy());
+    let target_windows = strip_verbatim_prefix(&target.to_string_lossy());
+    let source_linux = to_linux_path(&source_windows)
+        .ok_or_else(|| "source is not a Windows or WSL path".to_string())?;
+    let target_linux = to_linux_path(&target_windows)
+        .ok_or_else(|| "target is not a Windows or WSL path".to_string())?;
+
+    let prompt = sinew_app::MIGRATION_AGENT_PROMPT
+        .replace("{linux_source}", &source_linux)
+        .replace("{linux_target}", &target_linux);
+
+    Ok(PrepareMigrationOutput {
+        source_windows,
+        target_windows,
+        source_linux,
+        target_linux,
+        target_existed,
+        target_was_non_empty,
+        prompt,
+    })
+}
+
+/// Strip the `\\?\` and `\\?\UNC\` extended-length prefixes from a path
+/// string so it reads naturally and works with downstream tools.
+fn strip_verbatim_prefix(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = path.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    path.to_string()
+}
+
+/// Translate a Windows-side path into the path the WSL bash session will
+/// see for it. Returns `None` when the path doesn't fit either supported
+/// shape.
+fn to_linux_path(windows_path: &str) -> Option<String> {
+    let lower = windows_path.to_ascii_lowercase();
+    // WSL filesystem: \\wsl$\<distro>\<rest>  or  \\wsl.localhost\<distro>\<rest>
+    for prefix in [r"\\wsl$\", r"\\wsl.localhost\"] {
+        if lower.starts_with(prefix) {
+            let after_prefix = &windows_path[prefix.len()..];
+            let mut split = after_prefix.splitn(2, '\\');
+            split.next()?; // distro name — ignored, we use the path as-is on the distro side
+            let rest = split.next().unwrap_or("");
+            return Some(format!("/{}", rest.replace('\\', "/")));
+        }
+    }
+    // Drive-letter path: C:\foo\bar -> /mnt/c/foo/bar
+    let bytes = windows_path.as_bytes();
+    if bytes.len() >= 2
+        && bytes[1] == b':'
+        && (bytes[0].is_ascii_alphabetic())
+        && (bytes.len() == 2 || bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let rest = if bytes.len() > 2 {
+            &windows_path[2..].replace('\\', "/")
+        } else {
+            ""
+        }
+        .trim_start_matches('/')
+        .to_string();
+        return Some(if rest.is_empty() {
+            format!("/mnt/{drive}")
+        } else {
+            format!("/mnt/{drive}/{rest}")
+        });
+    }
+    None
 }
 
 #[tauri::command]

@@ -4,11 +4,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "@iconify/react";
 import { loadRecents } from "../lib/recents";
 import { api } from "../lib/ipc";
+import { setPendingMigration } from "../lib/pendingMigration";
 import type {
   ActiveTurnSummary,
   ActiveTurnsChangedPayload,
   RecentWorkspace,
 } from "../types";
+import { MigrationDialog } from "./MigrationDialog";
 import { SinewMark } from "./SinewMark";
 import { WindowControls, isWindowsPlatform } from "./WindowControls";
 
@@ -35,6 +37,7 @@ export function Welcome({ onPick, error, deriveName }: Props) {
   const [activeWorkspaces, setActiveWorkspaces] = useState<Set<string>>(
     () => new Set(),
   );
+  const [migrateOpen, setMigrateOpen] = useState(false);
 
   useEffect(() => {
     setRecents(loadRecents());
@@ -138,9 +141,45 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           </span>
         </button>
 
+        {IS_WINDOWS && (
+          <button
+            className="welcome__cta welcome__cta--secondary"
+            onClick={() => setMigrateOpen(true)}
+          >
+            <span className="welcome__cta-icon">
+              <Icon
+                icon="solar:transfer-horizontal-linear"
+                width={20}
+                height={20}
+              />
+            </span>
+            <span className="welcome__cta-body">
+              <span className="welcome__cta-title">
+                Migrate a Windows project to WSL
+              </span>
+              <span className="welcome__cta-sub">
+                Copy a folder over and let an agent handle the cleanup
+              </span>
+            </span>
+            <span className="welcome__cta-chev">
+              <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
+            </span>
+          </button>
+        )}
+
         {error && (
           <div className="welcome__error">{error}</div>
         )}
+
+        <MigrationDialog
+          open={migrateOpen}
+          onCancel={() => setMigrateOpen(false)}
+          onConfirm={({ targetWindows, sourceWindows, prompt }) => {
+            setPendingMigration({ prompt, sourceWindows });
+            setMigrateOpen(false);
+            onPick(targetWindows);
+          }}
+        />
 
         {recents.length > 0 ? (
           <section className="welcome__section">

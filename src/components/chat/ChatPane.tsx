@@ -19,6 +19,10 @@ import { FileChangeBlock } from "./FileChangeBlock";
 import { FileLinkedText, Markdown } from "./Markdown";
 import { ChatSearch } from "./ChatSearch";
 import { pingUserAttention } from "../../lib/notify";
+import {
+  MIGRATION_PREFILL_EVENT,
+  type MigrationPrefillDetail,
+} from "../../lib/pendingMigration";
 import { useChatSearch } from "./useChatSearch";
 import { PlanningNextMoveBlock } from "./PlanningNextMoveBlock";
 import { Questionnaire, type QuestionItem } from "./Questionnaire";
@@ -1690,6 +1694,20 @@ export function ChatPane({
       );
     }
   }, [goalWorkflow.status]);
+  // Migration hand-off: Workspace dispatches this event once it has
+  // created a fresh conversation for the migration. We pre-fill the
+  // composer with the agent prompt and switch to Goal mode so the user
+  // just has to read and press Send.
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<MigrationPrefillDetail>).detail;
+      if (!detail?.text) return;
+      setText(detail.text);
+      setMode("goal");
+    };
+    window.addEventListener(MIGRATION_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(MIGRATION_PREFILL_EVENT, onPrefill);
+  }, []);
   const scrollAnimationRef = useRef<number | null>(null);
   const autoScrollingRef = useRef(false);
   const stickToBottomRef = useRef(true);

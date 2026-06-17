@@ -50,11 +50,16 @@ pub(super) async fn spawn_terminal(
         ))
         .map_err(error_to_string)?;
 
-    let shell_preference = state
+    let raw_preference = state
         .store
         .load_tool_settings()
         .map(|settings| settings.shell_preference)
         .unwrap_or_default();
+    // Resolve `Auto` to the concrete kind for this workspace so the
+    // interactive terminal lines up with what the agent's bash tool
+    // does — neither needs the user to toggle the global preference
+    // when they switch between a Windows and a WSL project.
+    let shell_preference = resolve_shell_preference(raw_preference, &workspace_root);
     let mut command = default_terminal_command(shell_preference)
         .await
         .map_err(error_to_string)?;
@@ -97,6 +102,31 @@ pub(super) async fn spawn_terminal(
     );
 
     Ok(TerminalSpawnOutput { session_id })
+}
+
+/// Resolve `Auto` against the current workspace path. Auto on Windows
+/// picks WSL when the workspace lives on the WSL filesystem
+/// (`\\wsl$\…` / `\\wsl.localhost\…`), PowerShell otherwise. Explicit
+/// `PowerShell` / `Wsl` overrides are left untouched. No-op elsewhere.
+fn resolve_shell_preference(
+    pref: sinew_app::ShellPreference,
+    workspace_root: &std::path::Path,
+) -> sinew_app::ShellPreference {
+    #[cfg(windows)]
+    {
+        if matches!(pref, sinew_app::ShellPreference::Auto) {
+            return if sinew_app::path_targets_wsl_filesystem(workspace_root) {
+                sinew_app::ShellPreference::Wsl
+            } else {
+                sinew_app::ShellPreference::PowerShell
+            };
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = workspace_root;
+    }
+    pref
 }
 
 async fn default_terminal_command(

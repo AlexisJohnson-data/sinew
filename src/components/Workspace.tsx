@@ -23,11 +23,18 @@ import { TerminalPanel } from "./TerminalPanel";
 import { RemotePanel } from "./RemotePanel";
 import { SearchPane } from "./SearchPane";
 import { QuickOpen } from "./QuickOpen";
+import { MigrationDialog } from "./MigrationDialog";
 import { ChatPane, type ExternalDropFeed } from "./chat/ChatPane";
 import {
   pingUserAttention,
   setNotificationsEnabled,
 } from "../lib/notify";
+import {
+  consumePendingMigration,
+  MIGRATION_PREFILL_EVENT,
+  setPendingMigration,
+  type MigrationPrefillDetail,
+} from "../lib/pendingMigration";
 import { SinewMark } from "./SinewMark";
 import { UpdateBadge } from "./UpdateBadge";
 import { WindowControls, isWindowsPlatform } from "./WindowControls";
@@ -319,6 +326,17 @@ export function Workspace({
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
   const [fileTreeRefreshToken, setFileTreeRefreshToken] = useState(0);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  // The migration sidebar button only makes sense when the current
+  // workspace lives on a Windows-native path; for WSL workspaces the
+  // user is already where the migration would land them.
+  const isWindowsWorkspace = useMemo(() => {
+    if (!isWindowsPlatform()) return false;
+    const lower = workspacePath.toLowerCase();
+    if (lower.startsWith("\\\\wsl$\\")) return false;
+    if (lower.startsWith("\\\\wsl.localhost\\")) return false;
+    return /^[a-z]:[\\/]/i.test(workspacePath);
+  }, [workspacePath]);
   // Tracks when a streaming turn started so we can skip the "agent
   // finished" desktop notification for trivial fast exchanges (the user
   // is still actively typing and looking at the window).
@@ -344,6 +362,41 @@ export function Workspace({
     handle.startCreateRoot(pendingRootCreate);
     setPendingRootCreate(null);
   }, [pendingRootCreate, fileSearchOpen]);
+
+  // Migration hand-off: when the user kicked off a migration from the
+  // Welcome screen (or the sidebar), pendingMigration holds the agent
+  // prompt to feed into a fresh conversation. We create that
+  // conversation here and emit a window event the chat composer
+  // listens to, so it pre-fills the text + switches mode to Goal —
+  // the user just has to read and press Send.
+  useEffect(() => {
+    const pending = consumePendingMigration();
+    if (!pending) return;
+    void (async () => {
+      try {
+        const next = await api.createConversation(workspacePath);
+        activeConvIdRef.current = next.activeConversation.id;
+        setConversations(next.conversations);
+        setActiveConv(next.activeConversation);
+        setGlobalModeModelSettings(next.modeModelSettings);
+      } catch (err) {
+        console.error("[migration] failed to create conversation", err);
+      }
+      // Defer the prefill one frame so the freshly-mounted ChatPane has
+      // its listener wired up before we dispatch.
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(
+          new CustomEvent<MigrationPrefillDetail>(MIGRATION_PREFILL_EVENT, {
+            detail: { text: pending.prompt },
+          }),
+        );
+      });
+    })();
+    // Re-check on every workspace change. `consumePendingMigration`
+    // returns null after the first hand-off, so plain workspace
+    // switches stay no-ops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspacePath]);
 
   // Keep the notification subsystem in sync with the user preference.
   // Load once on mount, then react to cross-window save events emitted
@@ -2075,6 +2128,20 @@ export function Workspace({
                     height={15}
                   />
                 </button>
+                {isWindowsWorkspace && (
+                  <button
+                    type="button"
+                    className="sidebar__head-btn"
+                    title="Migrate this project to WSL"
+                    onClick={() => setMigrateOpen(true)}
+                  >
+                    <Icon
+                      icon="solar:transfer-horizontal-linear"
+                      width={15}
+                      height={15}
+                    />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="sidebar__head-btn"
@@ -2368,6 +2435,18 @@ export function Workspace({
           </div>
         )}
       </div>
+      <MigrationDialog
+        open={migrateOpen}
+        initialSourcePath={isWindowsWorkspace ? workspacePath : undefined}
+        onCancel={() => setMigrateOpen(false)}
+        onConfirm={({ targetWindows, sourceWindows, prompt }) => {
+          setPendingMigration({ prompt, sourceWindows });
+          setMigrateOpen(false);
+          void switchWorkspace(targetWindows).catch((err) =>
+            console.error("[migration] switchWorkspace failed", err),
+          );
+        }}
+      />
       <QuickOpen
         open={quickOpenVisible}
         workspacePath={workspacePath}

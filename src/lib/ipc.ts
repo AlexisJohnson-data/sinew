@@ -140,6 +140,20 @@ export const api = {
   openNewWindow() {
     return invoke<void>("open_new_window");
   },
+  /** Validate the source folder, create the target folder if missing,
+   *  and return the Linux-side paths + the ready-to-send agent prompt
+   *  for the "Migrate a Windows project to WSL" flow. */
+  prepareMigrationTarget(input: { sourcePath: string; targetPath: string }) {
+    return invoke<{
+      sourceWindows: string;
+      targetWindows: string;
+      sourceLinux: string;
+      targetLinux: string;
+      targetExisted: boolean;
+      targetWasNonEmpty: boolean;
+      prompt: string;
+    }>("prepare_migration_target", { input });
+  },
   /** Open Settings / Remote in a dedicated secondary window. If a
    * window for that view is already open it is focused instead. */
   openSecondaryWindow(input: {

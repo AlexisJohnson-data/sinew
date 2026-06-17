@@ -31,6 +31,73 @@ const SKILL_SETTINGS_KEY: &str = "skill_settings";
 const OPENROUTER_MODELS_KEY: &str = "openrouter_models";
 const HIDDEN_TOOL_SETTING_NAMES: &[&str] = &["skill"];
 
+/// Template prompt used by the "Migrate a Windows project to WSL" flow.
+/// Two placeholders — `{linux_source}` and `{linux_target}` — are replaced
+/// at runtime with the `/mnt/c/...` form of the user-picked source and
+/// the target's Linux home path. The flow runs the conversation in Goal
+/// mode so the agent works autonomously, but uses the `question` tool at
+/// the decision points so the user stays in control.
+pub const MIGRATION_AGENT_PROMPT: &str = r#"You are migrating a Windows-hosted project to WSL.
+
+SOURCE (Windows side, accessible from /mnt/c via bash):  {linux_source}
+TARGET (WSL home, your current workspace cwd):           {linux_target}
+
+Execute the following plan, reporting your findings as you go.
+
+1. Inspect the source. Run `ls -la {linux_source}` and look for stack markers
+   (`package.json`, `Cargo.toml`, `pyproject.toml`, `requirements.txt`,
+   `*.csproj`, `Gemfile`, `go.mod`, `composer.json`, `pubspec.yaml`).
+   State the detected stack(s) in one short paragraph.
+
+2. Check git state inside the source:
+   - `git -C {linux_source} rev-parse --is-inside-work-tree`
+   - If it's a repo:
+     - `git -C {linux_source} status --porcelain` (clean or dirty?)
+     - `git -C {linux_source} remote -v` (has a remote? which URL?)
+   - Pick the copy strategy and TELL THE USER:
+     - clean working tree + has remote: recommend
+       `git clone <remote> {linux_target}` instead of a file copy. Ask the
+       user to confirm via the `question` tool BEFORE running it.
+     - dirty working tree: MUST copy files (a re-clone would lose
+       uncommitted work). Warn the user explicitly.
+     - no remote: MUST copy.
+
+3. Copy when copying is chosen (or after the user said "go ahead"):
+   `rsync -a --info=progress2 \
+      --exclude=node_modules --exclude=target --exclude=dist \
+      --exclude=build --exclude=.next --exclude=.turbo --exclude=.cache \
+      --exclude=.venv --exclude=venv --exclude=__pycache__ \
+      --exclude=.mypy_cache --exclude=.pytest_cache --exclude=out \
+      --exclude=.gradle --exclude=.dart_tool --exclude=.idea --exclude=.vs \
+      {linux_source}/ {linux_target}/`
+   Fallback to `cp -a {linux_source}/. {linux_target}/` if rsync is missing.
+
+4. Surface environment risks:
+   - List every `.env*` file found in the target — do NOT print their
+     contents, just say they exist and may contain Windows-specific values
+     (paths, OS-specific commands).
+   - Grep for Windows-style path patterns (`C:\\`, `D:\\`, `\\\\wsl`) in
+     common config files: `vite.config.*`, `next.config.*`, `tsconfig.json`,
+     `Dockerfile`, `docker-compose.yml`, `pyproject.toml`, `Cargo.toml`,
+     `.env*`. Report the hits with file + line.
+   - Python: if `.venv/pyvenv.cfg` references a Windows interpreter
+     (`home = C:\\...`), flag it for recreation.
+   - Node: if `node_modules` was excluded, remind the user to run
+     `npm install` (or `pnpm install` / `yarn` depending on what lockfile
+     is present).
+   - Rust: if `target/` was excluded, note that the first `cargo build`
+     will be cold and may take a while.
+
+5. Produce a short, project-specific markdown checklist of next steps —
+   things the user must run manually (e.g. `npm install`, recreate the
+   venv with `python3 -m venv .venv && source .venv/bin/activate &&
+   pip install -r requirements.txt`, regenerate `.env.local`, re-fetch
+   credentials, install a missing CLI…). Only mention what you actually
+   detected — no generic boilerplate.
+
+6. Done. Stop and let the user pick up.
+"#;
+
 pub const DEFAULT_PLAN_MODE_PROMPT: &str = r#"You are in Plan mode.
 
 Rules:

@@ -137,6 +137,14 @@ impl ShellKind {
 /// shell without threading the preference through every call site.
 static SHELL_PREFERENCE: AtomicU8 = AtomicU8::new(0);
 
+/// When `SHELL_PREFERENCE` is `Auto`, this cache holds the kind we picked
+/// for the currently open workspace. Encoded as `0 = none/PowerShell-fallback`,
+/// `1 = PowerShell`, `2 = Wsl`. Updated by the desktop shell every time it
+/// opens (or switches) a workspace via `set_active_shell_for_workspace`.
+/// Auto users get the right shell per project without manually toggling
+/// the preference each time.
+static WORKSPACE_AUTO_SHELL: AtomicU8 = AtomicU8::new(0);
+
 fn encode_shell_preference(pref: ShellPreference) -> u8 {
     match pref {
         ShellPreference::Auto => 0,
@@ -162,8 +170,54 @@ fn active_shell_preference() -> ShellPreference {
     decode_shell_preference(SHELL_PREFERENCE.load(Ordering::Relaxed))
 }
 
+/// Heuristic: does the given workspace path point to a path that lives on
+/// the WSL filesystem? Matches both the plain UNC form
+/// `\\wsl$\<distro>\…`, the newer `\\wsl.localhost\<distro>\…`, and their
+/// canonicalized extended-length variants `\\?\UNC\wsl…`. Lowercased so
+/// the prefix check stays case-insensitive (the OS itself is).
+///
+/// Exposed publicly so the desktop shell can resolve `Auto` for the
+/// interactive terminal the same way the agent core does.
+pub fn path_targets_wsl_filesystem(path: &Path) -> bool {
+    let display = path.to_string_lossy().to_ascii_lowercase();
+    display.starts_with(r"\\wsl$\")
+        || display.starts_with(r"\\wsl.localhost\")
+        || display.starts_with(r"\\?\unc\wsl$\")
+        || display.starts_with(r"\\?\unc\wsl.localhost\")
+}
+
+/// Update the workspace-derived shell for `Auto` resolution. Called every
+/// time the desktop shell opens (or switches) a workspace so the agent
+/// and the integrated terminal can pick PowerShell vs WSL on the fly,
+/// without the user toggling the preference manually. No-op on
+/// macOS/Linux (Auto always means Bash there).
+pub fn set_active_shell_for_workspace(workspace_root: &Path) {
+    let _ = workspace_root;
+    #[cfg(windows)]
+    {
+        let encoded = if path_targets_wsl_filesystem(workspace_root) {
+            2 // Wsl
+        } else {
+            1 // PowerShell
+        };
+        WORKSPACE_AUTO_SHELL.store(encoded, Ordering::Relaxed);
+    }
+}
+
 fn active_shell_kind() -> ShellKind {
-    ShellKind::from_preference(active_shell_preference())
+    let pref = active_shell_preference();
+    #[cfg(windows)]
+    {
+        if matches!(pref, ShellPreference::Auto) {
+            // Auto: pull the workspace-derived kind if we have one,
+            // otherwise fall back to PowerShell (the previous default).
+            return match WORKSPACE_AUTO_SHELL.load(Ordering::Relaxed) {
+                2 => ShellKind::Wsl,
+                _ => ShellKind::PowerShell,
+            };
+        }
+    }
+    ShellKind::from_preference(pref)
 }
 
 pub fn active_shell_display_name() -> &'static str {

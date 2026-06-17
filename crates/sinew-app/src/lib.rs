@@ -28,7 +28,10 @@ pub use agent::{
     system_prompt_for_mode_with_plan_prompt, AgentEvent, AgentEventScope, AgentMode,
     ConversationEvent, EngineCommand, QuestionReply, TurnCancel, TurnContext,
 };
-pub use bash::{active_shell_display_name, set_shell_preference, shell_system_prompt, BashTool};
+pub use bash::{
+    active_shell_display_name, path_targets_wsl_filesystem, set_active_shell_for_workspace,
+    set_shell_preference, shell_system_prompt, BashTool,
+};
 #[cfg(windows)]
 pub use bash::wsl_working_directory;
 pub use compact::{compact_conversation_history, CompactConversationOutput};
@@ -49,7 +52,7 @@ pub use store::{
     tool_settings_view, AppStore, ConversationSummary, GoalWorkflowState, ModeModelSettings,
     OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, SavedConversation, ToolConfig,
     ShellPreference, ToolConfigView, ToolSettings, ToolSettingsView, TurnCheckpointRecord,
-    WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT,
+    WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT, MIGRATION_AGENT_PROMPT,
 };
 pub use subagent::{
     import_sub_agents_from_provider, is_subagent_tool_name, subagent_system_prompt,

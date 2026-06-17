@@ -283,6 +283,7 @@ pub fn run() {
             workspace::open_workspace,
             workspace::open_new_window,
             workspace::open_secondary_window,
+            workspace::prepare_migration_target,
             workspace::reset_window_title,
             workspace::watch_workspace_command,
             workspace::unwatch_workspace_command,
