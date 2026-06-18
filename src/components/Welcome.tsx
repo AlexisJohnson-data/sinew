@@ -169,7 +169,8 @@ export function Welcome({ onPick, error, deriveName }: Props) {
       >
         <Icon icon="solar:settings-linear" width={15} height={15} />
       </button>
-      <main className="welcome__stage">
+      <main className="welcome__stage" data-aside={IS_WINDOWS ? "true" : "false"}>
+        <div className="welcome__main">
         <header className="welcome__head">
           <span className="welcome__mark-dot" aria-hidden="true">
             <span className="welcome__mark-inner">
@@ -200,96 +201,6 @@ export function Welcome({ onPick, error, deriveName }: Props) {
             <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
           </span>
         </button>
-
-        {IS_WINDOWS && (
-          <div className="welcome__shell" role="group" aria-label="Terminal shell">
-            <div className="welcome__shell-row">
-              <Icon
-                icon="solar:command-linear"
-                width={13}
-                height={13}
-                aria-hidden="true"
-              />
-              <span className="welcome__shell-label">Terminal</span>
-              <div className="welcome__shell-segments">
-                <button
-                  type="button"
-                  data-active={shellPref === "auto" ? "true" : "false"}
-                  onClick={() => void switchShellPref("auto")}
-                  disabled={shellPrefBusy}
-                  title="Auto — PowerShell for C:\\ workspaces, WSL for \\\\wsl$\\ workspaces"
-                >
-                  Auto
-                </button>
-                <button
-                  type="button"
-                  data-active={shellPref === "powershell" ? "true" : "false"}
-                  onClick={() => void switchShellPref("powershell")}
-                  disabled={shellPrefBusy}
-                  title="Always PowerShell"
-                >
-                  PowerShell
-                </button>
-                <button
-                  type="button"
-                  data-active={shellPref === "wsl" ? "true" : "false"}
-                  onClick={() => void switchShellPref("wsl")}
-                  disabled={shellPrefBusy}
-                  title="Always WSL (Ubuntu) — slow on Windows-mounted /mnt/c paths"
-                >
-                  WSL
-                </button>
-              </div>
-            </div>
-            <p className="welcome__shell-hint">
-              {shellPref === "auto" ? (
-                <>
-                  Open a <code>C:\</code> project → PowerShell. Open a{" "}
-                  <code>\\wsl$\</code> project → WSL. Recommended.
-                </>
-              ) : shellPref === "powershell" ? (
-                <>
-                  Forces PowerShell on every workspace — even WSL paths. Pick{" "}
-                  <strong>Auto</strong> unless you have a specific reason.
-                </>
-              ) : (
-                <>
-                  Forces WSL on every workspace. Running it against a{" "}
-                  <code>C:\</code> project means the files live on{" "}
-                  <code>/mnt/c/</code> — that works but file I/O is slow. Prefer{" "}
-                  <strong>Auto</strong>, or use the migrate button below to copy
-                  the project into the WSL filesystem.
-                </>
-              )}
-            </p>
-          </div>
-        )}
-
-        {IS_WINDOWS && (
-          <button
-            className="welcome__cta welcome__cta--secondary"
-            onClick={() => setMigrateOpen(true)}
-          >
-            <span className="welcome__cta-icon">
-              <Icon
-                icon="solar:transfer-horizontal-linear"
-                width={20}
-                height={20}
-              />
-            </span>
-            <span className="welcome__cta-body">
-              <span className="welcome__cta-title">
-                Migrate a Windows project to WSL
-              </span>
-              <span className="welcome__cta-sub">
-                Copy a folder over and let an agent handle the cleanup
-              </span>
-            </span>
-            <span className="welcome__cta-chev">
-              <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
-            </span>
-          </button>
-        )}
 
         {error && (
           <div className="welcome__error">{error}</div>
@@ -359,6 +270,91 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           <div className="welcome__empty">
             No recent workspaces yet. Pick a folder to get started.
           </div>
+        )}
+        </div>
+
+        {IS_WINDOWS && (
+          <aside className="welcome__aside">
+            <button
+              type="button"
+              className="welcome__aside-cta"
+              onClick={() => setMigrateOpen(true)}
+            >
+              <span className="welcome__aside-cta-icon">
+                <Icon
+                  icon="solar:transfer-horizontal-linear"
+                  width={18}
+                  height={18}
+                />
+              </span>
+              <span className="welcome__aside-cta-body">
+                <span className="welcome__aside-cta-title">
+                  Migrate to WSL
+                </span>
+                <span className="welcome__aside-cta-sub">
+                  Copy a Windows folder over, an agent handles the cleanup
+                </span>
+              </span>
+            </button>
+
+            <div className="welcome__shell" role="group" aria-label="Terminal shell">
+              <div className="welcome__shell-head">
+                <Icon
+                  icon="solar:command-linear"
+                  width={13}
+                  height={13}
+                  aria-hidden="true"
+                />
+                <span className="welcome__shell-label">Terminal</span>
+              </div>
+              <div className="welcome__shell-segments">
+                <button
+                  type="button"
+                  data-active={shellPref === "auto" ? "true" : "false"}
+                  onClick={() => void switchShellPref("auto")}
+                  disabled={shellPrefBusy}
+                  title="Auto — PowerShell for C:\\ workspaces, WSL for \\\\wsl$\\ workspaces"
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPref === "powershell" ? "true" : "false"}
+                  onClick={() => void switchShellPref("powershell")}
+                  disabled={shellPrefBusy}
+                  title="Always PowerShell"
+                >
+                  PS
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPref === "wsl" ? "true" : "false"}
+                  onClick={() => void switchShellPref("wsl")}
+                  disabled={shellPrefBusy}
+                  title="Always WSL (Ubuntu) — slow on Windows-mounted /mnt/c paths"
+                >
+                  WSL
+                </button>
+              </div>
+              <p className="welcome__shell-hint">
+                {shellPref === "auto" ? (
+                  <>
+                    <code>C:\</code> → PowerShell, <code>\\wsl$\</code> → WSL.
+                    Recommended.
+                  </>
+                ) : shellPref === "powershell" ? (
+                  <>
+                    Forces PowerShell on every workspace. Pick <strong>Auto</strong> unless you have a reason.
+                  </>
+                ) : (
+                  <>
+                    Forces WSL even on <code>C:\</code> projects — runs against{" "}
+                    <code>/mnt/c/</code>, which is slow. Prefer <strong>Auto</strong> or migrate.
+                  </>
+                )}
+              </p>
+            </div>
+          </aside>
         )}
       </main>
     </div>

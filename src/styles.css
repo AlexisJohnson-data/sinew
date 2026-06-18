@@ -268,6 +268,31 @@ textarea {
   flex-direction: column;
   gap: 28px;
 }
+/* When the aside is rendered (Windows only) lay the stage out as two
+   columns so the right rail holds the secondary actions and the main
+   column stays focused on title + Open + Recents — the whole page now
+   fits without scrolling. */
+.welcome__stage[data-aside="true"] {
+  max-width: 880px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 28px 32px;
+  align-items: start;
+}
+.welcome__main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.welcome__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  position: sticky;
+  top: 40px;
+}
 
 /* ---- header ---------------------------------------------------- */
 .welcome__head {
@@ -357,19 +382,66 @@ textarea {
   background: var(--bg-3);
 }
 
+.welcome__aside-cta {
+  appearance: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  color: var(--text-1);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-ui);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.welcome__aside-cta:hover {
+  background: var(--bg-3);
+  border-color: var(--line-strong);
+}
+.welcome__aside-cta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-5);
+  color: var(--text-0);
+}
+.welcome__aside-cta-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.welcome__aside-cta-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.welcome__aside-cta-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
 .welcome__shell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 12px 14px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
 }
-.welcome__shell-row {
+.welcome__shell-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-2);
 }
 .welcome__shell-label {
@@ -380,8 +452,8 @@ textarea {
   flex: 0 0 auto;
 }
 .welcome__shell-segments {
-  margin-left: auto;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
   background: var(--bg-3);
   border: 1px solid var(--line);
   border-radius: var(--r-med);
@@ -395,10 +467,11 @@ textarea {
   color: var(--text-2);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  padding: 4px 10px;
+  padding: 5px 4px;
   border-radius: 4px;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  text-align: center;
 }
 .welcome__shell-segments button:hover {
   color: var(--text-1);
