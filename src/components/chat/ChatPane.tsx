@@ -17,6 +17,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AIThinkingBlock } from "./AIThinkingBlock";
 import { FileChangeBlock } from "./FileChangeBlock";
 import { FileLinkedText, Markdown } from "./Markdown";
+import { MessageCopyButton } from "./MessageCopyButton";
 import { ChatSearch } from "./ChatSearch";
 import { pingUserAttention } from "../../lib/notify";
 import {
@@ -6239,7 +6240,8 @@ function BlockView({
       );
     case "assistant-text":
       return (
-        <div className="msg" data-role="assistant">
+        <div className="msg msg--copyable" data-role="assistant">
+          <MessageCopyButton text={block.text} />
           <div className="msg__body">
             <Markdown text={block.text} onOpenFile={onOpenFile} />
           </div>

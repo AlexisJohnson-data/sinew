@@ -6981,6 +6981,44 @@ textarea {
   color: var(--accent-hi);
   border-color: var(--accent-dim);
 }
+
+/* Whole-message copy button on assistant text bubbles. Hidden until
+   hover so it doesn't crowd quiet messages, sits in the top-right
+   corner mirroring the code-block one. */
+.msg--copyable {
+  position: relative;
+}
+.msg__copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.msg--copyable:hover .msg__copy,
+.msg__copy:focus-visible {
+  opacity: 1;
+}
+.msg__copy:hover {
+  background: var(--bg-4);
+  color: var(--text-0);
+}
+.msg__copy[data-copied="true"] {
+  opacity: 1;
+  color: var(--accent-hi);
+  border-color: var(--accent-dim);
+}
 .mermaid-diagram {
   box-sizing: border-box;
   max-width: 100%;
