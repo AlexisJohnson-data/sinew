@@ -215,6 +215,46 @@ pub(super) async fn list_default_mode_model_settings(
         .map_err(error_to_string)
 }
 
+/// Read the saved shell preference without requiring a workspace. The
+/// Welcome screen surfaces this so a brand-new user can see (and switch)
+/// it before they ever open a folder.
+#[tauri::command]
+pub(super) async fn get_shell_preference(
+    state: State<'_, DesktopState>,
+) -> std::result::Result<sinew_app::ShellPreference, String> {
+    state
+        .store
+        .load_tool_settings()
+        .map(|settings| settings.shell_preference)
+        .map_err(error_to_string)
+}
+
+/// Persist a new shell preference (without going through the workspace
+/// catalog flow) and apply it process-wide so the next bash-tool turn
+/// and any newly spawned interactive terminal honor it immediately.
+#[derive(serde::Deserialize)]
+pub(super) struct SetShellPreferenceInput {
+    pub shell_preference: sinew_app::ShellPreference,
+}
+
+#[tauri::command]
+pub(super) async fn set_shell_preference(
+    state: State<'_, DesktopState>,
+    input: SetShellPreferenceInput,
+) -> std::result::Result<sinew_app::ShellPreference, String> {
+    let mut settings = state
+        .store
+        .load_tool_settings()
+        .map_err(error_to_string)?;
+    settings.shell_preference = input.shell_preference;
+    state
+        .store
+        .save_tool_settings(&settings)
+        .map_err(error_to_string)?;
+    sinew_app::set_shell_preference(input.shell_preference);
+    Ok(input.shell_preference)
+}
+
 #[tauri::command]
 pub(super) async fn save_mcp_settings(
     state: State<'_, DesktopState>,

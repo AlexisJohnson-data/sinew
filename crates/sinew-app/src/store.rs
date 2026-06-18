@@ -330,9 +330,10 @@ pub enum WebSearchProvider {
 }
 
 /// User preference for which shell backs the `bash` tool and the interactive
-/// terminal. `Auto` keeps the historical behaviour (PowerShell 7+ on Windows,
-/// Bash elsewhere). `Wsl` routes both through the default WSL distribution on
-/// Windows; it has no effect on macOS/Linux, which always use Bash.
+/// terminal. On Windows, `Auto` looks at the open workspace path: a `\\wsl$\`
+/// or `\\wsl.localhost\` workspace routes to WSL, everything else to
+/// PowerShell 7+. `PowerShell` and `Wsl` force the same shell on every
+/// workspace. macOS/Linux always use Bash regardless of the value here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShellPreference {
     #[default]

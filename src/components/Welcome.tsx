@@ -9,6 +9,7 @@ import type {
   ActiveTurnSummary,
   ActiveTurnsChangedPayload,
   RecentWorkspace,
+  ShellPreference,
 } from "../types";
 import { MigrationDialog } from "./MigrationDialog";
 import { SinewMark } from "./SinewMark";
@@ -38,10 +39,46 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     () => new Set(),
   );
   const [migrateOpen, setMigrateOpen] = useState(false);
+  // Current shell preference, surfaced on Welcome so a first-time user
+  // knows what's going to back the bash tool / interactive terminal —
+  // and can flip it without having to dig through Settings.
+  const [shellPref, setShellPref] = useState<ShellPreference>("auto");
+  const [shellPrefBusy, setShellPrefBusy] = useState(false);
 
   useEffect(() => {
     setRecents(loadRecents());
   }, []);
+
+  useEffect(() => {
+    if (!IS_WINDOWS) return;
+    let cancelled = false;
+    void api
+      .getShellPreference()
+      .then((pref) => {
+        if (!cancelled) setShellPref(pref);
+      })
+      .catch(() => {
+        // best effort — leave the optimistic "auto" default in place
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const switchShellPref = async (next: ShellPreference) => {
+    if (next === shellPref || shellPrefBusy) return;
+    setShellPrefBusy(true);
+    const previous = shellPref;
+    setShellPref(next); // optimistic
+    try {
+      await api.setShellPreference(next);
+    } catch (err) {
+      console.error("[shell-pref] failed to persist", err);
+      setShellPref(previous);
+    } finally {
+      setShellPrefBusy(false);
+    }
+  };
 
   // Surface running agent turns on the recents list. We seed from
   // `list_active_turns` (so the loader is correct the moment Welcome paints)
@@ -163,6 +200,70 @@ export function Welcome({ onPick, error, deriveName }: Props) {
             <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
           </span>
         </button>
+
+        {IS_WINDOWS && (
+          <div className="welcome__shell" role="group" aria-label="Terminal shell">
+            <div className="welcome__shell-row">
+              <Icon
+                icon="solar:command-linear"
+                width={13}
+                height={13}
+                aria-hidden="true"
+              />
+              <span className="welcome__shell-label">Terminal</span>
+              <div className="welcome__shell-segments">
+                <button
+                  type="button"
+                  data-active={shellPref === "auto" ? "true" : "false"}
+                  onClick={() => void switchShellPref("auto")}
+                  disabled={shellPrefBusy}
+                  title="Auto — PowerShell for C:\\ workspaces, WSL for \\\\wsl$\\ workspaces"
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPref === "powershell" ? "true" : "false"}
+                  onClick={() => void switchShellPref("powershell")}
+                  disabled={shellPrefBusy}
+                  title="Always PowerShell"
+                >
+                  PowerShell
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPref === "wsl" ? "true" : "false"}
+                  onClick={() => void switchShellPref("wsl")}
+                  disabled={shellPrefBusy}
+                  title="Always WSL (Ubuntu) — slow on Windows-mounted /mnt/c paths"
+                >
+                  WSL
+                </button>
+              </div>
+            </div>
+            <p className="welcome__shell-hint">
+              {shellPref === "auto" ? (
+                <>
+                  Open a <code>C:\</code> project → PowerShell. Open a{" "}
+                  <code>\\wsl$\</code> project → WSL. Recommended.
+                </>
+              ) : shellPref === "powershell" ? (
+                <>
+                  Forces PowerShell on every workspace — even WSL paths. Pick{" "}
+                  <strong>Auto</strong> unless you have a specific reason.
+                </>
+              ) : (
+                <>
+                  Forces WSL on every workspace. Running it against a{" "}
+                  <code>C:\</code> project means the files live on{" "}
+                  <code>/mnt/c/</code> — that works but file I/O is slow. Prefer{" "}
+                  <strong>Auto</strong>, or use the migrate button below to copy
+                  the project into the WSL filesystem.
+                </>
+              )}
+            </p>
+          </div>
+        )}
 
         {IS_WINDOWS && (
           <button

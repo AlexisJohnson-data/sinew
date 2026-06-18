@@ -34,6 +34,7 @@ import type {
   QuestionAnswer,
   SavedConversation,
   ServiceTier,
+  ShellPreference,
   SkillSettings,
   StartAnthropicLoginOutput,
   StartGoogleLoginOutput,
@@ -385,6 +386,14 @@ export const api = {
   },
   listDefaultModeModelSettings() {
     return invoke<ModeModelSettings>("list_default_mode_model_settings");
+  },
+  getShellPreference() {
+    return invoke<ShellPreference>("get_shell_preference");
+  },
+  setShellPreference(shellPreference: ShellPreference) {
+    return invoke<ShellPreference>("set_shell_preference", {
+      input: { shellPreference },
+    });
   },
   saveMcpSettings(settings: McpSettings) {
     return invoke<McpSettings>("save_mcp_settings", {

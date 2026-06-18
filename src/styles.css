@@ -357,6 +357,81 @@ textarea {
   background: var(--bg-3);
 }
 
+.welcome__shell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+}
+.welcome__shell-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+.welcome__shell-label {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  flex: 0 0 auto;
+}
+.welcome__shell-segments {
+  margin-left: auto;
+  display: inline-flex;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-med);
+  padding: 2px;
+  gap: 2px;
+}
+.welcome__shell-segments button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.welcome__shell-segments button:hover {
+  color: var(--text-1);
+}
+.welcome__shell-segments button[data-active="true"] {
+  background: var(--bg-5);
+  color: var(--text-0);
+}
+.welcome__shell-segments button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.welcome__shell-hint {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+  letter-spacing: -0.005em;
+}
+.welcome__shell-hint code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--bg-3);
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--text-2);
+}
+.welcome__shell-hint strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
 .welcome__cta-icon {
   width: 44px;
   height: 44px;

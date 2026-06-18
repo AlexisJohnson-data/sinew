@@ -322,6 +322,8 @@ pub fn run() {
             conversations::set_conversation_mode,
             conversations::set_conversation_model_preference,
             conversations::list_default_mode_model_settings,
+            conversations::get_shell_preference,
+            conversations::set_shell_preference,
             conversations::list_mcp_settings,
             conversations::save_mcp_settings,
             conversations::list_tool_settings,
