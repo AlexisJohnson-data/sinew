@@ -41,6 +41,7 @@ import {
   PROVIDERS,
   THINKING_LEVELS,
   availableModelsForProviders,
+  modelIdFromRef,
   modelRefFromId,
   modelsWithOpenRouter,
   selectionFromRef,
@@ -1696,14 +1697,30 @@ export function ChatPane({
   }, [goalWorkflow.status]);
   // Migration hand-off: Workspace dispatches this event once it has
   // created a fresh conversation for the migration. We pre-fill the
-  // composer with the agent prompt and switch to Goal mode so the user
-  // just has to read and press Send.
+  // composer with the agent prompt, switch to Goal mode, and — when the
+  // user picked a specific model in the MigrationDialog — persist that
+  // model for the Goal mode of the freshly-created conversation so the
+  // very first turn runs on the chosen LLM.
+  const migrationPersistRef = useRef<
+    ((targetMode: AgentMode, next: ModeModelSelection) => Promise<void>) | null
+  >(null);
   useEffect(() => {
     const onPrefill = (event: Event) => {
       const detail = (event as CustomEvent<MigrationPrefillDetail>).detail;
       if (!detail?.text) return;
       setText(detail.text);
       setMode("goal");
+      if (detail.model && detail.thinking) {
+        const persist = migrationPersistRef.current;
+        if (persist) {
+          void persist("goal", {
+            model: modelIdFromRef(detail.model),
+            thinking: detail.thinking,
+          }).catch((err) => {
+            console.error("[migration] failed to persist goal model", err);
+          });
+        }
+      }
     };
     window.addEventListener(MIGRATION_PREFILL_EVENT, onPrefill);
     return () => window.removeEventListener(MIGRATION_PREFILL_EVENT, onPrefill);
@@ -2402,6 +2419,13 @@ export function ChatPane({
     },
     [conversationId, modeSelections, onModelPreferenceChange],
   );
+
+  // Keep the migration prefill handler — which is bound at mount in a
+  // stable effect — pointed at the latest persistModeSelection. The
+  // ref is used by the MIGRATION_PREFILL_EVENT listener above.
+  useEffect(() => {
+    migrationPersistRef.current = persistModeSelection;
+  }, [persistModeSelection]);
 
   const handleModelSelect = useCallback(
     (nextModel: ModelId) => {

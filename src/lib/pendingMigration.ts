@@ -10,10 +10,18 @@
  * lives in memory only and gets consumed exactly once.
  */
 
+import type { ModelRef, ThinkingLevel } from "../types";
+
 type Pending = {
   prompt: string;
   /** Friendly description used to remind the user what's being migrated. */
   sourceWindows: string;
+  /** Goal-mode model the user picked in the MigrationDialog. The
+   *  receiving ChatPane applies it before the user submits, so the
+   *  migration runs with the chosen LLM regardless of the workspace's
+   *  previous default. */
+  model?: ModelRef;
+  thinking?: ThinkingLevel;
 };
 
 let pending: Pending | null = null;
@@ -34,4 +42,8 @@ export const MIGRATION_PREFILL_EVENT = "sinew:migration-prefill";
 
 export type MigrationPrefillDetail = {
   text: string;
+  /** Optional override for the goal-mode model — when present the
+   *  composer applies it to the new conversation before the user sends. */
+  model?: ModelRef;
+  thinking?: ThinkingLevel;
 };

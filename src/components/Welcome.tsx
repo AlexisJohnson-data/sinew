@@ -252,8 +252,19 @@ export function Welcome({ onPick, error, deriveName }: Props) {
         <MigrationDialog
           open={migrateOpen}
           onCancel={() => setMigrateOpen(false)}
-          onConfirm={({ targetWindows, sourceWindows, prompt }) => {
-            setPendingMigration({ prompt, sourceWindows });
+          onConfirm={({
+            targetWindows,
+            sourceWindows,
+            prompt,
+            model,
+            thinking,
+          }) => {
+            setPendingMigration({
+              prompt,
+              sourceWindows,
+              model,
+              thinking,
+            });
             setMigrateOpen(false);
             onPick(targetWindows);
           }}

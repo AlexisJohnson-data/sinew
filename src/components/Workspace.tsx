@@ -387,7 +387,11 @@ export function Workspace({
       window.requestAnimationFrame(() => {
         window.dispatchEvent(
           new CustomEvent<MigrationPrefillDetail>(MIGRATION_PREFILL_EVENT, {
-            detail: { text: pending.prompt },
+            detail: {
+              text: pending.prompt,
+              model: pending.model,
+              thinking: pending.thinking,
+            },
           }),
         );
       });
@@ -2439,8 +2443,14 @@ export function Workspace({
         open={migrateOpen}
         initialSourcePath={isWindowsWorkspace ? workspacePath : undefined}
         onCancel={() => setMigrateOpen(false)}
-        onConfirm={({ targetWindows, sourceWindows, prompt }) => {
-          setPendingMigration({ prompt, sourceWindows });
+        onConfirm={({
+          targetWindows,
+          sourceWindows,
+          prompt,
+          model,
+          thinking,
+        }) => {
+          setPendingMigration({ prompt, sourceWindows, model, thinking });
           setMigrateOpen(false);
           void switchWorkspace(targetWindows).catch((err) =>
             console.error("[migration] switchWorkspace failed", err),

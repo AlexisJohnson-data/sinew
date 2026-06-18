@@ -2,8 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
-import { labelForModelRef } from "../lib/models";
-import type { ModelRef } from "../types";
+import {
+  availableModelsForProviders,
+  labelForModelRef,
+  modelIdFromRef,
+  modelRefFromId,
+  modelRefWithThinking,
+  type ModelEntry,
+  type ModelId,
+} from "../lib/models";
+import type { ModelRef, OpenRouterModel, ThinkingLevel } from "../types";
 
 type Props = {
   open: boolean;
@@ -21,6 +29,10 @@ type Props = {
     sourceWindows: string;
     targetWindows: string;
     prompt: string;
+    /** Model the user explicitly picked for the migration agent. The
+     *  parent forwards this so the new conversation runs on it. */
+    model?: ModelRef;
+    thinking?: ThinkingLevel;
   }) => void;
 };
 
@@ -56,10 +68,14 @@ export function MigrationDialog({
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [overwriteAck, setOverwriteAck] = useState(false);
-  // Goal mode model used by the migration agent. Fetched lazily so the
-  // user knows which LLM is about to do the work — especially important
-  // on first launch, before they've opened any workspace.
-  const [goalModel, setGoalModel] = useState<ModelRef | null>(null);
+  // Goal mode model used by the migration agent. We seed the dropdown
+  // from the global default, then let the user pick anything else among
+  // the providers they have configured. The chosen model travels with
+  // the migration handoff so the agent runs on it from the first turn.
+  const [defaultGoalModel, setDefaultGoalModel] = useState<ModelRef | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<ModelId | "">("");
+  const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const sourceRef = useRef<HTMLInputElement>(null);
 
   // Reset every time the dialog (re)opens.
@@ -79,25 +95,43 @@ export function MigrationDialog({
     if (!initialSourcePath) sourceRef.current?.focus();
   }, [open, initialSourcePath, defaultTargetParent]);
 
-  // Fetch the global default goal-mode model when the dialog opens.
-  // Failures stay silent — we just hide the badge.
+  // Fetch the global default goal-mode model + the set of providers the
+  // user has configured, so the picker only offers models that will
+  // actually work. Failures stay silent — we just hide the picker.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void api
-      .listDefaultModeModelSettings()
-      .then((settings) => {
-        if (!cancelled) setGoalModel(settings.goal ?? settings.act ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setGoalModel(null);
-      });
+    void Promise.all([
+      api.listDefaultModeModelSettings().catch(() => null),
+      api.listConfiguredModelProviders().catch(() => [] as string[]),
+      api.listOpenRouterModels().catch(() => [] as OpenRouterModel[]),
+    ]).then(([modeSettings, providers, openRouter]) => {
+      if (cancelled) return;
+      const goal = modeSettings?.goal ?? modeSettings?.act ?? null;
+      setDefaultGoalModel(goal);
+      setConfiguredProviders(providers);
+      setOpenRouterModels(openRouter);
+      setSelectedModelId(goal ? modelIdFromRef(goal) : "");
+    });
     return () => {
       cancelled = true;
     };
   }, [open]);
 
-  const goalModelLabel = useMemo(() => labelForModelRef(goalModel), [goalModel]);
+  const availableModels: ModelEntry[] = useMemo(
+    () => availableModelsForProviders(configuredProviders, openRouterModels),
+    [configuredProviders, openRouterModels],
+  );
+
+  const selectedEntry = useMemo(
+    () => availableModels.find((m) => m.value === selectedModelId) ?? null,
+    [availableModels, selectedModelId],
+  );
+
+  const defaultGoalLabel = useMemo(
+    () => labelForModelRef(defaultGoalModel),
+    [defaultGoalModel],
+  );
 
   // Auto-update the target when the user picks a different source, but
   // only if the user hasn't manually edited the target yet (compare it
@@ -154,10 +188,22 @@ export function MigrationDialog({
         setBusy(false);
         return;
       }
+      // Build the ModelRef the parent will use to override the goal-mode
+      // model on the freshly-created conversation. We only pass it when
+      // the user picked something other than the current default.
+      let model: ModelRef | undefined;
+      let thinking: ThinkingLevel | undefined;
+      if (selectedEntry) {
+        const baseRef = modelRefFromId(selectedEntry.value);
+        thinking = selectedEntry.defaultThinking;
+        model = modelRefWithThinking(baseRef, thinking);
+      }
       onConfirm({
         sourceWindows: result.sourceWindows,
         targetWindows: result.targetWindows,
         prompt: result.prompt,
+        model,
+        thinking,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -242,24 +288,46 @@ export function MigrationDialog({
           )}
         </div>
 
-        {goalModelLabel && (
-          <div
-            className="migrate__model"
-            role="note"
-            title="Switch the goal-mode model from the chat model picker once the workspace is open."
-          >
+        <div className="migrate__field">
+          <label htmlFor="migrate-model">
             <Icon
               icon="solar:cpu-bolt-linear"
-              width={14}
-              height={14}
+              width={13}
+              height={13}
               aria-hidden="true"
-            />
-            <span>
-              Run by <strong>{goalModelLabel}</strong>
-              <span className="migrate__model-hint"> (Goal mode)</span>
-            </span>
-          </div>
-        )}
+            />{" "}
+            Migration agent model
+          </label>
+          {availableModels.length > 0 ? (
+            <select
+              id="migrate-model"
+              className="migrate__input migrate__select"
+              value={selectedModelId}
+              onChange={(event) => setSelectedModelId(event.target.value)}
+              disabled={busy}
+            >
+              {availableModels.map((entry) => (
+                <option key={entry.value} value={entry.value}>
+                  {entry.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="migrate__hint migrate__hint--warn">
+              No model providers configured. Open Settings and add an API
+              key before starting a migration.
+            </p>
+          )}
+          <p className="migrate__hint">
+            Runs in Goal mode.
+            {defaultGoalModel &&
+            defaultGoalLabel &&
+            selectedEntry?.value !== modelIdFromRef(defaultGoalModel)
+              ? ` Workspace default: ${defaultGoalLabel}.`
+              : ""}
+          </p>
+        </div>
+
 
         {overwriteAck && (
           <label className="migrate__overwrite">
@@ -289,7 +357,7 @@ export function MigrationDialog({
             type="button"
             className="migrate__btn migrate__btn--primary"
             onClick={() => void submit()}
-            disabled={busy || !source || !target}
+            disabled={busy || !source || !target || availableModels.length === 0}
           >
             {busy ? "Preparing…" : "Start migration"}
           </button>
