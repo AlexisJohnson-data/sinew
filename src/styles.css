@@ -6982,42 +6982,35 @@ textarea {
   border-color: var(--accent-dim);
 }
 
-/* Whole-message copy button on assistant text bubbles. Hidden until
-   hover so it doesn't crowd quiet messages, sits in the top-right
-   corner mirroring the code-block one. */
-.msg--copyable {
-  position: relative;
+/* Bottom-of-message action row on assistant text bubbles (matches the
+   Claude.ai chat affordance row). Discreet, always visible, recognisable
+   by the stacked-square copy glyph. */
+.msg__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
 }
-.msg__copy {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 1;
+.msg__action {
   appearance: none;
-  border: 1px solid var(--line-strong);
-  background: var(--bg-3);
-  color: var(--text-2);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  width: 26px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 6px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.msg--copyable:hover .msg__copy,
-.msg__copy:focus-visible {
-  opacity: 1;
+.msg__action:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
 }
-.msg__copy:hover {
-  background: var(--bg-4);
-  color: var(--text-0);
-}
-.msg__copy[data-copied="true"] {
-  opacity: 1;
+.msg__action[data-copied="true"] {
   color: var(--accent-hi);
-  border-color: var(--accent-dim);
 }
 .mermaid-diagram {
   box-sizing: border-box;

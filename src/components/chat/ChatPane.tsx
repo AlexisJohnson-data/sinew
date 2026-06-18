@@ -6240,11 +6240,11 @@ function BlockView({
       );
     case "assistant-text":
       return (
-        <div className="msg msg--copyable" data-role="assistant">
-          <MessageCopyButton text={block.text} />
+        <div className="msg" data-role="assistant">
           <div className="msg__body">
             <Markdown text={block.text} onOpenFile={onOpenFile} />
           </div>
+          <MessageCopyButton text={block.text} />
         </div>
       );
     case "compaction-summary":

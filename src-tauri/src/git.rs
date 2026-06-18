@@ -861,6 +861,10 @@ fn executable_works(path: &Path) -> bool {
 fn repo_root(path: &Path) -> Result<PathBuf> {
     let output = git_checked(path, &["rev-parse", "--show-toplevel"])?;
     let raw = output.stdout.trim();
+    eprintln!(
+        "[sinew::git] repo_root input={:?} rev-parse-out={:?}",
+        path, raw
+    );
     if raw.is_empty() {
         anyhow::bail!("unable to locate git repository root");
     }
@@ -872,7 +876,9 @@ fn repo_root(path: &Path) -> Result<PathBuf> {
     // UNC so the rest of the snapshot stays on the wsl.exe code path.
     #[cfg(windows)]
     if let Some(unc) = wsl_linux_path_to_unc(path, raw) {
-        return Ok(canonical_or_original(&PathBuf::from(unc)));
+        let canon = canonical_or_original(&PathBuf::from(&unc));
+        eprintln!("[sinew::git] repo_root translated unc={:?} canon={:?}", unc, canon);
+        return Ok(canon);
     }
     let path = PathBuf::from(raw);
     Ok(canonical_or_original(&path))
@@ -1435,7 +1441,12 @@ fn run_checked(program: &str, cwd: Option<&Path>, args: &[String]) -> Result<Git
     #[cfg(windows)]
     if program == "git" {
         if let Some(cwd_path) = cwd {
-            if sinew_app::path_targets_wsl_filesystem(cwd_path) {
+            let routes = sinew_app::path_targets_wsl_filesystem(cwd_path);
+            eprintln!(
+                "[sinew::git] run_checked git cwd={:?} routes_wsl={} args={:?}",
+                cwd_path, routes, args
+            );
+            if routes {
                 let output = run_git_through_wsl(cwd_path, args)?;
                 return if output.success {
                     Ok(output)

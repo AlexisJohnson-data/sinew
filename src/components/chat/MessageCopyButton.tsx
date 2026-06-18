@@ -1,12 +1,14 @@
 import { useState } from "react";
+import { Icon } from "@iconify/react";
 
 /**
- * Small "Copy" button overlaid on assistant messages. Mirrors the
- * code-block copy UX (transient "Copied!" feedback, silent failure on
- * unfocused-document clipboard errors) but for the whole message text.
+ * Small "Copy" affordance shown at the bottom of an assistant message
+ * (the same way Claude.ai / Claude Code surface it). Always visible
+ * but muted — clicking copies the raw markdown text and shows a
+ * transient "Copied" tick.
  *
- * Renders a positioned button — the parent must set
- * `position: relative` so the absolute placement lands correctly.
+ * The icon is a stacked-square (`solar:copy-linear`) so the button is
+ * recognisable without a label.
  */
 export function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -27,15 +29,22 @@ export function MessageCopyButton({ text }: { text: string }) {
   };
 
   return (
-    <button
-      type="button"
-      className="msg__copy"
-      onClick={copy}
-      title={copied ? "Copied!" : "Copy message"}
-      aria-label="Copy message"
-      data-copied={copied ? "true" : "false"}
-    >
-      {copied ? "Copied!" : "Copy"}
-    </button>
+    <div className="msg__actions">
+      <button
+        type="button"
+        className="msg__action"
+        onClick={copy}
+        title={copied ? "Copied" : "Copy message"}
+        aria-label="Copy message"
+        data-copied={copied ? "true" : "false"}
+      >
+        <Icon
+          icon={copied ? "solar:check-read-linear" : "solar:copy-linear"}
+          width={14}
+          height={14}
+          aria-hidden="true"
+        />
+      </button>
+    </div>
   );
 }
