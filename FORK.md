@@ -44,6 +44,7 @@ daily use.
 ## Feature index
 
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
+- [Git panel routes through WSL on WSL workspaces](#git-panel-routes-through-wsl-on-wsl-workspaces)
 - [Smart Auto shell preference](#smart-auto-shell-preference)
 - [Windows → WSL migration agent](#windows--wsl-migration-agent)
 - [Migration agent model picker](#migration-agent-model-picker)
@@ -75,6 +76,31 @@ Under the hood:
   translate verbatim paths).
 - Default WSL distribution + login shell, so your NVM / asdf / aliases
   load like in a normal `wsl` session.
+
+### Git panel routes through WSL on WSL workspaces
+
+Vanilla Sinew shells out to Windows-native `git.exe` for the Git
+panel. On `\\wsl$\…` workspaces that trips the CVE-2022-24765
+"dubious ownership" check on every call (Linux UID ≠ Windows user),
+so the panel shows **"Not a Git repository"** for a perfectly valid
+repo. Every user would have to manually run:
+
+```powershell
+git config --global --add safe.directory '%(prefix)///wsl$/Ubuntu/home/<you>/projects/<repo>'
+```
+
+…before the panel works.
+
+This fork sidesteps the whole problem: at the `run_checked` /
+`run_output` boundary in `src-tauri/src/git.rs`, any git invocation
+on a workspace that `sinew_app::path_targets_wsl_filesystem` flags
+gets routed through `wsl.exe -- git <args>` with the workspace path
+as the working directory. `wsl.exe` translates the cwd to the native
+Linux path automatically, git runs inside Linux, sees a UID-matching
+repo, and works normally — no user config, no security relaxation.
+
+`C:\` / `D:\` workspaces still use native `git.exe` — only WSL paths
+are routed through `wsl.exe`. Mirrors the smart-shell pattern.
 
 ### Smart Auto shell preference
 
