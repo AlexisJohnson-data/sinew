@@ -53,7 +53,7 @@ daily use.
 - [Chat UX: iMessage bubbles + code-block copy](#chat-ux-imessage-bubbles--code-block-copy)
 - [Skills: thematic grouping, accordion, "Enable/Disable all"](#skills-thematic-grouping-accordion-enabledisable-all)
 - [Terminal: smart Ctrl+C copy / Ctrl+V paste](#terminal-smart-ctrlc-copy--ctrlv-paste)
-- [Welcome screen: Settings entry, migration entry](#welcome-screen-settings-entry-migration-entry)
+- [Welcome screen: shell picker, Settings entry, migration entry](#welcome-screen-shell-picker-settings-entry-migration-entry)
 - [Open maximized + centered on Windows](#open-maximized--centered-on-windows)
 
 ---
@@ -78,7 +78,7 @@ Under the hood:
 
 ### Smart Auto shell preference
 
-When the shell preference is set to `Auto`:
+`Auto` is the default for fresh installs. When it's active:
 
 - Workspace path starts with `\\wsl$\…` / `\\wsl.localhost\…` →
   **WSL**.
@@ -89,6 +89,12 @@ You no longer have to toggle the global shell when switching between a
 Windows-native project and a WSL one. The interactive terminal and the
 agent's `bash` tool resolve `Auto` consistently — same shell, same
 working directory.
+
+The preference can be flipped from two places: the inline picker on
+the Welcome screen (right rail) or **Settings → Tools → Terminal &
+shell**. Both surfaces expose the same three explicit options
+(`Auto` / `PowerShell` / `WSL`) so there's no ambiguity about what
+each one means.
 
 Code: `terminal.rs::resolve_shell_preference()`,
 `bash.rs::set_active_shell_for_workspace()`,
@@ -224,16 +230,30 @@ bucket.
 Implemented in the xterm.js shell binding. Avoids the usual "I tried
 to copy but I killed the process" Windows-terminal trap.
 
-### Welcome screen: Settings entry, migration entry
+### Welcome screen: shell picker, Settings entry, migration entry
+
+A first-time user opens Sinew and has to know how to wire it before
+they even touch a project. The Welcome page surfaces three things:
 
 - A small **gear** in the top-left corner (away from the close
   button) opens Settings in a separate window. Lets you configure API
   keys / providers before opening any workspace.
-- A secondary CTA *"Migrate a Windows project to WSL"* below the main
-  *"Open a folder"* button (Windows only).
+- A **Terminal shell picker** (Windows only) in the right rail with
+  three explicit options — **Auto** / **PowerShell** / **WSL** — and
+  a hint that explains, in plain English, what each mode does
+  (including the "WSL on /mnt/c is slow" trap). Defaults to Auto.
+- A **Migrate to WSL** CTA in the same rail. Click → MigrationDialog.
+
+The whole page fits on one screen now: title + Open folder + recents
+in the main column, the two secondary actions in a sticky right rail
+(880px stage on Windows, single 520px column elsewhere).
 
 Code: `src/components/Welcome.tsx` +
-`src/lib/ipc.ts::openSecondaryWindow`.
+`src/lib/ipc.ts::openSecondaryWindow` / `getShellPreference` /
+`setShellPreference`. Backend: `get_shell_preference` /
+`set_shell_preference` Tauri commands in
+`src-tauri/src/conversations.rs` — workspace-independent so the
+picker is usable before any folder is open.
 
 ### Open maximized + centered on Windows
 
