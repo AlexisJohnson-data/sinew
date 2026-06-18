@@ -340,6 +340,11 @@ function TerminalSurface({
         return true;
       }
       if (event.key === "v" || event.key === "V") {
+        // Stop the browser's default Ctrl+V behaviour so the textarea
+        // backing xterm doesn't also fire its native `paste` event —
+        // otherwise our manual `terminal.paste(text)` and the native
+        // path both run and the clipboard content is pasted twice.
+        event.preventDefault();
         navigator.clipboard
           .readText()
           .then((text) => {
