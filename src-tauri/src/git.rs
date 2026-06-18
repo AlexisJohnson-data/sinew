@@ -864,8 +864,58 @@ fn repo_root(path: &Path) -> Result<PathBuf> {
     if raw.is_empty() {
         anyhow::bail!("unable to locate git repository root");
     }
+    // When routed through wsl.exe, git returned a Linux-style path
+    // (`/home/alexi/projects/foo`). All downstream git calls would
+    // then fail their wsl-routing detection (`path_targets_wsl_filesystem`
+    // doesn't recognise Linux paths) and silently fall back to native
+    // git.exe with an invalid cwd. Convert back to a `\\wsl$\<distro>\…`
+    // UNC so the rest of the snapshot stays on the wsl.exe code path.
+    #[cfg(windows)]
+    if let Some(unc) = wsl_linux_path_to_unc(path, raw) {
+        return Ok(canonical_or_original(&PathBuf::from(unc)));
+    }
     let path = PathBuf::from(raw);
     Ok(canonical_or_original(&path))
+}
+
+/// Given the original Windows workspace path (still in `\\wsl$\<distro>\…`
+/// form) and a Linux path that `git --show-toplevel` returned from inside
+/// WSL, rebuild a UNC path pointing at the same place. Returns `None`
+/// when the inputs don't look like a WSL→Linux pair, so callers fall
+/// back to their default handling.
+#[cfg(windows)]
+fn wsl_linux_path_to_unc(original_windows: &Path, linux_path: &str) -> Option<String> {
+    if !linux_path.starts_with('/') {
+        return None;
+    }
+    let text = original_windows.to_string_lossy();
+    // Tolerate the verbatim and non-verbatim spellings.
+    let (prefix, after_prefix) = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        (r"\\", rest)
+    } else if let Some(rest) = text.strip_prefix(r"\\") {
+        (r"\\", rest)
+    } else {
+        return None;
+    };
+    // after_prefix is something like `wsl$\Ubuntu\home\...` or
+    // `wsl.localhost\Ubuntu\home\...`. We need the host segment +
+    // the distro segment that follow.
+    let mut parts = after_prefix.splitn(3, '\\');
+    let host = parts.next()?;
+    let host_lower = host.to_ascii_lowercase();
+    if host_lower != "wsl$" && host_lower != "wsl.localhost" {
+        return None;
+    }
+    let distro = parts.next()?;
+    if distro.is_empty() {
+        return None;
+    }
+    let rest = linux_path.trim_start_matches('/').replace('/', "\\");
+    if rest.is_empty() {
+        Some(format!(r"{prefix}{host}\{distro}"))
+    } else {
+        Some(format!(r"{prefix}{host}\{distro}\{rest}"))
+    }
 }
 
 fn require_repo_root(path: &Path) -> Result<PathBuf> {
