@@ -1379,6 +1379,23 @@ fn git_output(repo: &Path, args: &[&str]) -> Result<GitCommandOutput> {
 }
 
 fn run_checked(program: &str, cwd: Option<&Path>, args: &[String]) -> Result<GitCommandOutput> {
+    // If we're going to route git through `wsl.exe`, the Windows-side
+    // `git.exe` lookup is irrelevant — skip it entirely so projects on
+    // machines without Windows git installed still work.
+    #[cfg(windows)]
+    if program == "git" {
+        if let Some(cwd_path) = cwd {
+            if sinew_app::path_targets_wsl_filesystem(cwd_path) {
+                let output = run_git_through_wsl(cwd_path, args)?;
+                return if output.success {
+                    Ok(output)
+                } else {
+                    let owned = args.to_vec();
+                    anyhow::bail!(format_command_error("git", &owned, &output))
+                };
+            }
+        }
+    }
     let path = resolve_executable(program)
         .ok_or_else(|| anyhow::anyhow!("unable to find executable '{program}'"))?;
     run_checked_with_program(&path, program, cwd, args)
@@ -1399,6 +1416,16 @@ fn run_checked_with_program(
 }
 
 fn run_output(program: &str, cwd: Option<&Path>, args: &[String]) -> Result<GitCommandOutput> {
+    // Same WSL fast-path as `run_checked`: skip the Windows-side git
+    // lookup when we're going to call wsl.exe anyway.
+    #[cfg(windows)]
+    if program == "git" {
+        if let Some(cwd_path) = cwd {
+            if sinew_app::path_targets_wsl_filesystem(cwd_path) {
+                return run_git_through_wsl(cwd_path, args);
+            }
+        }
+    }
     let path = resolve_executable(program)
         .ok_or_else(|| anyhow::anyhow!("unable to find executable '{program}'"))?;
     run_output_with_program(&path, program, cwd, args)
@@ -1427,6 +1454,31 @@ fn run_output_with_program(
     let output = command
         .output()
         .with_context(|| format!("unable to launch {program_label}"))?;
+    Ok(GitCommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        success: output.status.success(),
+    })
+}
+
+/// Spawn `wsl.exe -- git <args>` with the workspace root as the working
+/// directory. `wsl.exe` translates the `\\wsl$\<distro>\…` cwd into a
+/// native Linux path on its own (after we strip the extended-length
+/// `\\?\UNC\` prefix), so we don't need to pass `git -C`.
+#[cfg(windows)]
+fn run_git_through_wsl(cwd: &Path, args: &[String]) -> Result<GitCommandOutput> {
+    let mut command = Command::new("wsl.exe");
+    hide_windows_console(&mut command);
+    command.arg("--").arg("git");
+    for arg in args {
+        command.arg(OsStr::new(arg));
+    }
+    command.current_dir(sinew_app::wsl_working_directory(cwd));
+    command.stdin(Stdio::null());
+    hide_subprocess_console(&mut command);
+    let output = command
+        .output()
+        .with_context(|| "unable to launch wsl.exe for git")?;
     Ok(GitCommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
