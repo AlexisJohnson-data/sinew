@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
+import { labelForModelRef } from "../lib/models";
+import type { ModelRef } from "../types";
 
 type Props = {
   open: boolean;
@@ -54,6 +56,10 @@ export function MigrationDialog({
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [overwriteAck, setOverwriteAck] = useState(false);
+  // Goal mode model used by the migration agent. Fetched lazily so the
+  // user knows which LLM is about to do the work — especially important
+  // on first launch, before they've opened any workspace.
+  const [goalModel, setGoalModel] = useState<ModelRef | null>(null);
   const sourceRef = useRef<HTMLInputElement>(null);
 
   // Reset every time the dialog (re)opens.
@@ -72,6 +78,26 @@ export function MigrationDialog({
     // Focus the source field if it's empty so the user can paste / pick.
     if (!initialSourcePath) sourceRef.current?.focus();
   }, [open, initialSourcePath, defaultTargetParent]);
+
+  // Fetch the global default goal-mode model when the dialog opens.
+  // Failures stay silent — we just hide the badge.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void api
+      .listDefaultModeModelSettings()
+      .then((settings) => {
+        if (!cancelled) setGoalModel(settings.goal ?? settings.act ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setGoalModel(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const goalModelLabel = useMemo(() => labelForModelRef(goalModel), [goalModel]);
 
   // Auto-update the target when the user picks a different source, but
   // only if the user hasn't manually edited the target yet (compare it
@@ -215,6 +241,23 @@ export function MigrationDialog({
             </p>
           )}
         </div>
+
+        {goalModelLabel && (
+          <div className="migrate__model" role="note">
+            <Icon
+              icon="solar:cpu-bolt-linear"
+              width={14}
+              height={14}
+              aria-hidden="true"
+            />
+            <span>
+              Run by <strong>{goalModelLabel}</strong>
+              <span className="migrate__model-hint">
+                {" "}— Goal-mode model, change in Settings.
+              </span>
+            </span>
+          </div>
+        )}
 
         {overwriteAck && (
           <label className="migrate__overwrite">

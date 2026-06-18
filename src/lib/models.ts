@@ -240,6 +240,21 @@ export function modelIdFromRef(model: ModelRef | null | undefined): ModelId {
   return MODELS[0].value;
 }
 
+/// Human-readable label for a `ModelRef` — e.g. `"Opus 4.7"` for a
+/// registered Anthropic model, or `"Anthropic claude-foo"` as a fallback
+/// when the exact id isn't in our catalog (custom OpenRouter slugs, future
+/// models, etc.). Returns `null` when no model is provided so callers can
+/// render their own placeholder.
+export function labelForModelRef(model: ModelRef | null | undefined): string | null {
+  if (!model?.provider || !model?.name) return null;
+  const id = modelIdFromRef(model);
+  const entry = MODELS.find((m) => m.value === id);
+  if (entry) return entry.label;
+  const providerLabel =
+    PROVIDERS.find((p) => p.value === model.provider)?.label ?? model.provider;
+  return `${providerLabel} ${model.name}`;
+}
+
 export function modelRefFromId(model: ModelId): ModelRef {
   const separator = model.indexOf(":");
   if (separator < 0) return { provider: "anthropic", name: model };

@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "@iconify/react";
 import { loadRecents } from "../lib/recents";
 import { api } from "../lib/ipc";
+import { labelForModelRef } from "../lib/models";
 import { setPendingMigration } from "../lib/pendingMigration";
 import type {
   ActiveTurnSummary,
   ActiveTurnsChangedPayload,
+  ModeModelSettings,
   RecentWorkspace,
 } from "../types";
 import { MigrationDialog } from "./MigrationDialog";
@@ -38,10 +40,38 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     () => new Set(),
   );
   const [migrateOpen, setMigrateOpen] = useState(false);
+  // Default mode/model assignment surfaced as a footer hint — so the user
+  // (especially on first launch) knows which LLM is going to handle the
+  // turn before they pick a workspace or trigger a migration.
+  const [modeModels, setModeModels] = useState<ModeModelSettings | null>(null);
 
   useEffect(() => {
     setRecents(loadRecents());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listDefaultModeModelSettings()
+      .then((settings) => {
+        if (!cancelled) setModeModels(settings);
+      })
+      .catch(() => {
+        if (!cancelled) setModeModels(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const modelLabels = useMemo(() => {
+    if (!modeModels) return null;
+    const act = labelForModelRef(modeModels.act);
+    const plan = labelForModelRef(modeModels.plan);
+    const goal = labelForModelRef(modeModels.goal);
+    const unique = Array.from(new Set([act, plan, goal].filter(Boolean))) as string[];
+    return { act, goal, unique };
+  }, [modeModels]);
 
   // Surface running agent turns on the recents list. We seed from
   // `list_active_turns` (so the loader is correct the moment Welcome paints)
@@ -169,6 +199,28 @@ export function Welcome({ onPick, error, deriveName }: Props) {
 
         {error && (
           <div className="welcome__error">{error}</div>
+        )}
+
+        {modelLabels && modelLabels.unique.length > 0 && (
+          <div className="welcome__model" role="note">
+            <Icon
+              icon="solar:cpu-bolt-linear"
+              width={13}
+              height={13}
+              aria-hidden="true"
+            />
+            <span>
+              {modelLabels.unique.length === 1 ? (
+                <>Default model: <strong>{modelLabels.unique[0]}</strong></>
+              ) : (
+                <>
+                  Models — Act <strong>{modelLabels.act}</strong> · Goal{" "}
+                  <strong>{modelLabels.goal}</strong>
+                </>
+              )}
+              <span className="welcome__model-hint"> · Change in Settings</span>
+            </span>
+          </div>
         )}
 
         <MigrationDialog

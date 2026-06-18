@@ -201,6 +201,20 @@ pub(super) async fn list_mcp_settings(
     state.store.load_mcp_settings().map_err(error_to_string)
 }
 
+/// Return the global default mode/model assignment without requiring a
+/// workspace to be open. Used by Welcome-screen flows (e.g. the migration
+/// dialog) so the user can see which model will run an upcoming agentic
+/// turn before they pick a workspace.
+#[tauri::command]
+pub(super) async fn list_default_mode_model_settings(
+    state: State<'_, DesktopState>,
+) -> std::result::Result<sinew_app::ModeModelSettings, String> {
+    state
+        .store
+        .load_mode_model_settings(&state.default_model)
+        .map_err(error_to_string)
+}
+
 #[tauri::command]
 pub(super) async fn save_mcp_settings(
     state: State<'_, DesktopState>,

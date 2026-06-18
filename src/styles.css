@@ -393,6 +393,28 @@ textarea {
   letter-spacing: -0.005em;
 }
 
+.welcome__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: -0.005em;
+}
+.welcome__model strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.welcome__model-hint {
+  color: var(--text-3);
+}
+
 /* ---- recent section ------------------------------------------- */
 .welcome__section {
   display: flex;
@@ -6555,6 +6577,26 @@ textarea {
   font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-1);
+}
+.migrate__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--r-med);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--text-2);
+  align-self: flex-start;
+}
+.migrate__model strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.migrate__model-hint {
+  color: var(--text-3);
 }
 .migrate__error {
   font-family: var(--font-ui);

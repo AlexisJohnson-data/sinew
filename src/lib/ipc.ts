@@ -383,6 +383,9 @@ export const api = {
   listMcpSettings() {
     return invoke<McpSettings>("list_mcp_settings");
   },
+  listDefaultModeModelSettings() {
+    return invoke<ModeModelSettings>("list_default_mode_model_settings");
+  },
   saveMcpSettings(settings: McpSettings) {
     return invoke<McpSettings>("save_mcp_settings", {
       input: { settings },
