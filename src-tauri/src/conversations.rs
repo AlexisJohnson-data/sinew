@@ -233,6 +233,7 @@ pub(super) async fn get_shell_preference(
 /// catalog flow) and apply it process-wide so the next bash-tool turn
 /// and any newly spawned interactive terminal honor it immediately.
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct SetShellPreferenceInput {
     pub shell_preference: sinew_app::ShellPreference,
 }
