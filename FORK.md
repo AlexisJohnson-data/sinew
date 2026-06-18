@@ -222,13 +222,17 @@ Code: `src-tauri/src/platform.rs::create_secondary_window`,
 `src/components/Workspace.tsx` (the `editorShellVisible` flag and the
 `openSettings`/`openRemote` handlers).
 
-### Chat UX: iMessage bubbles + code-block copy
+### Chat UX: iMessage bubbles + copy buttons
 
 - User messages right-align with a subtle bubble background; assistant
   messages stay left-aligned and unboxed (no more rail accent —
   upstream had a violet stripe I removed).
 - Code blocks inside chat messages get a hover-revealed **Copy**
   button, just like Claude Code itself.
+- The **whole assistant message** also gets a hover-revealed copy
+  button in the top-right corner — useful for grabbing the markdown
+  response without selecting it manually. Component:
+  `src/components/chat/MessageCopyButton.tsx`.
 - Code blocks are wrapped/highlighted via `rehype-highlight`.
 
 ### Skills: thematic grouping, accordion, "Enable/Disable all"
