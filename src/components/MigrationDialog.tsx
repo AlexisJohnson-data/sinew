@@ -243,7 +243,11 @@ export function MigrationDialog({
         </div>
 
         {goalModelLabel && (
-          <div className="migrate__model" role="note">
+          <div
+            className="migrate__model"
+            role="note"
+            title="Switch the goal-mode model from the chat model picker once the workspace is open."
+          >
             <Icon
               icon="solar:cpu-bolt-linear"
               width={14}
@@ -252,9 +256,7 @@ export function MigrationDialog({
             />
             <span>
               Run by <strong>{goalModelLabel}</strong>
-              <span className="migrate__model-hint">
-                {" "}— Goal-mode model, change in Settings.
-              </span>
+              <span className="migrate__model-hint"> (Goal mode)</span>
             </span>
           </div>
         )}

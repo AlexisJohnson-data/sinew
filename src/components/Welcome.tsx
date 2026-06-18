@@ -125,9 +125,20 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     }
   };
 
+  // Open the Settings window from Welcome (no workspace yet). The pane
+  // handles `workspacePath: undefined` gracefully — providers, MCP and
+  // skills don't need a workspace; tool/sub-agent panes show a hint.
+  const openSettingsWindow = () => {
+    void api
+      .openSecondaryWindow({ view: "settings" })
+      .catch((err) =>
+        console.error("[settings-window] failed to open", err),
+      );
+  };
+
   return (
     <div className="welcome">
-      {IS_WINDOWS && (
+      {IS_WINDOWS ? (
         /* Drag region + custom window controls for the frameless Windows
            shell. The wrapper itself is the drag handle (it owns
            `data-tauri-drag-region`); buttons inside opt out via
@@ -136,8 +147,28 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           className="welcome__titlebar"
           data-tauri-drag-region
         >
+          <button
+            type="button"
+            className="welcome__settings-btn"
+            onClick={openSettingsWindow}
+            title="Settings"
+            aria-label="Settings"
+            data-tauri-drag-region="false"
+          >
+            <Icon icon="solar:settings-linear" width={15} height={15} />
+          </button>
           <WindowControls />
         </div>
+      ) : (
+        <button
+          type="button"
+          className="welcome__settings-btn welcome__settings-btn--standalone"
+          onClick={openSettingsWindow}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <Icon icon="solar:settings-linear" width={15} height={15} />
+        </button>
       )}
       <main className="welcome__stage">
         <header className="welcome__head">
@@ -202,7 +233,11 @@ export function Welcome({ onPick, error, deriveName }: Props) {
         )}
 
         {modelLabels && modelLabels.unique.length > 0 && (
-          <div className="welcome__model" role="note">
+          <div
+            className="welcome__model"
+            role="note"
+            title="Switch models from the chat header once a workspace is open."
+          >
             <Icon
               icon="solar:cpu-bolt-linear"
               width={13}
@@ -218,7 +253,6 @@ export function Welcome({ onPick, error, deriveName }: Props) {
                   <strong>{modelLabels.goal}</strong>
                 </>
               )}
-              <span className="welcome__model-hint"> · Change in Settings</span>
             </span>
           </div>
         )}
