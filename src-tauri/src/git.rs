@@ -861,10 +861,6 @@ fn executable_works(path: &Path) -> bool {
 fn repo_root(path: &Path) -> Result<PathBuf> {
     let output = git_checked(path, &["rev-parse", "--show-toplevel"])?;
     let raw = output.stdout.trim();
-    eprintln!(
-        "[sinew::git] repo_root input={:?} rev-parse-out={:?}",
-        path, raw
-    );
     if raw.is_empty() {
         anyhow::bail!("unable to locate git repository root");
     }
@@ -876,9 +872,7 @@ fn repo_root(path: &Path) -> Result<PathBuf> {
     // UNC so the rest of the snapshot stays on the wsl.exe code path.
     #[cfg(windows)]
     if let Some(unc) = wsl_linux_path_to_unc(path, raw) {
-        let canon = canonical_or_original(&PathBuf::from(&unc));
-        eprintln!("[sinew::git] repo_root translated unc={:?} canon={:?}", unc, canon);
-        return Ok(canon);
+        return Ok(canonical_or_original(&PathBuf::from(unc)));
     }
     let path = PathBuf::from(raw);
     Ok(canonical_or_original(&path))
@@ -1441,12 +1435,7 @@ fn run_checked(program: &str, cwd: Option<&Path>, args: &[String]) -> Result<Git
     #[cfg(windows)]
     if program == "git" {
         if let Some(cwd_path) = cwd {
-            let routes = sinew_app::path_targets_wsl_filesystem(cwd_path);
-            eprintln!(
-                "[sinew::git] run_checked git cwd={:?} routes_wsl={} args={:?}",
-                cwd_path, routes, args
-            );
-            if routes {
+            if sinew_app::path_targets_wsl_filesystem(cwd_path) {
                 let output = run_git_through_wsl(cwd_path, args)?;
                 return if output.success {
                     Ok(output)
@@ -1528,40 +1517,25 @@ fn run_output_with_program(
 /// `\\?\UNC\` prefix), so we don't need to pass `git -C`.
 #[cfg(windows)]
 fn run_git_through_wsl(cwd: &Path, args: &[String]) -> Result<GitCommandOutput> {
+    // `wsl.exe --` invokes the default login shell (`bash -c "<joined args>"`)
+    // which would expand `(`, `)`, `$`, glob characters, etc. in args like
+    // `--format=%(refname:short)`. `wsl.exe --exec` execs the target binary
+    // directly with no shell in between, so every arg lands at git unchanged.
     let mut command = Command::new("wsl.exe");
     hide_windows_console(&mut command);
-    command.arg("--").arg("git");
+    command.arg("--exec").arg("git");
     for arg in args {
         command.arg(OsStr::new(arg));
     }
-    let wsl_cwd = sinew_app::wsl_working_directory(cwd);
-    command.current_dir(&wsl_cwd);
+    command.current_dir(sinew_app::wsl_working_directory(cwd));
     command.stdin(Stdio::null());
     hide_subprocess_console(&mut command);
     let output = command
         .output()
         .with_context(|| "unable to launch wsl.exe for git")?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    eprintln!(
-        "[sinew::git] wsl git args={:?} cwd={:?} exit={:?} stdout_len={} stderr_len={}",
-        args,
-        wsl_cwd,
-        output.status.code(),
-        stdout.len(),
-        stderr.len()
-    );
-    if !stdout.is_empty() {
-        let preview = stdout.chars().take(400).collect::<String>();
-        eprintln!("[sinew::git]   stdout(preview)={:?}", preview);
-    }
-    if !stderr.is_empty() {
-        let preview = stderr.chars().take(400).collect::<String>();
-        eprintln!("[sinew::git]   stderr(preview)={:?}", preview);
-    }
     Ok(GitCommandOutput {
-        stdout,
-        stderr,
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         success: output.status.success(),
     })
 }
