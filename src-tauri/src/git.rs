@@ -1534,15 +1534,34 @@ fn run_git_through_wsl(cwd: &Path, args: &[String]) -> Result<GitCommandOutput> 
     for arg in args {
         command.arg(OsStr::new(arg));
     }
-    command.current_dir(sinew_app::wsl_working_directory(cwd));
+    let wsl_cwd = sinew_app::wsl_working_directory(cwd);
+    command.current_dir(&wsl_cwd);
     command.stdin(Stdio::null());
     hide_subprocess_console(&mut command);
     let output = command
         .output()
         .with_context(|| "unable to launch wsl.exe for git")?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    eprintln!(
+        "[sinew::git] wsl git args={:?} cwd={:?} exit={:?} stdout_len={} stderr_len={}",
+        args,
+        wsl_cwd,
+        output.status.code(),
+        stdout.len(),
+        stderr.len()
+    );
+    if !stdout.is_empty() {
+        let preview = stdout.chars().take(400).collect::<String>();
+        eprintln!("[sinew::git]   stdout(preview)={:?}", preview);
+    }
+    if !stderr.is_empty() {
+        let preview = stderr.chars().take(400).collect::<String>();
+        eprintln!("[sinew::git]   stderr(preview)={:?}", preview);
+    }
     Ok(GitCommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        stdout,
+        stderr,
         success: output.status.success(),
     })
 }
