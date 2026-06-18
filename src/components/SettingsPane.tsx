@@ -2550,6 +2550,13 @@ function ToolsSection({
                   data-active={shellPreference === "auto" ? "true" : "false"}
                   onClick={() => onShellPreferenceChange("auto")}
                 >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  data-active={shellPreference === "powershell" ? "true" : "false"}
+                  onClick={() => onShellPreferenceChange("powershell")}
+                >
                   PowerShell
                 </button>
                 <button
@@ -2561,9 +2568,11 @@ function ToolsSection({
                 </button>
               </div>
               <p className="settings-pane__field-hint">
-                {shellPreference === "wsl"
-                  ? "The bash tool and the integrated terminal run inside your default WSL distribution. Requires WSL installed. Reopen the terminal after switching."
-                  : "The bash tool and the integrated terminal use PowerShell 7+ (default on Windows)."}
+                {shellPreference === "auto"
+                  ? "Sinew picks WSL when the workspace lives on the WSL filesystem (\\\\wsl$\\…) and PowerShell otherwise. Recommended."
+                  : shellPreference === "wsl"
+                    ? "Always run the bash tool and the integrated terminal inside your default WSL distribution. Even on Windows-native paths (mounted as /mnt/c) — be aware of the performance hit."
+                    : "Always use PowerShell 7+, even on workspaces that live under \\\\wsl$\\."}
               </p>
             </section>
           )}
