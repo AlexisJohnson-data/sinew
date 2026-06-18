@@ -255,9 +255,10 @@ textarea {
 }
 .welcome__settings-btn--standalone {
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  left: 8px;
   z-index: 50;
+  -webkit-app-region: no-drag;
 }
 
 .welcome__stage {

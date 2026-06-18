@@ -138,7 +138,7 @@ export function Welcome({ onPick, error, deriveName }: Props) {
 
   return (
     <div className="welcome">
-      {IS_WINDOWS ? (
+      {IS_WINDOWS && (
         /* Drag region + custom window controls for the frameless Windows
            shell. The wrapper itself is the drag handle (it owns
            `data-tauri-drag-region`); buttons inside opt out via
@@ -147,29 +147,21 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           className="welcome__titlebar"
           data-tauri-drag-region
         >
-          <button
-            type="button"
-            className="welcome__settings-btn"
-            onClick={openSettingsWindow}
-            title="Settings"
-            aria-label="Settings"
-            data-tauri-drag-region="false"
-          >
-            <Icon icon="solar:settings-linear" width={15} height={15} />
-          </button>
           <WindowControls />
         </div>
-      ) : (
-        <button
-          type="button"
-          className="welcome__settings-btn welcome__settings-btn--standalone"
-          onClick={openSettingsWindow}
-          title="Settings"
-          aria-label="Settings"
-        >
-          <Icon icon="solar:settings-linear" width={15} height={15} />
-        </button>
       )}
+      {/* Settings entry point. Pinned top-left so it's nowhere near the
+         window close button on the right. Visible on every platform. */}
+      <button
+        type="button"
+        className="welcome__settings-btn welcome__settings-btn--standalone"
+        onClick={openSettingsWindow}
+        title="Settings"
+        aria-label="Settings"
+        data-tauri-drag-region="false"
+      >
+        <Icon icon="solar:settings-linear" width={15} height={15} />
+      </button>
       <main className="welcome__stage">
         <header className="welcome__head">
           <span className="welcome__mark-dot" aria-hidden="true">
