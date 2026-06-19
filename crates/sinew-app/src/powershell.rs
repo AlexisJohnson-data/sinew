@@ -49,8 +49,84 @@ pub async fn ensure_powershell_7_executable() -> Result<PathBuf> {
     }
 
     tracing::info!("PowerShell 7+ not found; installing official PowerShell runtime");
-    let path = install_runtime_powershell().await?;
-    remember_powershell(path).context("unable to cache resolved PowerShell executable")
+    // Primary path: download the official archive from GitHub releases and
+    // extract it into our app-local cache. Most users hit this successfully
+    // and never see the alternative branches below.
+    match install_runtime_powershell().await {
+        Ok(path) => {
+            return remember_powershell(path)
+                .context("unable to cache resolved PowerShell executable");
+        }
+        Err(direct_err) => {
+            tracing::warn!(
+                "direct PowerShell download failed ({direct_err:#}); falling back to winget"
+            );
+            // Fallback A: invoke `winget install Microsoft.PowerShell` so the
+            // user gets the Microsoft-signed MSI from the Store CDN. This
+            // works on machines where an AV (Bitdefender, Avast, …) blocks
+            // raw GitHub Releases downloads but still trusts the Microsoft
+            // Store endpoint.
+            if try_install_powershell_via_winget().await {
+                if let Some(path) = find_powershell_7_executable() {
+                    return remember_powershell(path)
+                        .context("unable to cache resolved PowerShell executable");
+                }
+            }
+            // Fallback B: nothing we can do automatically. Surface a clear,
+            // actionable message instead of leaking the raw checksum URL —
+            // the user just needs one copy-paste command to recover.
+            anyhow::bail!(
+                "PowerShell 7+ is required for the Windows terminal but is not installed, \
+                 and the automatic install failed. Run this in any terminal to install it, \
+                 then restart Sinew:\n\n\
+                 \twinget install --id Microsoft.PowerShell --source winget\n\n\
+                 (original error: {direct_err:#})"
+            );
+        }
+    }
+}
+
+/// Best-effort install of PowerShell 7 via the Windows Package Manager.
+/// Returns `true` when winget reports a success; `false` for any other
+/// outcome (winget missing, install rejected, exit code != 0). Never
+/// panics — caller decides what to do next.
+async fn try_install_powershell_via_winget() -> bool {
+    use tokio::process::Command;
+    let mut cmd = Command::new("winget");
+    cmd.arg("install")
+        .arg("--id")
+        .arg("Microsoft.PowerShell")
+        .arg("--source")
+        .arg("winget")
+        .arg("--silent")
+        .arg("--accept-package-agreements")
+        .arg("--accept-source-agreements")
+        .arg("--disable-interactivity");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    match cmd.output().await {
+        Ok(output) => {
+            if output.status.success() {
+                tracing::info!("PowerShell 7 installed via winget");
+                true
+            } else {
+                tracing::warn!(
+                    "winget install Microsoft.PowerShell exited with {:?}: {}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+                false
+            }
+        }
+        Err(err) => {
+            tracing::warn!("unable to invoke winget: {err}");
+            false
+        }
+    }
 }
 
 fn remember_powershell(path: PathBuf) -> Option<PathBuf> {
