@@ -156,25 +156,31 @@ async fn default_terminal_command(
     }
 }
 
-/// Resolve the working directory passed to the terminal shell. WSL needs the
-/// plain (non extended-length) path form because `wsl.exe` cannot translate a
-/// verbatim `\\?\UNC\...` working directory; every other shell keeps the
-/// canonical workspace path unchanged.
+/// Resolve the working directory passed to the terminal shell. On Windows
+/// the workspace path Sinew hands us is canonicalised — for regular drives
+/// that is `\\?\C:\...`, for WSL it's `\\?\UNC\wsl$\...`. The
+/// extended-length verbatim prefix:
+/// * breaks `wsl.exe` (it cannot translate verbatim cwds to Linux paths),
+/// * confuses PowerShell 7 which falls back to the verbose provider syntax
+///   in its prompt (`PS Microsoft.PowerShell.Core\FileSystem::\\?\C:\...>`)
+///   and leaves the first session stuck initialising for several seconds.
+/// `wsl_working_directory` strips both forms (`\\?\UNC\` → `\\` and
+/// `\\?\` → bare), so we apply it for every Windows shell. macOS/Linux
+/// shells get the workspace path unchanged.
 fn terminal_working_directory(
     shell_preference: sinew_app::ShellPreference,
     workspace_root: &std::path::Path,
 ) -> std::ffi::OsString {
     #[cfg(windows)]
     {
-        if matches!(shell_preference, sinew_app::ShellPreference::Wsl) {
-            return sinew_app::wsl_working_directory(workspace_root);
-        }
+        let _ = shell_preference;
+        return sinew_app::wsl_working_directory(workspace_root);
     }
     #[cfg(not(windows))]
     {
         let _ = shell_preference;
+        workspace_root.as_os_str().to_os_string()
     }
-    workspace_root.as_os_str().to_os_string()
 }
 
 #[tauri::command]

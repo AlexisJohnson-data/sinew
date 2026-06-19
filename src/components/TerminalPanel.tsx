@@ -413,7 +413,13 @@ function TerminalSurface({
       }),
       terminal.onTitleChange((title) => {
         const trimmed = title.trim();
-        if (trimmed) onTitle(trimmed);
+        if (!trimmed) return;
+        // PowerShell briefly sets the window title to the full path of its
+        // own pwsh.exe binary while the profile is still loading. Ignoring
+        // those keeps the tab label as the default "Terminal N" until the
+        // shell actually finishes initialising and sends a real cwd/title.
+        if (looksLikeExecutablePath(trimmed)) return;
+        onTitle(trimmed);
       }),
     ];
 
@@ -540,6 +546,18 @@ function TerminalSurface({
       // xterm's own handlers.
     />
   );
+}
+
+/// Returns true when the OSC title the shell pushed looks like a path to
+/// the shell executable itself (e.g. `C:\Program Files\PowerShell\7\pwsh.exe`)
+/// rather than a useful tab label like a cwd or branch name. We use it to
+/// suppress the noisy early titles PowerShell emits while loading the user
+/// profile.
+function looksLikeExecutablePath(title: string): boolean {
+  if (/\.(exe|cmd|bat|com)$/i.test(title)) return true;
+  if (/[A-Z]:\\Program Files/i.test(title)) return true;
+  if (/[A-Z]:\\Windows\\/i.test(title)) return true;
+  return false;
 }
 
 function createSession(index: number): TerminalSession {
