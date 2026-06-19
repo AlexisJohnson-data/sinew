@@ -260,6 +260,14 @@ textarea {
   z-index: 50;
   -webkit-app-region: no-drag;
 }
+/* Second chrome button (New Window), sits right of the settings gear. */
+.welcome__new-window-btn {
+  position: fixed;
+  top: 8px;
+  left: 44px;
+  z-index: 50;
+  -webkit-app-region: no-drag;
+}
 
 .welcome__stage {
   width: 100%;

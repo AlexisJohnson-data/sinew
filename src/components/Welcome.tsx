@@ -49,6 +49,23 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     setRecents(loadRecents());
   }, []);
 
+  // Global Ctrl/Cmd+Shift+N to spawn a new Sinew window — mirrors the
+  // accelerator the native menu would install on macOS/Linux but is
+  // required on Windows where the menu bar is absent (frameless shell).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.ctrlKey || event.metaKey;
+      if (!mod || !event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "n") return;
+      event.preventDefault();
+      void api.openNewWindow().catch((err) =>
+        console.error("[new-window] failed to open", err),
+      );
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   useEffect(() => {
     if (!IS_WINDOWS) return;
     let cancelled = false;
@@ -168,6 +185,23 @@ export function Welcome({ onPick, error, deriveName }: Props) {
         data-tauri-drag-region="false"
       >
         <Icon icon="solar:settings-linear" width={15} height={15} />
+      </button>
+      {/* New Window. Sibling of the Settings gear so it sits in the same
+         top-left chrome strip, far from the close button. Lets the user
+         run a second Sinew instance on another project in parallel. */}
+      <button
+        type="button"
+        className="welcome__settings-btn welcome__new-window-btn"
+        onClick={() => {
+          void api.openNewWindow().catch((err) =>
+            console.error("[new-window] failed to open", err),
+          );
+        }}
+        title="New window (Ctrl+Shift+N)"
+        aria-label="New window"
+        data-tauri-drag-region="false"
+      >
+        <Icon icon="solar:add-square-linear" width={15} height={15} />
       </button>
       <main className="welcome__stage" data-aside={IS_WINDOWS ? "true" : "false"}>
         <div className="welcome__main">

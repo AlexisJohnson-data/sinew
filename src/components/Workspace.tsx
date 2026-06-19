@@ -1021,6 +1021,20 @@ export function Workspace({
         event.preventDefault();
         setQuickOpenVisible(true);
       }
+      if (
+        hasPrimaryModifier &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "n"
+      ) {
+        // New Window. Sinew on Windows runs frameless without a native
+        // menu bar, so the Tauri-side `CmdOrCtrl+Shift+N` accelerator is
+        // never wired — handle it here so the shortcut works everywhere.
+        event.preventDefault();
+        void api.openNewWindow().catch((err) =>
+          console.error("[new-window] failed to open", err),
+        );
+      }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
