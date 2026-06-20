@@ -47,6 +47,7 @@ daily use.
 - [Git panel routes through WSL on WSL workspaces](#git-panel-routes-through-wsl-on-wsl-workspaces)
 - [Smart Auto shell preference](#smart-auto-shell-preference)
 - [Windows → WSL migration agent](#windows--wsl-migration-agent)
+- [MCP import from Claude Code / Codex](#mcp-import-from-claude-code--codex)
 - [Migration agent model picker](#migration-agent-model-picker)
 - [Quick Open (Ctrl+P) and Chat search (Ctrl+F)](#quick-open-ctrlp-and-chat-search-ctrlf)
 - [Workflow notifications](#workflow-notifications)
@@ -161,6 +162,32 @@ Code: `src-tauri/src/workspace.rs::prepare_migration_target`,
 `crates/sinew-app/src/store.rs::MIGRATION_AGENT_PROMPT`,
 `src/components/MigrationDialog.tsx`,
 `src/lib/pendingMigration.ts` (cross-component handoff).
+
+### MCP import from Claude Code / Codex
+
+The MCP tab used to start empty for every new install. If you already
+ran Claude Code or Codex CLI, you had a perfectly good list of MCP
+servers configured there and had to retype each one to use them
+inside Sinew.
+
+An **Import…** button in **Settings → MCP servers** now opens a file
+picker on `.json` / `.toml`, auto-detects the format from the
+extension, and merges the servers into Sinew's settings (duplicates
+by name are skipped, so re-running it is harmless):
+
+- **Claude Code / Claude Desktop** — pick `~/.claude.json` (Windows:
+  `C:\Users\<you>\.claude.json`; WSL: `\\wsl$\Ubuntu\home\<you>\.claude.json`).
+  Reads the top-level `mcpServers` object.
+- **Codex CLI** — pick `~/.codex/config.toml`. Reads
+  `[mcp_servers.<name>]` sections (older `[mcp.<name>]` also accepted).
+
+The MCP probe re-runs automatically after import so newly-added
+servers light up green/red on the spot.
+
+Code: `crates/sinew-app/src/mcp.rs::{parse_mcp_import_file,
+merge_imported_mcp_servers}`, Tauri command
+`import_mcp_servers_command` in `src-tauri/src/conversations.rs`,
+UI in `src/components/SettingsPane.tsx::McpSection`.
 
 ### Migration agent model picker
 
