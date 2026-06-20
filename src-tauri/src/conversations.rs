@@ -300,12 +300,12 @@ pub(super) async fn import_mcp_servers_command(
     let current = state.store.load_mcp_settings().map_err(error_to_string)?;
     let (merged, result) =
         sinew_app::merge_imported_mcp_servers(&current, imported, path.display().to_string());
-    let saved = state
+    state
         .store
         .save_mcp_settings(&merged)
         .map_err(error_to_string)?;
     Ok(ImportMcpServersOutput {
-        settings: saved,
+        settings: merged,
         result,
     })
 }
