@@ -3,6 +3,7 @@ import Editor, { type OnMount } from "@monaco-editor/react";
 import { Icon } from "@iconify/react";
 import { Wrench } from "lucide-react";
 import { emit } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
 import { canonicalToolName } from "../lib/tools";
 import { Markdown } from "./chat/Markdown";
@@ -915,6 +916,60 @@ export function SettingsPane({ workspacePath }: Props) {
     }
   }, [jsonText]);
 
+  /// Import MCP server definitions from another LLM CLI's config file.
+  /// Opens a file picker (defaults filtered to .json + .toml), detects
+  /// the format from the extension, merges, persists, and re-probes so
+  /// the freshly-added servers light up immediately. Skips duplicates
+  /// by name so re-importing the same file is harmless.
+  const importMcpFromFile = useCallback(async () => {
+    try {
+      const selected = await openDialog({
+        title: "Pick a Claude Code or Codex MCP config to import",
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "MCP config", extensions: ["json", "toml"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected !== "string") return;
+      const lower = selected.toLowerCase();
+      const format: "claude" | "codex" = lower.endsWith(".toml")
+        ? "codex"
+        : "claude";
+      setSaving(true);
+      setStatus(null);
+      const { settings: saved, result } = await api.importMcpServers(
+        selected,
+        format,
+      );
+      const normalized = normalizeSettings(saved);
+      const nextJson = settingsToJson(normalized);
+      setSettings(normalized);
+      setSavedJson(nextJson);
+      setJsonText(nextJson);
+      setParseError(null);
+
+      const nextProbes = await api.probeMcpTools();
+      setProbes(nextProbes);
+
+      const importedCount = result.imported.length;
+      const skippedCount = result.skipped.length;
+      const parts: string[] = [];
+      if (importedCount > 0)
+        parts.push(`${importedCount} imported`);
+      if (skippedCount > 0)
+        parts.push(`${skippedCount} skipped (already present)`);
+      if (parts.length === 0) parts.push("No MCP servers found in file");
+      setStatus(parts.join(" · "));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatus(`Import failed: ${message}`);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   const toggleEnabled = useCallback(
     async (id: string) => {
       if (parseError || saving) return;
@@ -1562,6 +1617,7 @@ export function SettingsPane({ workspacePath }: Props) {
             knownToolCounts={knownToolCounts}
             onToggleEnabled={toggleEnabled}
             onMount={handleEditorMount}
+            onImport={() => void importMcpFromFile()}
           />
         ) : section === "skills" ? (
           <SkillsSection
@@ -2747,6 +2803,7 @@ type McpSectionProps = {
   knownToolCounts: Record<string, number>;
   onToggleEnabled: (id: string) => void;
   onMount: OnMount;
+  onImport: () => void;
 };
 
 function McpSection({
@@ -2769,6 +2826,7 @@ function McpSection({
   knownToolCounts,
   onToggleEnabled,
   onMount,
+  onImport,
 }: McpSectionProps) {
   const enabledCount = servers.filter((server) => server.enabled).length;
   const failedCount = probes.filter((probe) => probe.enabled && !probe.ok).length;
@@ -2792,6 +2850,16 @@ function McpSection({
               {status}
             </span>
           )}
+          <button
+            type="button"
+            className="settings-pane__btn"
+            onClick={onImport}
+            disabled={loading || saving}
+            title="Import MCP servers from a Claude Code or Codex config file"
+          >
+            <Icon icon="solar:download-linear" width={13} height={13} />
+            <span>Import…</span>
+          </button>
           <button
             type="button"
             className="settings-pane__btn"

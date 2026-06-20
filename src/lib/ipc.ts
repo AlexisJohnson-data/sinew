@@ -400,6 +400,18 @@ export const api = {
       input: { settings },
     });
   },
+  importMcpServers(filePath: string, format: "claude" | "codex") {
+    return invoke<{
+      settings: McpSettings;
+      result: {
+        imported: { name: string }[];
+        skipped: { name: string; reason: string }[];
+        sourcePath: string;
+      };
+    }>("import_mcp_servers_command", {
+      input: { filePath, format },
+    });
+  },
   listToolSettings(workspacePath: string) {
     return invoke<ToolSettings>("list_tool_settings", {
       input: { workspacePath },

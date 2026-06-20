@@ -326,6 +326,7 @@ pub fn run() {
             conversations::set_shell_preference,
             conversations::list_mcp_settings,
             conversations::save_mcp_settings,
+            conversations::import_mcp_servers_command,
             conversations::list_tool_settings,
             conversations::save_tool_settings,
             conversations::list_sub_agent_settings,

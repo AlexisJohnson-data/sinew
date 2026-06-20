@@ -1269,3 +1269,264 @@ fn clip_output(value: String) -> String {
     clipped.push_str("\n\n[Output truncated]");
     clipped
 }
+
+/* ─────────────────────────── MCP import ────────────────────────────── */
+//
+// Import MCP server definitions from the native config files of other
+// LLM CLIs the user already runs (Claude Code, Codex). The schemas line
+// up almost 1-to-1 with `McpServerConfig` (command + args + env), so we
+// just parse, normalise and merge — duplicates by name are skipped so a
+// re-import is idempotent.
+
+#[derive(Debug, Clone, Copy)]
+pub enum McpImportFormat {
+    /// Claude Code / Claude Desktop config (JSON, top-level
+    /// `mcpServers` object — server name → { command, args, env }).
+    ClaudeJson,
+    /// Codex CLI config (TOML, sections `[mcp_servers.<name>]`).
+    CodexToml,
+}
+
+impl McpImportFormat {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "claude" | "claude-json" | "claude_json" => Ok(Self::ClaudeJson),
+            "codex" | "codex-toml" | "codex_toml" => Ok(Self::CodexToml),
+            other => bail!(
+                "unknown MCP import format `{other}` (expected `claude` or `codex`)"
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedMcpServerInfo {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedMcpServerInfo {
+    pub name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportMcpResult {
+    pub imported: Vec<ImportedMcpServerInfo>,
+    pub skipped: Vec<SkippedMcpServerInfo>,
+    pub source_path: String,
+}
+
+/// Read `path` according to `format` and return parsed
+/// `McpServerConfig` entries ready to merge. Each entry already has a
+/// freshly generated id; callers re-key/skip them by name.
+pub fn parse_mcp_import_file(
+    path: &Path,
+    format: McpImportFormat,
+) -> Result<Vec<McpServerConfig>> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("unable to read MCP import file {}", path.display()))?;
+    match format {
+        McpImportFormat::ClaudeJson => parse_claude_mcp_json(&raw),
+        McpImportFormat::CodexToml => parse_codex_mcp_toml(&raw),
+    }
+}
+
+fn parse_claude_mcp_json(raw: &str) -> Result<Vec<McpServerConfig>> {
+    // Claude Code's `~/.claude.json` is a big object with many keys; we
+    // only care about `mcpServers`. Tolerate missing/empty: return [] so
+    // the UI can say "nothing to import" instead of erroring.
+    let root: Value = serde_json::from_str(raw).context("invalid JSON in Claude config")?;
+    let servers = match root.get("mcpServers") {
+        Some(Value::Object(map)) => map.clone(),
+        Some(Value::Null) | None => return Ok(Vec::new()),
+        Some(other) => bail!(
+            "Claude config `mcpServers` must be an object, got {}",
+            value_kind(other)
+        ),
+    };
+
+    let mut out = Vec::with_capacity(servers.len());
+    for (name, value) in servers {
+        let Value::Object(entry) = value else {
+            continue;
+        };
+        let command = entry
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if command.is_empty() {
+            continue;
+        }
+        let args = entry
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let env = parse_env_object(entry.get("env"));
+        let cwd = entry
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        out.push(McpServerConfig {
+            id: generate_mcp_id(&name),
+            name,
+            command,
+            args,
+            env,
+            cwd,
+            enabled: true,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_codex_mcp_toml(raw: &str) -> Result<Vec<McpServerConfig>> {
+    // Codex CLI configs typically place MCP servers under
+    // `[mcp_servers.<name>]` (newer) or `[mcp.<name>]` (older). Try
+    // both so the user does not have to care which Codex version they
+    // are coming from.
+    let root: toml::Value = raw.parse().context("invalid TOML in Codex config")?;
+    let table = root
+        .as_table()
+        .ok_or_else(|| anyhow!("Codex config must be a top-level TOML table"))?;
+    let candidates = ["mcp_servers", "mcpServers", "mcp"];
+    let block = candidates
+        .iter()
+        .find_map(|key| table.get(*key).and_then(|v| v.as_table()))
+        .cloned()
+        .unwrap_or_default();
+    if block.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(block.len());
+    for (name, value) in block {
+        let Some(entry) = value.as_table() else {
+            continue;
+        };
+        let command = entry
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if command.is_empty() {
+            continue;
+        }
+        let args = entry
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.as_str())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let env = entry
+            .get("env")
+            .and_then(|v| v.as_table())
+            .map(|tbl| {
+                tbl.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .map(|(key, value)| McpEnvVar { key, value })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let cwd = entry
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        out.push(McpServerConfig {
+            id: generate_mcp_id(&name),
+            name,
+            command,
+            args,
+            env,
+            cwd,
+            enabled: true,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_env_object(value: Option<&Value>) -> Vec<McpEnvVar> {
+    let Some(Value::Object(map)) = value else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+        .map(|(key, value)| McpEnvVar { key, value })
+        .collect()
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn generate_mcp_id(name: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    std::time::SystemTime::now().hash(&mut hasher);
+    format!("mcp-{:x}", hasher.finish())
+}
+
+/// Merge `imported` into `current` and report what got added vs
+/// skipped. Skip rule: a server is skipped when an entry with the same
+/// (case-insensitive) name already exists — so re-importing the same
+/// file is a safe no-op.
+pub fn merge_imported_mcp_servers(
+    current: &McpSettings,
+    imported: Vec<McpServerConfig>,
+    source_path: impl Into<String>,
+) -> (McpSettings, ImportMcpResult) {
+    let mut settings = current.clone();
+    let mut result = ImportMcpResult {
+        source_path: source_path.into(),
+        ..Default::default()
+    };
+    let mut seen_names: HashSet<String> = settings
+        .servers
+        .iter()
+        .map(|server| server.name.to_ascii_lowercase())
+        .collect();
+
+    for server in imported {
+        let key = server.name.to_ascii_lowercase();
+        if seen_names.contains(&key) {
+            result.skipped.push(SkippedMcpServerInfo {
+                name: server.name,
+                reason: "already configured in Sinew".into(),
+            });
+            continue;
+        }
+        seen_names.insert(key);
+        result.imported.push(ImportedMcpServerInfo {
+            name: server.name.clone(),
+        });
+        settings.servers.push(server);
+    }
+    (settings, result)
+}

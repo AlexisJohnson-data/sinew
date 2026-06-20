@@ -39,7 +39,10 @@ pub use edit::EditFileTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use image::CreateImageTool;
-pub use mcp::{probe_mcp_servers, McpServerProbe, McpSettings, McpToolRegistry};
+pub use mcp::{
+    merge_imported_mcp_servers, parse_mcp_import_file, probe_mcp_servers, ImportMcpResult,
+    McpImportFormat, McpServerProbe, McpSettings, McpToolRegistry,
+};
 #[cfg(windows)]
 pub use powershell::{ensure_powershell_7_executable, find_powershell_7_executable};
 pub use question::QuestionTool;

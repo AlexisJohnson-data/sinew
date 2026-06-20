@@ -268,6 +268,48 @@ pub(super) async fn save_mcp_settings(
     Ok(input.settings)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ImportMcpServersInput {
+    pub file_path: String,
+    /// `claude` for a `.claude.json` (JSON) or `codex` for a Codex CLI
+    /// `config.toml`. Other values are rejected.
+    pub format: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ImportMcpServersOutput {
+    pub settings: sinew_app::McpSettings,
+    pub result: sinew_app::ImportMcpResult,
+}
+
+/// Parse the given Claude Code or Codex CLI MCP config file and merge
+/// the servers it defines into Sinew's own MCP settings (duplicates by
+/// name are skipped so a re-run is a no-op). Returns the merged
+/// settings + a summary of what was added vs skipped.
+#[tauri::command]
+pub(super) async fn import_mcp_servers_command(
+    state: State<'_, DesktopState>,
+    input: ImportMcpServersInput,
+) -> std::result::Result<ImportMcpServersOutput, String> {
+    let format = sinew_app::McpImportFormat::parse(&input.format).map_err(error_to_string)?;
+    let path = std::path::PathBuf::from(&input.file_path);
+    let imported =
+        sinew_app::parse_mcp_import_file(&path, format).map_err(error_to_string)?;
+    let current = state.store.load_mcp_settings().map_err(error_to_string)?;
+    let (merged, result) =
+        sinew_app::merge_imported_mcp_servers(&current, imported, path.display().to_string());
+    let saved = state
+        .store
+        .save_mcp_settings(&merged)
+        .map_err(error_to_string)?;
+    Ok(ImportMcpServersOutput {
+        settings: saved,
+        result,
+    })
+}
+
 #[tauri::command]
 pub(super) async fn list_tool_settings(
     state: State<'_, DesktopState>,
