@@ -6,9 +6,9 @@ use std::ffi::OsString;
 use std::os::windows::process::CommandExt;
 use std::path::Component;
 use std::process::Stdio;
-use std::sync::OnceLock;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;

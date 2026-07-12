@@ -203,7 +203,10 @@ textarea {
 .welcome {
   height: 100%;
   display: flex;
-  align-items: center;
+  /* `safe center` keeps the page centered when it fits, but falls back to
+     top alignment when the content is taller than the viewport — otherwise
+     plain `center` clips the top (title) and scroll can't reach it. */
+  align-items: safe center;
   justify-content: center;
   overflow: auto;
   background: var(--bg-0);
@@ -388,6 +391,94 @@ textarea {
 }
 .welcome__cta--secondary:active {
   background: var(--bg-3);
+}
+
+.welcome__whatsnew {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(
+    180deg,
+    var(--accent-soft),
+    color-mix(in srgb, var(--accent-soft) 30%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.welcome__whatsnew-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.welcome__whatsnew-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.welcome__whatsnew-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.welcome__whatsnew-dismiss {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 2px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.welcome__whatsnew-dismiss:hover {
+  color: var(--text-0);
+  background: var(--bg-3);
+}
+.welcome__whatsnew-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.welcome__whatsnew-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+.welcome__whatsnew-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--bg-2);
+  color: var(--accent-hi);
+}
+.welcome__whatsnew-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.welcome__whatsnew-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.welcome__whatsnew-item-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
 }
 
 .welcome__aside-cta {
@@ -601,21 +692,84 @@ textarea {
 
 .welcome__recent {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
+  align-items: stretch;
   background: var(--bg-2);
   border-radius: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition: background 140ms ease, transform 90ms ease;
+  overflow: hidden;
+  transition: background 140ms ease;
+  position: relative;
 }
 .welcome__recent:hover {
   background: var(--bg-3);
 }
-.welcome__recent:active {
-  background: var(--bg-4);
+.welcome__recent[data-pinned="true"] {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent-2-soft, #6f6aff) 22%, transparent),
+    var(--bg-2)
+  );
+}
+.welcome__recent[data-pinned="true"]:hover {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent-2-soft, #6f6aff) 32%, transparent),
+    var(--bg-3)
+  );
+}
+
+.welcome__recent-main {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+}
+.welcome__recent-main:active {
   transform: translateY(1px);
+}
+
+.welcome__recent-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.welcome__recent:hover .welcome__recent-actions,
+.welcome__recent[data-pinned="true"] .welcome__recent-actions {
+  opacity: 1;
+}
+.welcome__recent-action {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.welcome__recent-action:hover {
+  background: var(--bg-4);
+  color: var(--text-0);
+}
+.welcome__recent-action[data-active="true"] {
+  color: var(--accent-2, #6f6aff);
+}
+.welcome__recent-action--danger:hover {
+  background: color-mix(in srgb, #ef4444 22%, transparent);
+  color: #fca5a5;
 }
 
 .welcome__recent-icon {
@@ -4381,6 +4535,14 @@ textarea {
   color: var(--text-3);
 }
 
+.settings-pane__oauth-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+
 .settings-pane__tools-error {
   padding: 9px 11px;
   margin-bottom: 10px;
@@ -5812,6 +5974,35 @@ textarea {
   overflow: hidden;
 }
 
+.quote-pill {
+  position: absolute;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.12));
+  background: var(--bg-2, #1f1f23);
+  color: var(--text-1, #ededef);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transform: translateX(-100%);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.quote-pill:hover {
+  background: var(--bg-3, #2a2a30);
+  border-color: var(--accent, rgba(229, 126, 86, 0.4));
+}
+
+.quote-pill svg {
+  flex: 0 0 auto;
+}
+
 .img-preview {
   position: fixed;
   inset: 0;
@@ -6390,12 +6581,16 @@ textarea {
 .md h3 { font-size: 13px; }
 .md h4 { font-size: var(--fs-sm); }
 .md a {
-  color: var(--text-0);
+  color: var(--accent-hi);
   text-decoration: none;
-  border-bottom: 1px solid rgba(232, 233, 236, 0.32);
-  transition: border-color 150ms ease;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-hi) 45%, transparent);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
 }
-.md a:hover { border-bottom-color: var(--text-0); }
+.md a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
 .chat-file-link {
   display: inline;
   padding: 0;
@@ -6427,6 +6622,25 @@ textarea {
   border-radius: var(--r-small);
   color: var(--text-1);
   overflow-wrap: anywhere;
+}
+/* A URL written as inline `code`: keep the code-chip shape but read as a
+   clickable hyperlink (accent color + pointer). */
+.md a.md-codelink {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  background: var(--accent-soft);
+  padding: 1px 5px;
+  border-radius: var(--r-small);
+  border-bottom: none;
+  color: var(--accent-hi);
+  cursor: pointer;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: background 150ms ease, color 150ms ease;
+}
+.md a.md-codelink:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
 }
 .md pre {
   box-sizing: border-box;
@@ -7616,6 +7830,11 @@ textarea {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
+}
+
+.tool-card__images--browser {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border);
 }
 
 .tool-card__image {
@@ -9068,6 +9287,15 @@ textarea {
   color: var(--text-0);
 }
 .composer__iconbtn:active { transform: translateY(1px); }
+.composer__iconbtn[data-active="true"] {
+  background: var(--accent, #e57e56);
+  color: #fff;
+  border-color: transparent;
+}
+.composer__iconbtn[data-active="true"]:hover {
+  background: var(--accent, #e57e56);
+  filter: brightness(1.1);
+}
 .composer__iconbtn:disabled {
   cursor: not-allowed;
   opacity: 0.36;
@@ -10268,6 +10496,21 @@ textarea {
 .remote-panel__chip[data-tone="ok"] .remote-panel__chip-value { color: var(--ok); }
 
 /* ── Blocks ────────────────────────────────────────────────────────────── */
+.remote-panel__relay-url {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.remote-panel__relay-url input {
+  min-width: 0;
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+}
 .remote-panel__block {
   display: flex;
   flex-direction: column;

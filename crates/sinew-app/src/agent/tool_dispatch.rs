@@ -4,9 +4,10 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::{
-    tool_names, BashTool, CreateImageTool, EditFileTool, GlobTool, GrepTool, McpToolRegistry,
-    QuestionTool, ReadFingerprint, ReadTool, SkillTool, SubAgentTool, TeamTool, ToDoListTool,
-    TodoListState, ToolRunResult, ToolSettings, WebFetchTool, WebSearchTool, WriteFileTool,
+    tool_names, BashTool, BrowserTools, CreateImageTool, EditFileTool, GlobTool, GrepTool,
+    McpToolRegistry, QuestionTool, ReadFingerprint, ReadTool, SkillTool, SubAgentTool, TeamTool,
+    ToDoListTool, TodoListState, ToolRunResult, ToolSettings, WebFetchTool, WebSearchTool,
+    WriteFileTool,
 };
 
 use super::{cancel::TurnCancel, context::AgentMode, events::AgentEvent};
@@ -37,6 +38,7 @@ pub(super) async fn run_tool(
     question: Option<&QuestionTool>,
     web_search: &WebSearchTool,
     web_fetch: &WebFetchTool,
+    browser: &BrowserTools,
     skill: &SkillTool,
     mcp: &McpToolRegistry,
     subagents: Option<&SubAgentTool>,
@@ -97,6 +99,14 @@ pub(super) async fn run_tool(
         web_search.run(input).await
     } else if canonical_name == tool_names::WEB_FETCH {
         web_fetch.run(input).await
+    } else if name.starts_with("browser_") {
+        if mode == AgentMode::Plan {
+            return ToolRunResult::err("browser tools are unavailable in Plan mode", Vec::new());
+        }
+        if !tool_settings.browser_enabled {
+            return ToolRunResult::err("browser tools are disabled in Settings", Vec::new());
+        }
+        browser.run(name, input).await
     } else if canonical_name == tool_names::SKILL {
         skill.run(input).await
     } else if name.starts_with("subagent_") {

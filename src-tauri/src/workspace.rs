@@ -1,5 +1,63 @@
 use crate::*;
 
+const RECENT_WORKSPACES_KEY: &str = "recent_workspaces_v1";
+const RECENT_WORKSPACES_CAP: usize = 20;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RecentWorkspaceRecord {
+    pub(super) path: String,
+    pub(super) name: String,
+    pub(super) last_opened_ms: i64,
+}
+
+pub(super) fn load_recent_workspaces(store: &AppStore) -> Vec<RecentWorkspaceRecord> {
+    store
+        .load_json_setting::<Vec<RecentWorkspaceRecord>>(RECENT_WORKSPACES_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+pub(super) fn record_recent_workspace(store: &AppStore, path: &str, name: &str) {
+    let mut recents = load_recent_workspaces(store);
+    recents.retain(|entry| entry.path != path);
+    recents.insert(
+        0,
+        RecentWorkspaceRecord {
+            path: path.to_string(),
+            name: name.to_string(),
+            last_opened_ms: now_ms(),
+        },
+    );
+    recents.sort_by(|a, b| b.last_opened_ms.cmp(&a.last_opened_ms));
+    recents.truncate(RECENT_WORKSPACES_CAP);
+    let _ = store.save_json_setting(RECENT_WORKSPACES_KEY, &recents);
+}
+
+#[tauri::command]
+pub(super) async fn seed_recent_workspaces(
+    state: State<'_, DesktopState>,
+    entries: Vec<RecentWorkspaceRecord>,
+) -> std::result::Result<Vec<RecentWorkspaceRecord>, String> {
+    let mut recents = load_recent_workspaces(&state.store);
+    for mut entry in entries {
+        let Ok(normalized) = normalize_workspace_root(&entry.path) else {
+            continue;
+        };
+        entry.path = normalized.display().to_string();
+        recents.retain(|existing| existing.path != entry.path);
+        recents.push(entry);
+    }
+    recents.sort_by(|a, b| b.last_opened_ms.cmp(&a.last_opened_ms));
+    recents.truncate(RECENT_WORKSPACES_CAP);
+    state
+        .store
+        .save_json_setting(RECENT_WORKSPACES_KEY, &recents)
+        .map_err(error_to_string)?;
+    Ok(recents)
+}
+
 #[tauri::command]
 pub(super) async fn open_workspace(
     state: State<'_, DesktopState>,
@@ -33,6 +91,7 @@ pub(super) async fn open_workspace(
             bootstrap.active_conversation = active_conversation;
         }
     }
+    record_recent_workspace(&state.store, &workspace_id, &bootstrap.workspace.name);
     apply_window_title(&window, &bootstrap.workspace.name);
     update_current_workspace(
         &window.app_handle(),
@@ -634,7 +693,10 @@ pub(super) async fn import_sub_agents_command(
 ) -> std::result::Result<ImportSubAgentsOutput, String> {
     let workspace_root =
         normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
-    let current = state.store.load_sub_agent_settings().map_err(error_to_string)?;
+    let current = state
+        .store
+        .load_sub_agent_settings()
+        .map_err(error_to_string)?;
     let (merged, result) = import_sub_agents_from_provider(
         &workspace_root,
         &input.provider,

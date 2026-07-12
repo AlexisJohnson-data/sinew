@@ -500,7 +500,8 @@ pub fn import_skills_from_provider(
                     name: entry.name,
                     reason: format!(
                         "folder already exists at {}",
-                        dest_dir.strip_prefix(workspace_root)
+                        dest_dir
+                            .strip_prefix(workspace_root)
                             .unwrap_or(&dest_dir)
                             .display()
                     ),
@@ -564,8 +565,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     if !src.is_dir() {
         bail!("{} is not a directory", src.display());
     }
-    fs::create_dir_all(dst)
-        .with_context(|| format!("unable to create {}", dst.display()))?;
+    fs::create_dir_all(dst).with_context(|| format!("unable to create {}", dst.display()))?;
     for entry in fs::read_dir(src).with_context(|| format!("unable to read {}", src.display()))? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -574,8 +574,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         if file_type.is_dir() {
             copy_dir_recursive(&from, &to)?;
         } else {
-            fs::copy(&from, &to)
-                .with_context(|| format!("unable to copy {} to {}", from.display(), to.display()))?;
+            fs::copy(&from, &to).with_context(|| {
+                format!("unable to copy {} to {}", from.display(), to.display())
+            })?;
         }
     }
     Ok(())

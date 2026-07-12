@@ -73,6 +73,27 @@ type DragPreviewState = {
 
 const INTERNAL_DRAG_MIME = "application/x-sinew-files";
 const POINTER_DRAG_THRESHOLD_PX = 4;
+const ADD_FILES_TO_CHAT_EVENT = "sinew:add-files-to-chat";
+
+// Walk up from the pointer-targeted element until we find a chat drop zone
+// (anything tagged `.chat-col` or `.composer`). Returns true when the
+// pointer-based drag should be treated as an "add to chat" instead of an
+// in-tree move.
+function pointIsOverChat(x: number, y: number): boolean {
+  const element = document.elementFromPoint(x, y);
+  if (!element) return false;
+  return Boolean(
+    (element as Element).closest?.(".chat-col, .composer"),
+  );
+}
+
+function dispatchAddFilesToChat(entries: WorkspaceEntry[]): void {
+  const files = entries.filter((entry) => entry.kind === "file");
+  if (!files.length) return;
+  window.dispatchEvent(
+    new CustomEvent(ADD_FILES_TO_CHAT_EVENT, { detail: { entries: files } }),
+  );
+}
 
 type Props = {
   workspacePath: string;
@@ -668,6 +689,67 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     [closeMenu, selectedScopeFor],
   );
 
+  // Save screenshots / image bytes from the OS clipboard into the workspace.
+  // The Tauri backend's `saveClipboardImage` writes the bytes to a temp file;
+  // we then `importPaths` it into the chosen target directory so the file
+  // appears in the tree (and on disk) rather than living only as a chat
+  // attachment.
+  const importClipboardImages = useCallback(
+    async (images: File[], targetRelativePath: string | null) => {
+      const tempPaths: string[] = [];
+      for (const [index, file] of images.entries()) {
+        const mediaType = clipboardImageMediaType(file);
+        if (!mediaType) continue;
+        try {
+          const saved = await api.saveClipboardImage(
+            workspacePath,
+            pastedImageName(file, index, mediaType),
+            mediaType,
+            await readFileAsBase64(file),
+          );
+          tempPaths.push(saved.path);
+        } catch (err) {
+          setActionError(String(err));
+        }
+      }
+      if (!tempPaths.length) return;
+      try {
+        const imported = await api.importPaths(
+          workspacePath,
+          tempPaths,
+          targetRelativePath ?? undefined,
+        );
+        refresh();
+        const firstRel = imported[0]?.relativePath;
+        if (firstRel) {
+          setSelectedEntry({
+            name: firstRel.split("/").pop() ?? firstRel,
+            relativePath: firstRel,
+            absolutePath: firstRel,
+            kind: "file",
+            hasChildren: false,
+          });
+        }
+      } catch (err) {
+        setActionError(String(err));
+      }
+    },
+    [refresh, workspacePath],
+  );
+
+  const handleBodyPaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      if (editState) return;
+      const images = clipboardImageFiles(event.clipboardData);
+      if (!images.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const targetRelativePath = targetDirectoryFor(selectedEntry);
+      void importClipboardImages(images, targetRelativePath);
+    },
+    [editState, importClipboardImages, selectedEntry],
+  );
+
   const pasteInto = useCallback(
     async (entry: WorkspaceEntry | null) => {
       closeMenu();
@@ -698,21 +780,39 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         }
 
         const paths = await readExternalClipboardPaths();
-        if (!paths.length) {
-          setActionError("Clipboard has no files to paste.");
+        if (paths.length) {
+          await api.importPaths(
+            workspacePath,
+            paths,
+            targetRelativePath ?? undefined,
+          );
+          refresh();
           return;
         }
-        await api.importPaths(
-          workspacePath,
-          paths,
-          targetRelativePath ?? undefined,
-        );
-        refresh();
+
+        // Keyboard Ctrl+V swallows the native paste event, so screenshots
+        // (which live as image bytes, not file paths) never reach the
+        // `onPaste` handler. Probe the async Clipboard API ourselves so a
+        // Ctrl+V on a freshly-captured image still lands in the tree.
+        const images = await readClipboardImages();
+        if (images.length) {
+          await importClipboardImages(images, targetRelativePath);
+          return;
+        }
+
+        setActionError("Clipboard has no files to paste.");
       } catch (err) {
         setActionError(String(err));
       }
     },
-    [clipboard, closeMenu, onEntriesMoved, refresh, workspacePath],
+    [
+      clipboard,
+      closeMenu,
+      importClipboardImages,
+      onEntriesMoved,
+      refresh,
+      workspacePath,
+    ],
   );
 
   const clearInternalDragState = useCallback(() => {
@@ -883,6 +983,13 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       if (!state.active) return;
       event.preventDefault();
       suppressNextClickRef.current = true;
+      // Dropping onto the chat composer adds the dragged files as chat
+      // attachments instead of moving them inside the tree.
+      if (pointIsOverChat(event.clientX, event.clientY)) {
+        clearInternalDragState();
+        dispatchAddFilesToChat(state.entries);
+        return;
+      }
       const target = dropTargetAtPoint(event.clientX, event.clientY, state.entries);
       clearInternalDragState();
       if (!target) return;
@@ -1139,6 +1246,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       onDragOver={handleRootDragOver}
       onDragLeave={handleRootDragLeave}
       onDrop={(event) => void handleRootDrop(event)}
+      onPaste={handleBodyPaste}
       onContextMenu={(event) => {
         if ((event.target as Element).closest(".tree-row")) return;
         openContextMenu(event, null);
@@ -1205,6 +1313,10 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
             closeMenu();
             if (menu.entry.kind === "directory") void toggle(menu.entry);
             else onOpenFile(menu.entry);
+          }}
+          onAddToChat={() => {
+            closeMenu();
+            dispatchAddFilesToChat(selectedScopeFor(menu.entry));
           }}
           onRename={() => startRename(menu.entry)}
           onReveal={() => void revealEntry(menu.entry)}
@@ -1666,6 +1778,7 @@ function TreeContextMenu({
   onNewFile,
   onNewFolder,
   onOpen,
+  onAddToChat,
   onRename,
   onReveal,
   onCopy,
@@ -1681,6 +1794,7 @@ function TreeContextMenu({
   onNewFile: () => void;
   onNewFolder: () => void;
   onOpen: () => void;
+  onAddToChat: () => void;
   onRename: () => void;
   onReveal: () => void;
   onCopy: () => void;
@@ -1692,6 +1806,7 @@ function TreeContextMenu({
   onRefresh: () => void;
 }) {
   const entry = menu.entry;
+  const canAddToChat = entry?.kind === "file";
 
   return (
     <div
@@ -1707,6 +1822,16 @@ function TreeContextMenu({
           label={entry.kind === "directory" ? "Open folder" : "Open"}
           onClick={onOpen}
         />
+      )}
+      {canAddToChat && (
+        <>
+          <MenuItem
+            icon="solar:chat-line-linear"
+            label="Add to chat"
+            onClick={onAddToChat}
+          />
+          <MenuSeparator />
+        </>
       )}
       <MenuItem icon="solar:document-add-linear" label="New file" onClick={onNewFile} />
       <MenuItem
@@ -1956,6 +2081,103 @@ function parentRelativePath(relativePath: string): string | null {
   const idx = relativePath.lastIndexOf("/");
   if (idx <= 0) return null;
   return relativePath.slice(0, idx);
+}
+
+function clipboardImageFiles(dataTransfer: DataTransfer): File[] {
+  const fromItems: File[] = [];
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== "file") continue;
+    if (item.type && !item.type.toLowerCase().startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file && clipboardImageMediaType(file)) fromItems.push(file);
+  }
+  if (fromItems.length > 0) return fromItems;
+
+  return Array.from(dataTransfer.files).filter((file) =>
+    Boolean(clipboardImageMediaType(file)),
+  );
+}
+
+function clipboardImageMediaType(file: File): string | null {
+  const normalized = file.type.split(";")[0]?.trim().toLowerCase();
+  if (
+    normalized === "image/png" ||
+    normalized === "image/jpeg" ||
+    normalized === "image/gif" ||
+    normalized === "image/webp"
+  ) {
+    return normalized;
+  }
+  if (normalized === "image/jpg") return "image/jpeg";
+  if (/\.png$/i.test(file.name)) return "image/png";
+  if (/\.jpe?g$/i.test(file.name)) return "image/jpeg";
+  if (/\.gif$/i.test(file.name)) return "image/gif";
+  if (/\.webp$/i.test(file.name)) return "image/webp";
+  return null;
+}
+
+function pastedImageName(file: File, index: number, mediaType: string): string {
+  if (file.name.trim()) return file.name;
+  const suffix = index === 0 ? "" : `-${index + 1}`;
+  return `pasted-image${suffix}.${extensionForImageMediaType(mediaType)}`;
+}
+
+function extensionForImageMediaType(mediaType: string): string {
+  if (mediaType === "image/jpeg") return "jpg";
+  if (mediaType === "image/gif") return "gif";
+  if (mediaType === "image/webp") return "webp";
+  return "png";
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Unable to read pasted image"));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Pull image bitmaps off the OS clipboard via the async Clipboard API.
+// Used when the synchronous `paste` event isn't available (keyboard Ctrl+V
+// path that we intercept and preventDefault).
+async function readClipboardImages(): Promise<File[]> {
+  const clipboard = navigator.clipboard as Clipboard & {
+    read?: () => Promise<ClipboardItem[]>;
+  };
+  if (typeof clipboard?.read !== "function") return [];
+  let items: ClipboardItem[];
+  try {
+    items = await clipboard.read();
+  } catch {
+    return [];
+  }
+  const files: File[] = [];
+  let index = 0;
+  for (const item of items) {
+    for (const type of item.types) {
+      const normalized = type.toLowerCase();
+      if (!normalized.startsWith("image/")) continue;
+      try {
+        const blob = await item.getType(type);
+        const extension = extensionForImageMediaType(normalized);
+        index += 1;
+        files.push(
+          new File([blob], `pasted-image-${index}.${extension}`, {
+            type: normalized,
+          }),
+        );
+      } catch {
+        // Skip blobs the browser refuses to expose (e.g. cross-origin).
+      }
+    }
+  }
+  return files;
 }
 
 async function readExternalClipboardPaths(): Promise<string[]> {

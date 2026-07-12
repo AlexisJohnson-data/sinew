@@ -227,6 +227,17 @@ export type StartAnthropicLoginOutput = {
   authUrl: string;
 };
 
+export type StartMcpLoginOutput = {
+  loginId: string;
+  authUrl: string;
+};
+
+export type McpLoginStatus = {
+  pending: boolean;
+  success: boolean;
+  error?: string | null;
+};
+
 export type GoogleProviderStatus = {
   connected: boolean;
   connectionState: ProviderConnectionState;
@@ -286,6 +297,16 @@ export type McpEnvVar = {
   value: string;
 };
 
+export type McpOAuthClientConfig = {
+  clientId?: string | null;
+  clientSecret?: string | null;
+  scope?: string | null;
+  authorizationEndpoint?: string | null;
+  tokenEndpoint?: string | null;
+  resource?: string | null;
+  tokenEndpointAuthMethod?: string | null;
+};
+
 export type McpServerConfig = {
   id: string;
   name: string;
@@ -294,6 +315,14 @@ export type McpServerConfig = {
   env: McpEnvVar[];
   cwd?: string | null;
   enabled: boolean;
+  /** MCP transport: local stdio, streamable HTTP, or legacy SSE */
+  transport?: "stdio" | "http" | "sse" | null;
+  /** Remote MCP server URL */
+  url?: string | null;
+  /** HTTP transport: extra request headers */
+  headers?: McpEnvVar[];
+  /** Optional OAuth overrides / pre-registered client credentials */
+  oauth?: McpOAuthClientConfig | null;
 };
 
 export type McpSettings = {
@@ -787,4 +816,6 @@ export type RecentWorkspace = {
   path: string;
   name: string;
   lastOpenedMs: number;
+  /** Pinned entries sort to the top and are exempt from the recents cap. */
+  pinned?: boolean;
 };

@@ -406,9 +406,23 @@ impl RemoteRuntime {
             }
             RelayServerFrame::PhoneConnected { device_id } => {
                 let mut inner = self.inner.lock().await;
-                inner.connected_devices.insert(device_id);
+                inner.connected_devices.insert(device_id.clone());
                 drop(inner);
                 self.emit_status(app).await;
+                if let Some(state) = app.try_state::<DesktopState>() {
+                    let active_turns = {
+                        let active = state.active_turn_details.lock().ok();
+                        active
+                            .map(|active| turns::active_turn_summaries_from_map(&active))
+                            .unwrap_or_default()
+                    };
+                    let _ = self
+                        .send_encrypted_to_device(
+                            &device_id,
+                            &RemotePcPayload::ActiveTurnsChanged { active_turns },
+                        )
+                        .await;
+                }
             }
             RelayServerFrame::PhoneDisconnected { device_id } => {
                 let mut inner = self.inner.lock().await;
@@ -647,6 +661,67 @@ impl RemoteRuntime {
         envelope: RemotePhoneEnvelope,
     ) -> Result<Value> {
         let state = app.state::<DesktopState>();
+
+        // Commands that don't require a workspace to already be open must be
+        // matched before we resolve/require one below — this is the primary
+        // path for opening a project from the phone when no PC window is open.
+        match &envelope.command {
+            RemotePhoneCommand::Ping => {
+                return Ok(json!({ "pong": true, "nowMs": now_ms() }));
+            }
+            RemotePhoneCommand::SubscribePush { subscription } => {
+                self.save_push_subscription(app, device_id, subscription.clone())
+                    .await?;
+                return Ok(json!({ "subscribed": true }));
+            }
+            RemotePhoneCommand::UnsubscribePush { endpoint } => {
+                self.remove_push_subscription(app, device_id, endpoint)
+                    .await?;
+                return Ok(json!({ "subscribed": false }));
+            }
+            RemotePhoneCommand::ListRecentWorkspaces => {
+                let recents = workspace::load_recent_workspaces(&state.store);
+                return Ok(serde_json::to_value(recents)?);
+            }
+            RemotePhoneCommand::OpenWorkspace { workspace_path } => {
+                let normalized = normalize_workspace_root(workspace_path)?;
+                let normalized_id = normalized.display().to_string();
+                let recents = workspace::load_recent_workspaces(&state.store);
+                if !recents.iter().any(|entry| entry.path == normalized_id) {
+                    return Err(anyhow::anyhow!(
+                        "this workspace is not in the list of recently opened projects"
+                    ));
+                }
+                let bootstrap = remote_bootstrap(&state, &normalized_id)?;
+                let active_turns = turns::list_active_turns(state)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                self.set_window_workspace("remote".to_string(), normalized_id.clone())
+                    .await;
+                let (_current_workspace, mut open_workspaces) = self.workspace_view().await;
+                if !open_workspaces.iter().any(|id| id == &normalized_id) {
+                    open_workspaces.push(normalized_id.clone());
+                }
+                let workspaces: Vec<Value> = open_workspaces
+                    .iter()
+                    .map(|id| {
+                        json!({
+                            "path": id,
+                            "name": workspace_display_name(id),
+                        })
+                    })
+                    .collect();
+                return Ok(json!({
+                    "workspacePath": normalized_id,
+                    "workspaces": workspaces,
+                    "bootstrap": bootstrap,
+                    "activeTurns": active_turns,
+                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control"],
+                }));
+            }
+            _ => {}
+        }
+
         let (current_workspace, mut open_workspaces) = self.workspace_view().await;
         let workspace_path = match envelope.workspace.as_deref() {
             Some(requested) if !requested.is_empty() => {
@@ -689,6 +764,7 @@ impl RemoteRuntime {
                     "workspaces": workspaces,
                     "bootstrap": bootstrap,
                     "activeTurns": active_turns,
+                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control"],
                 }))
             }
             RemotePhoneCommand::ListConversations => {
@@ -882,6 +958,18 @@ impl RemoteRuntime {
                 .map_err(|err| anyhow::anyhow!(err))?;
                 Ok(json!({ "accepted": ok }))
             }
+            RemotePhoneCommand::CancelTurn { conversation_id } => {
+                let cancelled = turns::cancel_turn(
+                    state,
+                    ConversationInput {
+                        workspace_path: workspace_path.clone(),
+                        conversation_id,
+                    },
+                )
+                .await
+                .map_err(|err| anyhow::anyhow!(err))?;
+                Ok(json!({ "cancelled": cancelled }))
+            }
             RemotePhoneCommand::ReplayActiveTurnEvents {
                 conversation_id,
                 after_sequence,
@@ -898,17 +986,13 @@ impl RemoteRuntime {
                 .map_err(|err| anyhow::anyhow!(err))?;
                 Ok(serde_json::to_value(replay)?)
             }
-            RemotePhoneCommand::SubscribePush { subscription } => {
-                self.save_push_subscription(app, device_id, subscription)
-                    .await?;
-                Ok(json!({ "subscribed": true }))
+            RemotePhoneCommand::SubscribePush { .. }
+            | RemotePhoneCommand::UnsubscribePush { .. }
+            | RemotePhoneCommand::ListRecentWorkspaces
+            | RemotePhoneCommand::OpenWorkspace { .. }
+            | RemotePhoneCommand::Ping => {
+                unreachable!("handled before workspace resolution")
             }
-            RemotePhoneCommand::UnsubscribePush { endpoint } => {
-                self.remove_push_subscription(app, device_id, &endpoint)
-                    .await?;
-                Ok(json!({ "subscribed": false }))
-            }
-            RemotePhoneCommand::Ping => Ok(json!({ "pong": true, "nowMs": now_ms() })),
         }
     }
 
@@ -1064,6 +1148,31 @@ impl RemoteRuntime {
                     payload: RemotePushPayload {
                         title: "Sinew".to_string(),
                         body: "Response ready".to_string(),
+                        conversation_id: conversation_id.to_string(),
+                    },
+                })
+                .await;
+        }
+    }
+
+    async fn notify_question_asked(&self, conversation_id: &str) {
+        let subscriptions = {
+            let inner = self.inner.lock().await;
+            inner
+                .settings
+                .devices
+                .iter()
+                .filter(|device| device.revoked_at_ms.is_none())
+                .flat_map(|device| device.push_subscriptions.iter().cloned())
+                .collect::<Vec<_>>()
+        };
+        for subscription in subscriptions {
+            let _ = self
+                .send_relay(RelayClientFrame::PcPush {
+                    subscription,
+                    payload: RemotePushPayload {
+                        title: "Sinew".to_string(),
+                        body: "Question awaiting answer".to_string(),
                         conversation_id: conversation_id.to_string(),
                     },
                 })
@@ -1324,6 +1433,11 @@ pub(super) fn forward_agent_event(
         if matches!(event, AgentEvent::TurnFinished { .. }) {
             runtime.notify_turn_finished(&conversation_id).await;
         }
+        if let AgentEvent::ToolStarted { name, .. } = &event {
+            if name == sinew_app::tool_names::QUESTION {
+                runtime.notify_question_asked(&conversation_id).await;
+            }
+        }
     });
 }
 
@@ -1538,6 +1652,9 @@ enum RemotePhoneCommand {
         conversation_id: String,
         tool_call_id: String,
     },
+    CancelTurn {
+        conversation_id: String,
+    },
     ReplayActiveTurnEvents {
         conversation_id: String,
         after_sequence: Option<u64>,
@@ -1547,6 +1664,10 @@ enum RemotePhoneCommand {
     },
     UnsubscribePush {
         endpoint: String,
+    },
+    ListRecentWorkspaces,
+    OpenWorkspace {
+        workspace_path: String,
     },
     Ping,
 }

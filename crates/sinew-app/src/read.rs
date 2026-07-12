@@ -22,6 +22,9 @@ const MAX_LIMIT: usize = 500;
 const MAX_RANGES: usize = 20;
 const MAX_TEXT_READ_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+// PDFs are binary and commonly larger than the text cap; liteparse turns them
+// into markdown, so allow a bigger ceiling than plain text.
+const MAX_PDF_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ReadTool {
@@ -47,7 +50,7 @@ impl ReadTool {
     pub fn descriptor(&self) -> ToolDescriptor {
         ToolDescriptor {
             name: "read".into(),
-            description: "Read text files by line ranges or attach supported image files visually."
+            description: "Read text files by line ranges, parse PDF files into markdown (read by line ranges like text), or attach supported image files visually."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -81,10 +84,77 @@ impl ReadTool {
     }
 
     pub async fn run(&self, input: Value) -> ToolRunResult {
+        // PDFs need async parsing (liteparse), so branch before the sync path.
+        let path_str = input
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if is_pdf_path(&path_str) {
+            return match self.read_pdf(&path_str, input).await {
+                Ok(output) => output,
+                Err(err) => ToolRunResult::err(err.to_string(), Vec::new()),
+            };
+        }
         match self.read(input) {
             Ok(output) => output,
             Err(err) => ToolRunResult::err(err.to_string(), Vec::new()),
         }
+    }
+
+    async fn read_pdf(&self, path_str: &str, input: Value) -> Result<ToolRunResult> {
+        let parsed: ReadInput = serde_json::from_value(input)
+            .map_err(|err| anyhow::anyhow!("invalid read input: {err}"))?;
+        let path = resolve_read_path(&self.workspace_root, path_str)?;
+        let metadata = fs::metadata(&path)
+            .with_context(|| format!("unable to read file metadata {}", path.display()))?;
+        if !metadata.is_file() {
+            bail!("path is not a file");
+        }
+        if metadata.len() > MAX_PDF_BYTES {
+            bail!("PDF is too large to parse safely");
+        }
+
+        let display_path = display_read_path(&self.workspace_root, &path);
+        let (markdown, page_count) = parse_pdf_to_markdown(&path).await?;
+
+        // Scanned PDFs have no usable text layer; render their pages to images
+        // so the agent's own vision model reads them (no OCR engine needed).
+        if looks_like_scan(&markdown, page_count) {
+            let images = render_pdf_pages(&path, page_count).await?;
+            if images.is_empty() {
+                bail!("PDF appears to be scanned but no pages could be rendered");
+            }
+            let shown = images.len();
+            let more = if page_count > shown {
+                format!(" (first {shown} of {page_count}; ask for more pages if needed)")
+            } else {
+                String::new()
+            };
+            return Ok(ToolRunResult::ok_with_images(
+                format!(
+                    "path: {display_path}\ntype: pdf (scanned — no text layer)\npages: {page_count}{more}\n\n\
+                     [Scanned PDF — no extractable text layer. The page image(s) are ATTACHED to this tool result; read them directly with your own vision. Do NOT run any external OCR tool (tesseract, etc.) and do NOT shell out — the images are already provided here.]"
+                ),
+                images,
+                Vec::new(),
+            ));
+        }
+
+        // Digital PDF: reuse the text line-range machinery so the agent can page
+        // through a long PDF exactly like a text file.
+        let ranges = parsed.text_ranges()?;
+        let lines = split_lines(&markdown);
+        let total_lines = lines.len();
+        let numbered = render_ranges(&lines, &ranges, total_lines);
+
+        Ok(ToolRunResult::ok(
+            format!(
+                "path: {display_path}\ntype: pdf (markdown)\ntotal: {total_lines}\n\n{numbered}"
+            ),
+            Vec::new(),
+        ))
     }
 
     pub fn normalize_path(&self, raw: &str) -> Result<String> {
@@ -388,6 +458,90 @@ fn fingerprint_for_bytes(
         modified_ms,
         sha256,
     }
+}
+
+fn is_pdf_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
+
+fn pdf_markdown_config() -> liteparse::LiteParseConfig {
+    use liteparse::config::ImageMode;
+    use liteparse::{LiteParseConfig, OutputFormat};
+    LiteParseConfig {
+        output_format: OutputFormat::Markdown,
+        ocr_enabled: false,
+        image_mode: ImageMode::Off,
+        extract_links: true,
+        quiet: true,
+        ..Default::default()
+    }
+}
+
+/// Extract the embedded text layer of a PDF as markdown with liteparse. OCR is
+/// disabled (the crate is built without the `tesseract` feature) so this is the
+/// fast, model-free heuristic path — perfect for digital PDFs. Returns the
+/// markdown plus the page count so the caller can tell a scanned PDF (empty/
+/// sparse text layer) apart from a digital one.
+async fn parse_pdf_to_markdown(path: &Path) -> Result<(String, usize)> {
+    use liteparse::LiteParse;
+
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("PDF path is not valid UTF-8: {}", path.display()))?;
+
+    let result = LiteParse::new(pdf_markdown_config())
+        .parse(path_str)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to parse PDF {}: {err}", path.display()))?;
+    Ok((result.text, result.pages.len()))
+}
+
+/// A PDF whose text layer is empty or unusually sparse for its page count is
+/// almost certainly a scan (pages are just images). Average usable characters
+/// per page below this threshold routes the document to the vision path.
+const SCAN_CHARS_PER_PAGE: usize = 50;
+/// Cap how many pages we render to images for the vision path. Full-page PNGs
+/// are heavy in tokens, so keep the first pages and let the user ask for more.
+const MAX_PDF_VISION_PAGES: usize = 10;
+
+fn looks_like_scan(markdown: &str, page_count: usize) -> bool {
+    if page_count == 0 {
+        return false;
+    }
+    let chars = markdown.trim().chars().count();
+    chars / page_count < SCAN_CHARS_PER_PAGE
+}
+
+/// Render the first pages of a (scanned) PDF to PNG via liteparse/PDFium so the
+/// agent's own vision model can read them. No OCR engine required — the LLM is
+/// the OCR. Returns the page images as visual attachments.
+async fn render_pdf_pages(path: &Path, page_count: usize) -> Result<Vec<ToolRunImage>> {
+    use liteparse::LiteParse;
+
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("PDF path is not valid UTF-8: {}", path.display()))?;
+
+    let render_pages = page_count.min(MAX_PDF_VISION_PAGES);
+    let page_numbers: Vec<u32> = (1..=render_pages as u32).collect();
+
+    let shots = LiteParse::new(pdf_markdown_config())
+        .screenshot(path_str, Some(page_numbers))
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to render PDF {}: {err}", path.display()))?;
+
+    Ok(shots
+        .into_iter()
+        .map(|shot| ToolRunImage {
+            media_type: "image/png".to_string(),
+            data: BASE64_STANDARD.encode(&shot.image_bytes),
+            path: None,
+        })
+        .collect())
 }
 
 fn relative_from_root(root: &Path, path: &Path) -> Result<String> {

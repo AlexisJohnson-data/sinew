@@ -97,6 +97,10 @@ impl TeamTool {
                 self.tool_settings.linkup_api_key(),
             )),
             web_fetch: Arc::new(WebFetchTool::new()),
+            browser: Arc::new(BrowserTools::new(
+                self.workspace_root.to_string_lossy().to_string(),
+                sinew_browser::BrowserSessions::new(),
+            )),
             skill: Arc::new(SkillTool::with_settings(
                 self.workspace_root.clone(),
                 self.skill_settings.clone(),

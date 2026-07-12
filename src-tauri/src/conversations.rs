@@ -243,10 +243,7 @@ pub(super) async fn set_shell_preference(
     state: State<'_, DesktopState>,
     input: SetShellPreferenceInput,
 ) -> std::result::Result<sinew_app::ShellPreference, String> {
-    let mut settings = state
-        .store
-        .load_tool_settings()
-        .map_err(error_to_string)?;
+    let mut settings = state.store.load_tool_settings().map_err(error_to_string)?;
     settings.shell_preference = input.shell_preference;
     state
         .store
@@ -295,8 +292,7 @@ pub(super) async fn import_mcp_servers_command(
 ) -> std::result::Result<ImportMcpServersOutput, String> {
     let format = sinew_app::McpImportFormat::parse(&input.format).map_err(error_to_string)?;
     let path = std::path::PathBuf::from(&input.file_path);
-    let imported =
-        sinew_app::parse_mcp_import_file(&path, format).map_err(error_to_string)?;
+    let imported = sinew_app::parse_mcp_import_file(&path, format).map_err(error_to_string)?;
     let current = state.store.load_mcp_settings().map_err(error_to_string)?;
     let (merged, result) =
         sinew_app::merge_imported_mcp_servers(&current, imported, path.display().to_string());
@@ -375,6 +371,7 @@ pub(super) async fn probe_mcp_tools(
     state: State<'_, DesktopState>,
 ) -> std::result::Result<Vec<sinew_app::McpServerProbe>, String> {
     let settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    let settings = crate::mcp_oauth::resolve_mcp_oauth_settings(&state.store, settings).await;
     Ok(probe_mcp_servers(&settings).await)
 }
 

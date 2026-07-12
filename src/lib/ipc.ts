@@ -22,8 +22,10 @@ import type {
   InstalledSkill,
   KimiProviderStatus,
   MessageVisibility,
+  McpLoginStatus,
   McpServerProbe,
   McpSettings,
+  StartMcpLoginOutput,
   ModeModelSettings,
   ModelRef,
   OpenAiProviderStatus,
@@ -58,6 +60,14 @@ export const api = {
     return invoke<WorkspaceBootstrap>("open_workspace", {
       input: { workspacePath },
     });
+  },
+  seedRecentWorkspaces(
+    entries: Array<{ path: string; name: string; lastOpenedMs: number }>,
+  ) {
+    return invoke<Array<{ path: string; name: string; lastOpenedMs: number }>>(
+      "seed_recent_workspaces",
+      { entries },
+    );
   },
   gitSnapshot(workspacePath: string) {
     return invoke<GitRepositorySnapshot>("git_repository_snapshot_command", {
@@ -517,6 +527,18 @@ export const api = {
   },
   probeMcpTools() {
     return invoke<McpServerProbe[]>("probe_mcp_tools");
+  },
+  startMcpOAuthLogin(serverId: string) {
+    return invoke<StartMcpLoginOutput>("start_mcp_oauth_login", { serverId });
+  },
+  pollMcpOAuthLogin() {
+    return invoke<McpLoginStatus>("poll_mcp_oauth_login");
+  },
+  cancelMcpOAuthLogin() {
+    return invoke<void>("cancel_mcp_oauth_login");
+  },
+  disconnectMcpOAuth(serverId: string) {
+    return invoke<void>("disconnect_mcp_oauth", { serverId });
   },
   listInstalledSkills(workspacePath: string) {
     return invoke<InstalledSkill[]>("list_installed_skills_command", {

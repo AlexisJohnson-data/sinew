@@ -233,15 +233,9 @@ fn url_encode_value(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/'
-            | b':' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+                out.push(byte as char)
+            }
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -697,7 +691,28 @@ return output as text
     )))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub(super) fn read_platform_clipboard_file_paths() -> Result<Vec<String>> {
+    // Files copied from Explorer land on the Windows clipboard as a
+    // FileDropList (CF_HDROP) — not text — so the generic Get-Clipboard
+    // call returns nothing. Ask for that format explicitly and print one
+    // absolute path per line, which `parse_clipboard_paths` then filters
+    // by existence.
+    let script = "$paths = Get-Clipboard -Format FileDropList -ErrorAction SilentlyContinue; \
+                  if ($paths) { $paths | ForEach-Object { $_.FullName } }";
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", script])
+        .output()
+        .context("unable to read Windows clipboard file list")?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(parse_clipboard_paths(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 pub(super) fn read_platform_clipboard_file_paths() -> Result<Vec<String>> {
     Ok(Vec::new())
 }

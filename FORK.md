@@ -1,7 +1,10 @@
 # Sinew — Personal fork
 
 > **TL;DR** — This fork adds a WSL/Ubuntu shell mode, a one-click
-> Windows→WSL project migration agent, a friendlier chat UX (iMessage-style
+> Windows→WSL project migration agent, **real in-agent browser automation
+> (CDP/Chromium)**, **PDF reading (text + scanned pages via the model's
+> vision)**, **file-to-chat context** (drag, right-click, clipboard paste),
+> **quote-a-reply-into-context**, a friendlier chat UX (iMessage-style
 > bubbles, code-block copy, Ctrl+F search), workflow notifications,
 > Quick Open (Ctrl+P), and a handful of layout tweaks that make Sinew
 > usable when you actually live on Windows but code in Linux.
@@ -43,6 +46,14 @@ daily use.
 
 ## Feature index
 
+**Agent capabilities**
+- [Real browser automation (CDP / Chromium)](#real-browser-automation-cdp--chromium)
+- [PDF reading: digital text + scanned pages via vision](#pdf-reading-digital-text--scanned-pages-via-vision)
+- [File → chat context: drag, right-click, clipboard paste](#file--chat-context-drag-right-click-clipboard-paste)
+- [Quote a reply into the composer](#quote-a-reply-into-the-composer)
+- [Gemini / Antigravity reliability fix](#gemini--antigravity-reliability-fix)
+
+**Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
 - [Git panel routes through WSL on WSL workspaces](#git-panel-routes-through-wsl-on-wsl-workspaces)
 - [Smart Auto shell preference](#smart-auto-shell-preference)
@@ -56,9 +67,126 @@ daily use.
 - [Skills: thematic grouping, accordion, "Enable/Disable all"](#skills-thematic-grouping-accordion-enabledisable-all)
 - [Terminal: smart Ctrl+C copy / Ctrl+V paste](#terminal-smart-ctrlc-copy--ctrlv-paste)
 - [Welcome screen: shell picker, Settings entry, migration entry](#welcome-screen-shell-picker-settings-entry-migration-entry)
+- [Recents: pin & remove](#recents-pin--remove)
+- [Welcome "What's new" capabilities card](#welcome-whats-new-capabilities-card)
 - [Open maximized + centered on Windows](#open-maximized--centered-on-windows)
 
 ---
+
+### Real browser automation (CDP / Chromium)
+
+The agent can drive a real Chromium browser over the Chrome DevTools
+Protocol — open pages, screenshot, read the DOM, click, type, eval JS,
+etc. — so it can actually *look at* a running site instead of guessing
+from source. Cherry-picked and adapted from Glamgar's work on
+[Paseru/sinew#28](https://github.com/Paseru/sinew/pull/28).
+
+- New crate `crates/sinew-browser/` (chromiumoxide 0.7 + tokio): session
+  management, DOM, screenshots, gif recording.
+- 18 agent tools in `crates/sinew-app/src/browser.rs`
+  (`browser_open`, `browser_screenshot`, `browser_dom`, `browser_click`,
+  `browser_eval`, …), names in `tool_names.rs` (`BROWSER_*` consts).
+- Wired into the turn in `crates/sinew-app/src/agent/turn.rs`: the
+  browser descriptors are added **only when `browser_enabled` and not in
+  Plan mode**, plus a `<browser_tools>` system-prompt block so the agent
+  knows the browser exists (otherwise it tries to `apt-get install
+  chromium` in the shell).
+- **Chrome is preferred over Edge** in `session.rs::find_browser_executable`
+  (searches per-user `%LOCALAPPDATA%` paths too).
+- **Headed by default**: chromiumoxide's builder injects `--headless`,
+  so we call `.with_head()` explicitly when `headless = false` — you
+  actually *see* Chrome navigate.
+- **Force-browser toggle** (globe button in the composer): one-shot mode
+  that prepends an instruction making the agent use the `browser_*` tools
+  instead of reading code. `src/components/chat/ChatPane.tsx`.
+- **Inline screenshots**: `browser_*` tool cards render the returned
+  screenshot directly under the card (`src/components/chat/ToolCard.tsx`).
+
+Needs Chrome or Edge installed on the host (not bundled).
+
+### PDF reading: digital text + scanned pages via vision
+
+The `read` tool now reads PDFs. A router picks the right path per
+document, so the common case stays free/local and only scans pay for
+heavier processing:
+
+- **Digital PDF** (has a text layer, ~90% of PDFs) → `liteparse`
+  extracts the text as **markdown**, read by line ranges like any text
+  file. Free, fully local, ~3 ms/page, exact.
+- **Scanned PDF** (empty/sparse text layer, heuristic <50 chars/page) →
+  `liteparse` renders the pages to PNG via PDFium and **attaches them as
+  images**, so the agent's own vision model (Gemini / Claude / GPT) reads
+  them. No OCR engine, no setup — the LLM is the OCR. Capped at 10 pages.
+
+Notes:
+- `liteparse` is added with `default-features = false` to **drop the
+  `tesseract` feature** — built-in Tesseract needs CMake to build
+  leptonica/tesseract from C++ source (fails on a clean Windows box) and
+  we don't want it anyway. The tool result tells the agent *not* to shell
+  out to an external OCR.
+- A higher-accuracy **Mistral OCR** backend (optional API key) is the
+  planned next layer — purely additive.
+- **Packaging caveat**: PDFium ships as a `pdfium.dll` (~6.7 MB) loaded
+  at runtime; the MSI must bundle it next to the exe
+  (`liteparse-pdfium` looks in the `current_exe` dir as a fallback) or
+  PDF support breaks on machines other than the build host.
+
+Code: `crates/sinew-app/src/read.rs` (`read_pdf`, scan detection,
+`render_pdf_pages`), dep in `crates/sinew-app/Cargo.toml`. PDF reads
+render as a normal expandable tool card so you can see the extracted
+markdown / page thumbnails (`src/components/chat/ToolCard.tsx`).
+
+### File → chat context: drag, right-click, clipboard paste
+
+Get files into the agent's context without typing paths:
+
+- **Drag** an entry from the file tree onto the chat / composer →
+  added as context.
+- **Right-click → "Add to chat"** on a file.
+- **Paste** into the file tree (`Ctrl+V` on a folder): an Explorer-copied
+  file or a clipboard **screenshot** is imported into the workspace.
+
+Cross-component handoff uses a module singleton + a window
+`sinew:add-files-to-chat` CustomEvent. Windows clipboard files are read
+via PowerShell `Get-Clipboard -Format FileDropList`; screenshots via
+`navigator.clipboard.read()` image blobs (the keyboard `Ctrl+V` handler
+`preventDefault`s the native paste, so the blob fallback is required).
+
+Code: `src/components/FileTree.tsx` (drag, context menu, `onPaste` /
+`importClipboardImages`), `src/components/chat/ChatPane.tsx` (event
+listener), `src-tauri/src/platform.rs` (Windows `FileDropList`).
+
+### Quote a reply into the composer
+
+Select part of an assistant message → a small **"Add to context"** pill
+appears → click it to prepend the selection as a `>` blockquote in the
+composer, so your next turn can respond to a specific fragment.
+
+Guarded against the trailing synthetic `click` that a small drag-select
+fires (the pill ignores clicks within 250 ms of appearing). Selecting
+text inside your **own** message no longer triggers a rewind either
+(the rewind handler bails when there's an active selection).
+
+Code: `src/components/chat/ChatPane.tsx` (`quoteAction`,
+`applyQuoteToComposer`), `.quote-pill` in `src/styles.css`.
+
+### Gemini / Antigravity reliability fix
+
+Google models (Antigravity endpoint) used to 400 with
+`INVALID_ARGUMENT` on any project that already had tool history — fresh
+projects worked, started ones didn't. Two root causes, both in
+`crates/sinew-google/src/client.rs`:
+
+- Every `functionResponse` was named `generic_tool` (the tool name
+  couldn't be recovered from the call id) while the `functionCall` had
+  the real name → Gemini matches the two **by name**, so every pair
+  mismatched. Fixed by mapping `tool_call_id → name` from the
+  `ToolCall` parts and labelling responses correctly.
+- Replayed `thought` parts without their original `thoughtSignature`
+  were rejected; unsigned thoughts are now dropped instead of sent bare.
+
+A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
+400 was added to make future diagnosis trivial.
 
 ### WSL / Ubuntu shell support
 
@@ -311,6 +439,30 @@ Code: `src/components/Welcome.tsx` +
 `set_shell_preference` Tauri commands in
 `src-tauri/src/conversations.rs` — workspace-independent so the
 picker is usable before any folder is open.
+
+### Recents: pin & remove
+
+Hovering a recent workspace on the Welcome page reveals two actions: a
+**pin** (📌) that lifts it to the top and keeps it there regardless of
+recency, and a **remove** (✕). Pinned entries don't count against the
+recents cap, so they stay sticky. Persisted in the same localStorage
+list with an added `pinned?: boolean` field.
+
+Code: `src/lib/recents.ts` (`removeRecent`, `toggleRecentPinned`,
+`compareRecents`), `src/components/Welcome.tsx`, `src/types.ts`.
+
+### Welcome "What's new" capabilities card
+
+Some of this fork's headline powers (PDF reading, browser automation,
+quote-to-context) aren't obvious IDE features, so a dismissible **"What's
+new / Things this agent can do"** card on the Welcome page surfaces them
+once — on the landing screen, so it never clutters the IDE while you
+work. Dismissal is persisted (`localStorage` key
+`sinew.whatsNewDismissed.v1`); bump the key suffix to resurface it after
+a future update.
+
+Code: `src/components/Welcome.tsx` (`CAPABILITIES`), styles
+`.welcome__whatsnew*` in `src/styles.css`.
 
 ### Open maximized + centered on Windows
 

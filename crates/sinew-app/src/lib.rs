@@ -1,11 +1,13 @@
 pub mod agent;
 pub mod bash;
+pub mod browser;
 pub mod compact;
 pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod image;
 pub mod mcp;
+pub mod mcp_oauth;
 #[cfg(windows)]
 mod powershell;
 pub mod question;
@@ -28,12 +30,13 @@ pub use agent::{
     system_prompt_for_mode_with_plan_prompt, AgentEvent, AgentEventScope, AgentMode,
     ConversationEvent, EngineCommand, QuestionReply, TurnCancel, TurnContext,
 };
+#[cfg(windows)]
+pub use bash::wsl_working_directory;
 pub use bash::{
     active_shell_display_name, path_targets_wsl_filesystem, set_active_shell_for_workspace,
     set_shell_preference, shell_system_prompt, BashTool,
 };
-#[cfg(windows)]
-pub use bash::wsl_working_directory;
+pub use browser::BrowserTools;
 pub use compact::{compact_conversation_history, CompactConversationOutput};
 pub use edit::EditFileTool;
 pub use glob::GlobTool;
@@ -41,7 +44,16 @@ pub use grep::GrepTool;
 pub use image::CreateImageTool;
 pub use mcp::{
     merge_imported_mcp_servers, parse_mcp_import_file, probe_mcp_servers, ImportMcpResult,
-    McpImportFormat, McpServerProbe, McpSettings, McpToolRegistry,
+    McpImportFormat, McpOAuthClientConfig, McpServerConfig, McpServerProbe, McpSettings,
+    McpToolRegistry, McpTransport,
+};
+pub use mcp_oauth::{
+    build_authorize_url as mcp_oauth_authorize_url, discover as mcp_oauth_discover,
+    exchange_code as mcp_oauth_exchange_code, generate_pkce as mcp_oauth_generate_pkce,
+    generate_state as mcp_oauth_generate_state, refresh as mcp_oauth_refresh,
+    register_client as mcp_oauth_register_client, McpOAuthRecord,
+    OAuthMetadata as McpOAuthMetadata, PkcePair as McpPkcePair,
+    RegisteredClient as McpRegisteredClient,
 };
 #[cfg(windows)]
 pub use powershell::{ensure_powershell_7_executable, find_powershell_7_executable};
@@ -53,9 +65,10 @@ pub use skill::{
 };
 pub use store::{
     tool_settings_view, AppStore, ConversationSummary, GoalWorkflowState, ModeModelSettings,
-    OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, SavedConversation, ToolConfig,
-    ShellPreference, ToolConfigView, ToolSettings, ToolSettingsView, TurnCheckpointRecord,
-    WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT, MIGRATION_AGENT_PROMPT,
+    OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, SavedConversation,
+    ShellPreference, ToolConfig, ToolConfigView, ToolSettings, ToolSettingsView,
+    TurnCheckpointRecord, WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT,
+    MIGRATION_AGENT_PROMPT,
 };
 pub use subagent::{
     import_sub_agents_from_provider, is_subagent_tool_name, subagent_system_prompt,

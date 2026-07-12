@@ -1122,7 +1122,13 @@ export function ToolCard({
     previousTeamRunActiveRef.current = !!teamRunActive;
   }, [isTeamRunSpawn, status, teamRunActive]);
 
-  if (canonicalName === "read") {
+  // PDFs read via the `read` tool produce extracted markdown (or page-image
+  // thumbnails for scans). The compact inline row can't show that, so let PDF
+  // reads fall through to the normal expandable card instead.
+  const isPdfRead =
+    (readArgs(argsPretty).path ?? "").toLowerCase().endsWith(".pdf") ||
+    (output?.includes("type: pdf") ?? false);
+  if (canonicalName === "read" && !isPdfRead) {
     return (
       <ReadToolInline
         status={status}
@@ -1157,6 +1163,7 @@ export function ToolCard({
   const isTeamStop = canonicalName === "team_stop";
   const isTeam = isTeamRun || isTeamCreate || isTeamStatus || isTeamStop;
   const isSubAgent = name.startsWith("subagent_") || canonicalName === "agent";
+  const isBrowser = name.startsWith("browser_");
   const hasImages = !!images && images.length > 0;
   const editingPaths =
     isEditFile && status === "running" ? extractEditFilePaths(argsPretty) : [];
@@ -1343,6 +1350,8 @@ export function ToolCard({
               <TerminalGlyph />
             ) : isGlob || isGrep ? (
               <AsteriskGlyph />
+            ) : isBrowser ? (
+              <Icon icon="solar:global-linear" width={13} height={13} />
             ) : isEditFile || isWriteFile ? (
               <Icon icon="solar:pen-new-square-linear" width={12} height={12} />
             ) : isWebSearch ? (
@@ -1421,6 +1430,18 @@ export function ToolCard({
           </span>
         ) : null}
       </div>
+      {isBrowser && hasImages && status !== "running" && (
+        <div className="tool-card__images tool-card__images--browser">
+          {images!.map((image, idx) => (
+            <img
+              key={`${image.media_type}-${idx}`}
+              className="tool-card__image"
+              src={toolImageSrc(image)}
+              alt={`Screenshot ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
       {showBody && (
         <div className="tool-card__body">
           {isTeamRunSpawn ? (
@@ -1442,7 +1463,7 @@ export function ToolCard({
               {displayOutput.length ? displayOutput : "—"}
             </pre>
           )}
-          {hasImages && (
+          {hasImages && !isBrowser && (
             <div className="tool-card__images">
               {images!.map((image, idx) => (
                 <img

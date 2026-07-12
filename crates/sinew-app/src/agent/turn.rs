@@ -64,6 +64,7 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
         question,
         web_search,
         web_fetch,
+        browser,
         skill,
         mcp,
         subagents,
@@ -115,6 +116,9 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
             web_search.descriptor(),
             web_fetch.descriptor(),
         ];
+        if tool_settings.browser_enabled && mode != AgentMode::Plan {
+            tool_descriptors.extend(browser.all_descriptors());
+        }
         if let Some(question) = &question {
             tool_descriptors.insert(6, question.descriptor());
         }
@@ -149,12 +153,24 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                 current_system_prompt.push_str(&team_reminder);
             }
         }
-        let current_system_prompt = system_prompt_for_turn(
+        let mut current_system_prompt = system_prompt_for_turn(
             &current_system_prompt,
             mode,
             &goal_workflow,
             tool_settings.plan_mode_prompt(),
         );
+        // When the browser tools are exposed, drop a short hint so the agent
+        // reaches for them on its own when the user asks it to "look at",
+        // "open", "navigate", or otherwise inspect a web page. Without this,
+        // models default to shell commands and end up trying to install
+        // chromium inside the WSL shell — pointless since the browser tool
+        // launches Chrome/Edge natively on Windows via CDP.
+        if tool_settings.browser_enabled && mode != AgentMode::Plan {
+            current_system_prompt.push_str(
+                "\n\n<browser_tools>\nYou have a real Chromium-based browser available through the browser_* tools (browser_open, browser_screenshot, browser_click, browser_dom, browser_eval, browser_console, browser_network, browser_wait, browser_scroll, browser_select, browser_hover, browser_close, browser_record_start/stop, browser_resize, browser_back, browser_forward, browser_find, browser_pdf, browser_upload, browser_cookies, browser_keys, browser_iframe). When the user asks you to look at, open, navigate, screenshot, or interact with a web page (including a local dev server), use these tools — they drive a headed Chrome/Edge instance on the host OS. Do NOT install a browser inside the shell; the browser tool launches one for you.\n</browser_tools>",
+            );
+        }
+        let current_system_prompt = current_system_prompt;
 
         if auto_compact {
             match maybe_auto_compact_history(
@@ -629,6 +645,7 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                         question.as_deref(),
                         &web_search,
                         &web_fetch,
+                        &browser,
                         &skill,
                         &mcp,
                         subagents.as_deref(),
@@ -673,6 +690,7 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                             question.as_deref(),
                             &web_search,
                             &web_fetch,
+                            &browser,
                             &skill,
                             &mcp,
                             subagents.as_deref(),

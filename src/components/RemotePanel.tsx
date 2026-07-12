@@ -13,12 +13,14 @@ const REMOTE_STATUS_EVENT = "remote-status-changed";
 
 export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
   const [status, setStatus] = useState<RemoteStatus | null>(initialStatus);
+  const [relayUrl, setRelayUrl] = useState(initialStatus?.relayUrl ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const applyStatus = useCallback(
     (next: RemoteStatus) => {
       setStatus(next);
+      setRelayUrl(next.relayUrl);
       onStatusChange?.(next);
     },
     [onStatusChange],
@@ -34,7 +36,10 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
   }, [applyStatus]);
 
   useEffect(() => {
-    if (initialStatus) setStatus(initialStatus);
+    if (initialStatus) {
+      setStatus(initialStatus);
+      setRelayUrl(initialStatus.relayUrl);
+    }
   }, [initialStatus]);
 
   useEffect(() => {
@@ -72,8 +77,12 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
   );
 
   const setEnabled = useCallback(
-    (enabled: boolean) => runAction(() => api.remoteSetEnabled(enabled)),
-    [runAction],
+    (enabled: boolean) => runAction(() => api.remoteSetEnabled(enabled, relayUrl)),
+    [relayUrl, runAction],
+  );
+  const saveRelayUrl = useCallback(
+    () => runAction(() => api.remoteSetEnabled(status?.enabled ?? false, relayUrl)),
+    [relayUrl, runAction, status?.enabled],
   );
   const startPairing = useCallback(
     () => runAction(() => api.remoteStartPairing()),
@@ -154,6 +163,24 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
             tone={status?.reachable ? "ok" : "off"}
           />
         </div>
+
+        <section className="remote-panel__block">
+          <div className="remote-panel__block-head">
+            <div>
+              <h2>Relay URL</h2>
+              <p>Use your self-hosted relay WebSocket URL, for example wss://remote.example.com/ws.</p>
+            </div>
+          </div>
+          <div className="remote-panel__relay-url">
+            <input
+              value={relayUrl}
+              onChange={(event) => setRelayUrl(event.target.value)}
+              placeholder="wss://remote.example.com/ws"
+              disabled={busy}
+            />
+            <button type="button" className="settings-pane__btn" disabled={busy || !relayUrl.trim()} onClick={saveRelayUrl}>Save</button>
+          </div>
+        </section>
 
         <section className="remote-panel__block">
           <div className="remote-panel__block-head">

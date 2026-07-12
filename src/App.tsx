@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Welcome } from "./components/Welcome";
 import { Workspace } from "./components/Workspace";
 import { UpdaterLockScreen } from "./components/UpdaterLockScreen";
-import { loadLastWorkspace, recordRecent, deriveName } from "./lib/recents";
+import { loadLastWorkspace, loadRecents, recordRecent, deriveName } from "./lib/recents";
 import { api } from "./lib/ipc";
 import type { UpdateInfo, WorkspaceBootstrap } from "./types";
 
@@ -45,6 +45,12 @@ export default function App() {
   // still handles mid-session checks via its own 30 min interval.
   useEffect(() => {
     let cancelled = false;
+
+    // Best-effort: mirror the localStorage recents list into SQLite so the
+    // remote (PWA) side can offer "open project" without access to
+    // localStorage. Non-blocking, failure is silent (older PC binaries
+    // without the command, or no recents yet).
+    void api.seedRecentWorkspaces(loadRecents()).catch(() => {});
 
     (async () => {
       // 1. Updater gate.

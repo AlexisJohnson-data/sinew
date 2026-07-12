@@ -18,3 +18,4 @@
 # Tauri updater signing keys — NEVER commit private keys
 /.tauri-keys/
 *.key
+src-tauri/pdfium.dll

@@ -21,8 +21,12 @@ const MODEL_CATALOG = [
   { value: "anthropic:claude-opus-4-8", provider: "anthropic", label: "Opus 4.8", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-opus-4-7", provider: "anthropic", label: "Opus 4.7", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-opus-4-6", provider: "anthropic", label: "Opus 4.6", thinking: ["off", "low", "medium", "high", "max"], defaultThinking: "medium" },
+  { value: "anthropic:claude-sonnet-5", provider: "anthropic", label: "Sonnet 5", thinking: ["off", "low", "medium", "high", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-sonnet-4-6", provider: "anthropic", label: "Sonnet 4.6", thinking: ["off", "low", "medium", "high", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-haiku-4-5", provider: "anthropic", label: "Haiku 4.5", thinking: ["off", "low", "medium", "high"], defaultThinking: "medium" },
+  { value: "openai:gpt-5.6-sol", provider: "openai", label: "GPT-5.6 Sol", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
+  { value: "openai:gpt-5.6-terra", provider: "openai", label: "GPT-5.6 Terra", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
+  { value: "openai:gpt-5.6-luna", provider: "openai", label: "GPT-5.6 Luna", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "openai:gpt-5.5", provider: "openai", label: "GPT-5.5", thinking: ["off", "low", "medium", "high", "xhigh"], defaultThinking: "medium" },
   { value: "openai:gpt-5.4", provider: "openai", label: "GPT-5.4", thinking: ["off", "low", "medium", "high", "xhigh"], defaultThinking: "medium" },
   { value: "openai:gpt-5.4-mini", provider: "openai", label: "GPT-5.4 Mini", thinking: ["off", "low", "medium", "high", "xhigh"], defaultThinking: "medium" },
@@ -714,6 +718,8 @@ function App() {
   const [liveEvents, setLiveEvents] = useState(new Map());
   const [activeTurns, setActiveTurns] = useState([]);
   const [synced, setSynced] = useState(false);
+  const [features, setFeatures] = useState([]);
+  const [recentWorkspaces, setRecentWorkspaces] = useState([]);
 
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("act");
@@ -792,6 +798,7 @@ function App() {
       setWorkspace(bootstrap.workspace || null);
       setConversations(bootstrap.conversations || []);
       if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
+      if (Array.isArray(data.features)) setFeatures(data.features);
       syncedRef.current = true;
       setSynced(true);
       if (deepLinkConversation && (bootstrap.conversations || []).some((c) => c.id === deepLinkConversation)) {
@@ -801,6 +808,53 @@ function App() {
       setError(String(err.message || err));
     }
   }, [deepLinkConversation]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Throttled resync (~2s): re-bootstraps the current workspace and, if a
+  // conversation is open, reloads it and replays the active turn in full.
+  // Idempotent — safe to call repeatedly; liveEvents get replaced, not
+  // appended. Triggered on reconnect (pcReachable false→true) and on tab
+  // foregrounding, which is when iOS/Android are most likely to have killed
+  // the WebSocket in the background and dropped broadcast events.
+  const lastResyncRef = useRef(0);
+  const prevReachableRef = useRef(false);
+  const resync = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client?.session || !statusRef.current.pcReachable) return;
+    const now = Date.now();
+    if (now - lastResyncRef.current < 2000) return;
+    lastResyncRef.current = now;
+    try {
+      const data = await client.command({ type: "bootstrap" });
+      const bootstrap = data.bootstrap || data;
+      const resolvedPath = data.workspacePath || bootstrap.workspace?.path || null;
+      workspacePathRef.current = resolvedPath;
+      setWorkspacePath(resolvedPath);
+      setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
+      setWorkspace(bootstrap.workspace || null);
+      setConversations(bootstrap.conversations || []);
+      if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
+      if (Array.isArray(data.features)) setFeatures(data.features);
+      syncedRef.current = true;
+      setSynced(true);
+      const openId = convRef.current?.id;
+      if (openId) await openConversationById(openId);
+    } catch (err) {
+      setError(String(err.message || err));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (status.pcReachable && !prevReachableRef.current) void resync();
+    prevReachableRef.current = status.pcReachable;
+  }, [status.pcReachable, resync]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void resync();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [resync]);
 
   /* — client lifecycle — */
 
@@ -924,10 +978,42 @@ function App() {
       setWorkspace(bootstrap.workspace || null);
       setConversations(bootstrap.conversations || []);
       if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
+      if (Array.isArray(data.features)) setFeatures(data.features);
       setConv(null);
       setView("list");
     } catch (err) {
       setError(String(err.message || err));
+    }
+  }
+
+  async function openRecentWorkspace(path) {
+    setWsMenuOpen(false);
+    if (!path || !statusRef.current.pcReachable) return;
+    try {
+      const data = await clientRef.current.command({ type: "open_workspace", workspace_path: path });
+      const bootstrap = data.bootstrap || data;
+      const resolvedPath = data.workspacePath || path;
+      workspacePathRef.current = resolvedPath;
+      setWorkspacePath(resolvedPath);
+      setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
+      setWorkspace(bootstrap.workspace || null);
+      setConversations(bootstrap.conversations || []);
+      if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
+      if (Array.isArray(data.features)) setFeatures(data.features);
+      setConv(null);
+      setView("list");
+    } catch (err) {
+      setError(String(err.message || err));
+    }
+  }
+
+  async function loadRecentWorkspaces() {
+    if (!features.includes("open_workspace") || !statusRef.current.pcReachable) return;
+    try {
+      const list = await clientRef.current.command({ type: "list_recent_workspaces" });
+      setRecentWorkspaces(Array.isArray(list) ? list : []);
+    } catch {
+      // best-effort
     }
   }
 
@@ -939,25 +1025,24 @@ function App() {
       setMode(modeFromConversation(conversation));
       setView("chat");
       stickRef.current = true;
-      const turnActive = activeTurnsRef.current.some((item) => item.conversationId === id);
-      if (turnActive) {
-        try {
-          const replay = await cmd({ type: "replay_active_turn_events", conversation_id: id, after_sequence: 0 });
+      try {
+        const replay = await cmd({ type: "replay_active_turn_events", conversation_id: id, after_sequence: 0 });
+        if (replay.active) {
           setLiveEvents((current) => {
             const next = new Map(current);
             next.set(id, (replay.events || []).map((entry) => entry.event));
             return next;
           });
-        } catch {
-          // replay is best-effort
+        } else {
+          setLiveEvents((current) => {
+            if (!current.has(id)) return current;
+            const next = new Map(current);
+            next.delete(id);
+            return next;
+          });
         }
-      } else {
-        setLiveEvents((current) => {
-          if (!current.has(id)) return current;
-          const next = new Map(current);
-          next.delete(id);
-          return next;
-        });
+      } catch {
+        // replay is best-effort
       }
     } catch (err) {
       setError(`Open conversation failed: ${String(err.message || err)}`);
@@ -1030,6 +1115,46 @@ function App() {
       setError(String(err.message || err));
     } finally {
       setSendPending(false);
+    }
+  }
+
+  async function sendPlanApproval(action) {
+    if (!conv || !canReachPc || isStreaming || !features.includes("plan_control")) return;
+    const artifact = conv.planWorkflow?.artifact;
+    if (!artifact) return;
+    const implementing = action === "implement";
+    const nextMode = implementing ? "act" : "plan";
+    const model = conv.modeModelSettings?.[nextMode] || conv.model;
+    const text = implementing
+      ? "Implement completely this plan. Use the attached plan as the source of truth."
+      : "No, keep updating the plan. Use the attached plan as the current draft, ask any useful follow-up questions, then rewrite the plan when ready.";
+    setSendPending(true);
+    try {
+      await cmd({
+        type: "send_message",
+        conversation_id: conv.id,
+        text,
+        attachments: [{ path: artifact.absolutePath || artifact.path, name: artifact.title || artifact.path.split(/[\\/]/).pop() || "plan" }],
+        mode: nextMode,
+        model,
+        thinking: thinkingFromModel(model),
+        plan_control: implementing ? "implementPlan" : "updatePlan",
+        message_visibility: "systemReminder",
+      });
+      setMode(nextMode);
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setSendPending(false);
+    }
+  }
+
+  async function cancelTurn() {
+    if (!conv || !canReachPc || !isStreaming || !features.includes("cancel_turn")) return;
+    try {
+      await cmd({ type: "cancel_turn", conversation_id: conv.id });
+    } catch (err) {
+      setError(String(err.message || err));
     }
   }
 
@@ -1213,8 +1338,14 @@ function App() {
       h("div", { className: "pane__head-main" },
         h("button", {
           className: "ws-switch",
-          onClick: () => setWsMenuOpen((value) => !value),
-          disabled: workspaces.length === 0,
+          onClick: () => {
+            setWsMenuOpen((value) => {
+              const next = !value;
+              if (next) void loadRecentWorkspaces();
+              return next;
+            });
+          },
+          disabled: workspaces.length === 0 && recentWorkspaces.length === 0 && !features.includes("open_workspace"),
           "aria-haspopup": "menu",
           "aria-expanded": wsMenuOpen ? "true" : "false",
         },
@@ -1249,6 +1380,20 @@ function App() {
           h("span", { className: "ws-menu__name" }, item.name || item.path),
           h("span", { className: "ws-menu__path" }, item.path),
         )),
+        features.includes("open_workspace") && recentWorkspaces.filter((r) => !workspaces.some((w) => w.path === r.path)).length > 0 && h(React.Fragment, null,
+          h("div", { className: "ws-menu__kicker" }, "Recent"),
+          recentWorkspaces
+            .filter((r) => !workspaces.some((w) => w.path === r.path))
+            .map((item) => h("button", {
+              key: item.path,
+              className: "ws-menu__item",
+              disabled: !canReachPc,
+              onClick: () => void openRecentWorkspace(item.path),
+            },
+              h("span", { className: "ws-menu__name" }, item.name || item.path),
+              h("span", { className: "ws-menu__path" }, item.path),
+            )),
+        ),
       ),
     ),
     showInstallHint && h("div", { className: "hint" },
@@ -1307,6 +1452,7 @@ function App() {
                 : canReachPc ? "Encrypted" : "PC unreachable",
           ),
         ),
+        features.includes("cancel_turn") && isStreaming && h("button", { className: "icon-btn", onClick: () => void cancelTurn(), title: "Stop turn" }, "Stop"),
         h("button", { className: "icon-btn", disabled: !canReachPc || isStreaming, onClick: compact }, "Compact"),
       ),
       h("div", { className: "chat-body", ref: bodyRef, onScroll: onBodyScroll },
@@ -1347,6 +1493,13 @@ function App() {
           return h("div", { key: index, className: "status-line" }, block.text);
         }),
         isStreaming && events.length === 0 && h("div", { className: "status-line shimmer" }, "Working…"),
+      ),
+      conv.planWorkflow?.status === "planReady" && !isStreaming && features.includes("plan_control") && h("div", { className: "plan-approval" },
+        h("div", { className: "plan-approval__text" }, "Plan ready. What would you like to do?"),
+        h("div", { className: "plan-approval__actions" },
+          h("button", { type: "button", className: "plan-approval__implement", disabled: !canReachPc || sendPending, onClick: () => void sendPlanApproval("implement") }, "Implement plan"),
+          h("button", { type: "button", className: "plan-approval__update", disabled: !canReachPc || sendPending, onClick: () => void sendPlanApproval("update") }, "Update plan"),
+        ),
       ),
       h("form", { className: "composer", onSubmit: sendPrompt },
         attachments.length > 0 && h("div", { className: "composer__chips" },

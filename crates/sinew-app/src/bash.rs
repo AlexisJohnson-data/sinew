@@ -448,17 +448,12 @@ impl BashTool {
         {
             match self.shell {
                 ShellKind::Wsl => {
-                    return spawn_wsl_piped_session(
-                        command,
-                        cwd,
-                        max_lifetime,
-                        before,
-                        || self.next_session_id.fetch_add(1, Ordering::Relaxed),
-                    );
+                    return spawn_wsl_piped_session(command, cwd, max_lifetime, before, || {
+                        self.next_session_id.fetch_add(1, Ordering::Relaxed)
+                    });
                 }
                 ShellKind::PowerShell => {
-                    let shell_program =
-                        crate::powershell::ensure_powershell_7_executable().await?;
+                    let shell_program = crate::powershell::ensure_powershell_7_executable().await?;
                     return spawn_windows_piped_session(
                         shell_program,
                         command,
@@ -491,9 +486,10 @@ impl BashTool {
             builder.env("GIT_PAGER", "cat");
             builder.env("GH_PAGER", "cat");
 
-            let mut child = pair.slave.spawn_command(builder).with_context(|| {
-                format!("unable to spawn {}", self.shell.display_name())
-            })?;
+            let mut child = pair
+                .slave
+                .spawn_command(builder)
+                .with_context(|| format!("unable to spawn {}", self.shell.display_name()))?;
             drop(pair.slave);
 
             let mut reader = pair

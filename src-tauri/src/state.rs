@@ -44,11 +44,13 @@ pub(super) struct DesktopState {
     pub(super) team_runtime: Arc<RwLock<TeamRuntime>>,
     pub(super) remote: RemoteRuntime,
     pub(super) file_watchers: Arc<Mutex<HashMap<String, RecommendedWatcher>>>,
+    pub(super) browser_sessions: sinew_browser::BrowserSessions,
     pub(super) terminal_sessions: Arc<Mutex<HashMap<String, TerminalProcess>>>,
     pub(super) openai_login: Arc<Mutex<Option<OpenAiLoginAttempt>>>,
     pub(super) anthropic_login: Arc<Mutex<Option<AnthropicLoginAttempt>>>,
     pub(super) google_login: Arc<Mutex<Option<GoogleLoginAttempt>>>,
     pub(super) kimi_login: Arc<Mutex<Option<KimiLoginAttempt>>>,
+    pub(super) mcp_login: Arc<Mutex<Option<McpLoginAttempt>>>,
 }
 
 #[derive(Clone)]
@@ -122,6 +124,22 @@ pub(super) struct KimiLoginAttempt {
 
 #[derive(Clone)]
 pub(super) struct KimiLoginOutcome {
+    pub(super) success: bool,
+    pub(super) error: Option<String>,
+}
+
+#[derive(Clone)]
+pub(super) struct McpLoginAttempt {
+    #[allow(dead_code)]
+    pub(super) id: String,
+    #[allow(dead_code)]
+    pub(super) server_id: String,
+    pub(super) cancel: Arc<Notify>,
+    pub(super) outcome: Arc<StdMutex<Option<McpLoginOutcome>>>,
+}
+
+#[derive(Clone)]
+pub(super) struct McpLoginOutcome {
     pub(super) success: bool,
     pub(super) error: Option<String>,
 }

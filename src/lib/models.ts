@@ -92,6 +92,13 @@ export const MODELS: ModelEntry[] = [
     defaultThinking: "medium",
   },
   {
+    value: "anthropic:claude-sonnet-5",
+    provider: "anthropic",
+    label: "Sonnet 5",
+    thinking: ["off", "low", "medium", "high", "max"],
+    defaultThinking: "medium",
+  },
+  {
     value: "anthropic:claude-sonnet-4-6",
     provider: "anthropic",
     label: "Sonnet 4.6",
@@ -104,6 +111,30 @@ export const MODELS: ModelEntry[] = [
     label: "Haiku 4.5",
     thinking: ["off", "low", "medium", "high"],
     defaultThinking: "medium",
+  },
+  {
+    value: "openai:gpt-5.6-sol",
+    provider: "openai",
+    label: "GPT-5.6 Sol",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
+  },
+  {
+    value: "openai:gpt-5.6-terra",
+    provider: "openai",
+    label: "GPT-5.6 Terra",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
+  },
+  {
+    value: "openai:gpt-5.6-luna",
+    provider: "openai",
+    label: "GPT-5.6 Luna",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
   },
   {
     value: "openai:gpt-5.5",
@@ -309,7 +340,13 @@ export function thinkingFromRef(
   }
   if (model?.effort === "none") return "off";
   if (model?.effort === "xhigh") return "xhigh";
-  if (model?.provider === "openai" && model.effort === "max") return "xhigh";
+  if (
+    model?.provider === "openai" &&
+    model.effort === "max" &&
+    !supportsOpenAiMaxEffort(model.name)
+  ) {
+    return "xhigh";
+  }
   if (
     model?.effort === "low" ||
     model?.effort === "medium" ||
@@ -369,6 +406,10 @@ export function selectionFromRef(
 
 function modelId(provider: string, name: string): ModelId {
   return `${provider}:${name}`;
+}
+
+function supportsOpenAiMaxEffort(modelName: string): boolean {
+  return modelName === "gpt-5.6" || modelName.startsWith("gpt-5.6-");
 }
 
 function normalizedModelName(provider: string, name: string): string {

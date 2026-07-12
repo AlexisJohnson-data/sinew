@@ -57,6 +57,8 @@ pub(super) async fn estimate_context(
     let skill_settings = state.store.load_skill_settings().map_err(error_to_string)?;
     let mut tools = tool_descriptors_for_workspace(&workspace_root, mode, &skill_settings);
     let mcp_settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    let mcp_settings =
+        crate::mcp_oauth::resolve_mcp_oauth_settings(&state.store, mcp_settings).await;
     let mcp = McpToolRegistry::new(mcp_settings.clone());
     let mcp_tools = mcp.refresh_catalog(&conversation.history).await;
     let mcp_tool_names = tool_name_set(&mcp_tools);
@@ -145,6 +147,8 @@ pub(super) async fn estimate_sub_agent_context(
     let skill_settings = state.store.load_skill_settings().map_err(error_to_string)?;
     let mut tools = tool_descriptors_for_workspace(&workspace_root, mode, &skill_settings);
     let mcp_settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    let mcp_settings =
+        crate::mcp_oauth::resolve_mcp_oauth_settings(&state.store, mcp_settings).await;
     let mcp = McpToolRegistry::new(mcp_settings);
     let mcp_tools = mcp.refresh_catalog(&input.history).await;
     let mcp_tool_names = tool_name_set(&mcp_tools);

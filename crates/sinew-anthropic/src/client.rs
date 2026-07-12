@@ -18,7 +18,7 @@ const API_VERSION: &str = "2023-06-01";
 const USER_AGENT: &str = "claude-cli/2.1.75";
 const CODE_SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 // Note: we intentionally do NOT advertise `context-1m-2025-08-07` here.
-// All models currently shipped in the app (Opus 4.6/4.7/4.8, Sonnet 4.6) already
+// All models currently shipped in the app (Opus 4.6/4.7/4.8, Sonnet 4.6/5) already
 // expose a 1M context window natively, and Haiku 4.5 does not support that
 // beta at all. Sending it inconditionally caused:
 //   * Sonnet 4.6 → server-side tier gating → `rate_limit_error: Extra usage
@@ -30,8 +30,13 @@ const COMMON_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 const OAUTH_BETA: &str = "claude-code-20250219,oauth-2025-04-20";
 const CACHE_BREAKPOINTS: usize = 4;
 const ANTHROPIC_MAX_IMAGE_BASE64_BYTES: usize = 5 * 1024 * 1024;
+// Anthropic rejects any image whose width or height exceeds 8000 px (e.g. a
+// `full_page` browser screenshot of a long page). Such an image poisons the
+// whole conversation: it sits in history and every later request 400s. We drop
+// it here so the conversation keeps working.
+const ANTHROPIC_MAX_IMAGE_DIMENSION: u32 = 8000;
 const ANTHROPIC_SKIPPED_IMAGE_TOO_LARGE: &str =
-    "[Skipped: image is too large for Anthropic and exceeds the 5 MiB limit. Try compressing it first.]";
+    "[Skipped: image too large for Anthropic (over 5 MiB or 8000 px on a side). Capture a smaller screenshot — e.g. without full_page.]";
 
 #[derive(Clone)]
 pub struct AnthropicConfig {
@@ -456,34 +461,45 @@ fn to_wire_message(message: &ChatMessage, cache: bool) -> Result<Option<wire::Wi
                 is_error,
                 ..
             } => {
-                let mut skipped_oversized_image = false;
-                let inline_images = images
-                    .iter()
-                    .filter(|image| !image.data.trim().is_empty())
-                    .filter(|image| {
-                        let keep = image_base64_fits_anthropic(&image.data);
-                        skipped_oversized_image |= !keep;
-                        keep
+                let result_content = if *is_error {
+                    // Anthropic requires an errored tool_result to be text-only
+                    // ("all content must be type 'text' if is_error is true").
+                    // Drop any image blocks and keep just the error text.
+                    wire::ToolResultContent::Text(if text.trim().is_empty() {
+                        "[tool error]"
+                    } else {
+                        text
                     })
-                    .collect::<Vec<_>>();
-                let result_content = if inline_images.is_empty() && !skipped_oversized_image {
-                    wire::ToolResultContent::Text(text)
                 } else {
-                    let mut blocks = Vec::new();
-                    if !text.trim().is_empty() {
-                        blocks.push(wire::ToolResultBlock::Text { text });
-                    }
-                    blocks.extend(inline_images.into_iter().map(|image| {
-                        wire::ToolResultBlock::Image {
-                            source: image_source(&image.media_type, &image.data),
+                    let mut skipped_oversized_image = false;
+                    let inline_images = images
+                        .iter()
+                        .filter(|image| !image.data.trim().is_empty())
+                        .filter(|image| {
+                            let keep = image_base64_fits_anthropic(&image.data);
+                            skipped_oversized_image |= !keep;
+                            keep
+                        })
+                        .collect::<Vec<_>>();
+                    if inline_images.is_empty() && !skipped_oversized_image {
+                        wire::ToolResultContent::Text(text)
+                    } else {
+                        let mut blocks = Vec::new();
+                        if !text.trim().is_empty() {
+                            blocks.push(wire::ToolResultBlock::Text { text });
                         }
-                    }));
-                    if skipped_oversized_image {
-                        blocks.push(wire::ToolResultBlock::Text {
-                            text: ANTHROPIC_SKIPPED_IMAGE_TOO_LARGE,
-                        });
+                        blocks.extend(inline_images.into_iter().map(|image| {
+                            wire::ToolResultBlock::Image {
+                                source: image_source(&image.media_type, &image.data),
+                            }
+                        }));
+                        if skipped_oversized_image {
+                            blocks.push(wire::ToolResultBlock::Text {
+                                text: ANTHROPIC_SKIPPED_IMAGE_TOO_LARGE,
+                            });
+                        }
+                        wire::ToolResultContent::Blocks(blocks)
                     }
-                    wire::ToolResultContent::Blocks(blocks)
                 };
                 content.push(wire::WirePart::ToolResult {
                     tool_use_id: tool_call_id,
@@ -523,7 +539,26 @@ fn image_source<'a>(media_type: &'a str, data: &'a str) -> wire::ImageSource<'a>
 }
 
 fn image_base64_fits_anthropic(data: &str) -> bool {
-    data.len() <= ANTHROPIC_MAX_IMAGE_BASE64_BYTES
+    data.len() <= ANTHROPIC_MAX_IMAGE_BASE64_BYTES && image_dimensions_within_limit(data)
+}
+
+/// True if the image's pixel dimensions are within Anthropic's 8000 px cap.
+/// Reads only the header (no full decode). Fails open: if the dimensions can't
+/// be determined we keep the image rather than drop a possibly-valid one.
+fn image_dimensions_within_limit(data: &str) -> bool {
+    let Ok(bytes) = BASE64_STANDARD.decode(data) else {
+        return true;
+    };
+    match image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|reader| reader.into_dimensions().ok())
+    {
+        Some((width, height)) => {
+            width <= ANTHROPIC_MAX_IMAGE_DIMENSION && height <= ANTHROPIC_MAX_IMAGE_DIMENSION
+        }
+        None => true,
+    }
 }
 
 fn part_is_ui_only(part: &Part) -> bool {

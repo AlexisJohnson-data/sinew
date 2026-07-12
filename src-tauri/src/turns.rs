@@ -135,6 +135,8 @@ pub(super) async fn send_message(
         .capabilities(&conversation.model)
         .ok_or_else(|| format!("model `{}` is not supported", conversation.model.name))?;
     let mcp_settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    let mcp_settings =
+        crate::mcp_oauth::resolve_mcp_oauth_settings(&state.store, mcp_settings).await;
     let sub_agent_settings = state
         .store
         .load_sub_agent_settings()
@@ -228,6 +230,10 @@ pub(super) async fn send_message(
             tool_settings.linkup_api_key(),
         )),
         web_fetch: Arc::new(WebFetchTool::new()),
+        browser: Arc::new(BrowserTools::new(
+            workspace_id.clone(),
+            state.browser_sessions.clone(),
+        )),
         skill: Arc::new(SkillTool::with_settings(
             workspace_root.clone(),
             skill_settings.clone(),

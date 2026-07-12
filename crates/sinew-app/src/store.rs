@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::agent::AgentMode;
 use crate::bash::active_shell_display_name;
 use crate::mcp::McpSettings;
+use crate::mcp_oauth::McpOAuthRecord;
 use crate::skill::SkillSettings;
 use crate::subagent::SubAgentSettings;
 use crate::todo::TodoListState;
@@ -25,6 +26,7 @@ use crate::workspace::{workspace_info, WorkspaceInfo};
 const DEFAULT_CONVERSATION_TITLE: &str = "New conversation";
 const MODE_MODEL_SETTINGS_KEY: &str = "mode_model_settings";
 const MCP_SETTINGS_KEY: &str = "mcp_settings";
+const MCP_OAUTH_TOKENS_KEY: &str = "mcp_oauth_tokens";
 const SUB_AGENT_SETTINGS_KEY: &str = "sub_agent_settings";
 const TOOL_SETTINGS_KEY: &str = "tool_settings";
 const SKILL_SETTINGS_KEY: &str = "skill_settings";
@@ -288,9 +290,17 @@ pub struct ToolSettings {
     /// dislike pings can opt out from Settings.
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
+    /// Master switch for the in-app Chrome browser tools. Defaults to
+    /// `true` so the browser stays available out of the box.
+    #[serde(default = "default_browser_enabled")]
+    pub browser_enabled: bool,
 }
 
 fn default_notifications_enabled() -> bool {
+    true
+}
+
+fn default_browser_enabled() -> bool {
     true
 }
 
@@ -307,6 +317,7 @@ impl Default for ToolSettings {
             linkup_api_key: String::new(),
             shell_preference: ShellPreference::default(),
             notifications_enabled: default_notifications_enabled(),
+            browser_enabled: default_browser_enabled(),
         }
     }
 }
@@ -1237,6 +1248,58 @@ impl AppStore {
             params![MCP_SETTINGS_KEY, serde_json::to_string(settings)?, now_ms()],
         )
         .context("unable to save MCP settings")?;
+        Ok(())
+    }
+
+    /// All persisted MCP OAuth tokens, keyed by server id.
+    pub fn load_mcp_oauth_tokens(&self) -> Result<HashMap<String, McpOAuthRecord>> {
+        let conn = self.connection()?;
+        let stored = conn
+            .query_row(
+                "select value_json from app_settings where key = ?1",
+                params![MCP_OAUTH_TOKENS_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("unable to read MCP OAuth tokens")?;
+
+        if let Some(json) = stored {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, McpOAuthRecord>>(&json) {
+                return Ok(map);
+            }
+        }
+        Ok(HashMap::new())
+    }
+
+    pub fn save_mcp_oauth_token(&self, server_id: &str, record: &McpOAuthRecord) -> Result<()> {
+        let mut tokens = self.load_mcp_oauth_tokens()?;
+        tokens.insert(server_id.to_string(), record.clone());
+        self.write_mcp_oauth_tokens(&tokens)
+    }
+
+    pub fn delete_mcp_oauth_token(&self, server_id: &str) -> Result<()> {
+        let mut tokens = self.load_mcp_oauth_tokens()?;
+        if tokens.remove(server_id).is_some() {
+            self.write_mcp_oauth_tokens(&tokens)?;
+        }
+        Ok(())
+    }
+
+    fn write_mcp_oauth_tokens(&self, tokens: &HashMap<String, McpOAuthRecord>) -> Result<()> {
+        let conn = self.connection()?;
+        conn.execute(
+            "insert into app_settings (key, value_json, updated_at_ms)
+             values (?1, ?2, ?3)
+             on conflict(key) do update set
+                value_json = excluded.value_json,
+                updated_at_ms = excluded.updated_at_ms",
+            params![
+                MCP_OAUTH_TOKENS_KEY,
+                serde_json::to_string(tokens)?,
+                now_ms()
+            ],
+        )
+        .context("unable to save MCP OAuth tokens")?;
         Ok(())
     }
 

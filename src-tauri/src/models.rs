@@ -23,6 +23,21 @@ pub(super) struct StartOpenAiLoginOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct StartMcpLoginOutput {
+    pub(super) login_id: String,
+    pub(super) auth_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpLoginStatus {
+    pub(super) pending: bool,
+    pub(super) success: bool,
+    pub(super) error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct AnthropicProviderStatus {
     pub(super) connected: bool,
     pub(super) connection_state: String,

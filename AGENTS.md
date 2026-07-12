@@ -79,6 +79,7 @@ Code map:
 │   │       ├── image.rs
 │   │       ├── lib.rs
 │   │       ├── mcp.rs
+│   │       ├── mcp_oauth.rs
 │   │       ├── powershell.rs
 │   │       ├── question.rs
 │   │       ├── read.rs
@@ -240,6 +241,7 @@ Code map:
 │       ├── git.rs
 │       ├── lib.rs
 │       ├── main.rs
+│       ├── mcp_oauth.rs
 │       ├── models.rs
 │       ├── platform.rs
 │       ├── providers.rs

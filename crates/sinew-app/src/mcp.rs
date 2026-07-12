@@ -11,6 +11,8 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
+use eventsource_stream::Eventsource;
+use futures_util::{stream::BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sinew_core::{ChatMessage, Part, ToolDescriptor};
@@ -41,11 +43,24 @@ pub struct McpSettings {
     pub servers: Vec<McpServerConfig>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum McpTransport {
+    /// Local process speaking JSON-RPC over stdin/stdout.
+    #[default]
+    Stdio,
+    /// Streamable HTTP (single URL, JSON responses and/or SSE response bodies).
+    Http,
+    /// Legacy HTTP+SSE MCP transport: GET event stream + POST message endpoint.
+    Sse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfig {
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -55,6 +70,42 @@ pub struct McpServerConfig {
     pub cwd: Option<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// MCP transport. Defaults to `stdio` for command configs and is inferred
+    /// as `http`/`sse` when `url` is present in imported legacy configs.
+    #[serde(default)]
+    pub transport: McpTransport,
+    /// Remote MCP server URL. For `http`, this is the streamable HTTP endpoint
+    /// (for example https://mcp.figma.com/mcp). For `sse`, this is the SSE
+    /// endpoint (commonly /sse); Sinew follows endpoint events when provided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Remote transports: extra request headers (e.g. Authorization: Bearer …).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<McpEnvVar>,
+    /// Optional OAuth hints for remote MCP servers. Most servers work with
+    /// discovery + dynamic registration; some only allow pre-registered
+    /// clients, so users can provide these fields in the MCP JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<McpOAuthClientConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthClientConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint_auth_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +176,7 @@ impl McpToolRegistry {
         let mut next_bindings = HashMap::new();
 
         for server in enabled_servers(&self.settings) {
-            let mut client = match McpStdioClient::connect(server).await {
+            let mut client = match McpClient::connect(server).await {
                 Ok(client) => client,
                 Err(err) => {
                     warn!("unable to connect MCP server {}: {err}", server.name);
@@ -437,7 +488,7 @@ pub async fn probe_mcp_servers(settings: &McpSettings) -> Vec<McpServerProbe> {
             continue;
         }
 
-        let mut client = match McpStdioClient::connect(server).await {
+        let mut client = match McpClient::connect(server).await {
             Ok(client) => client,
             Err(err) => {
                 probes.push(McpServerProbe {
@@ -501,10 +552,9 @@ pub async fn probe_mcp_servers(settings: &McpSettings) -> Vec<McpServerProbe> {
 }
 
 fn enabled_servers(settings: &McpSettings) -> impl Iterator<Item = &McpServerConfig> {
-    settings
-        .servers
-        .iter()
-        .filter(|server| server.enabled && !server.command.trim().is_empty())
+    settings.servers.iter().filter(|server| {
+        server.enabled && (is_remote_server(server) || !server.command.trim().is_empty())
+    })
 }
 
 async fn call_mcp_tool(binding: McpToolBinding, input: Value) -> ToolRunResult {
@@ -515,7 +565,7 @@ async fn call_mcp_tool(binding: McpToolBinding, input: Value) -> ToolRunResult {
 }
 
 async fn call_mcp_tool_inner(binding: McpToolBinding, input: Value) -> Result<ToolRunResult> {
-    let mut client = McpStdioClient::connect_with_timeout(&binding.server, CALL_TIMEOUT).await?;
+    let mut client = McpClient::connect_with_timeout(&binding.server, CALL_TIMEOUT).await?;
     let result = client.call_tool(&binding.original_name, input).await?;
     Ok(format_call_result(result))
 }
@@ -769,10 +819,6 @@ struct McpStdioClient {
 }
 
 impl McpStdioClient {
-    async fn connect(config: &McpServerConfig) -> Result<Self> {
-        Self::connect_with_timeout(config, REQUEST_TIMEOUT).await
-    }
-
     async fn connect_with_timeout(
         config: &McpServerConfig,
         request_timeout: Duration,
@@ -971,6 +1017,529 @@ impl McpStdioClient {
         self.stdin.flush().await?;
         Ok(())
     }
+}
+
+/* ────────────────────── Transport dispatch ────────────────────────── */
+
+fn has_url(config: &McpServerConfig) -> bool {
+    config
+        .url
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|u| !u.is_empty())
+}
+
+fn is_remote_server(config: &McpServerConfig) -> bool {
+    has_url(config) || matches!(config.transport, McpTransport::Http | McpTransport::Sse)
+}
+
+enum McpClient {
+    Stdio(McpStdioClient),
+    Http(McpHttpClient),
+    Sse(McpSseClient),
+}
+
+impl McpClient {
+    async fn connect(config: &McpServerConfig) -> Result<Self> {
+        Self::connect_with_timeout(config, REQUEST_TIMEOUT).await
+    }
+
+    async fn connect_with_timeout(config: &McpServerConfig, t: Duration) -> Result<Self> {
+        match effective_transport(config) {
+            McpTransport::Stdio => Ok(Self::Stdio(
+                McpStdioClient::connect_with_timeout(config, t).await?,
+            )),
+            McpTransport::Http => Ok(Self::Http(
+                McpHttpClient::connect_with_timeout(config, t).await?,
+            )),
+            McpTransport::Sse => Ok(Self::Sse(
+                McpSseClient::connect_with_timeout(config, t).await?,
+            )),
+        }
+    }
+
+    async fn list_tools(&mut self) -> Result<Vec<McpServerTool>> {
+        match self {
+            Self::Stdio(c) => c.list_tools().await,
+            Self::Http(c) => c.list_tools().await,
+            Self::Sse(c) => c.list_tools().await,
+        }
+    }
+
+    async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<McpCallToolResult> {
+        match self {
+            Self::Stdio(c) => c.call_tool(name, arguments).await,
+            Self::Http(c) => c.call_tool(name, arguments).await,
+            Self::Sse(c) => c.call_tool(name, arguments).await,
+        }
+    }
+}
+
+fn effective_transport(config: &McpServerConfig) -> McpTransport {
+    match config.transport {
+        McpTransport::Stdio if has_url(config) => McpTransport::Http,
+        other => other,
+    }
+}
+
+fn config_headers(config: &McpServerConfig) -> Vec<(String, String)> {
+    config
+        .headers
+        .iter()
+        .filter(|h| !h.key.trim().is_empty())
+        .map(|h| (h.key.trim().to_string(), h.value.clone()))
+        .collect()
+}
+
+fn remote_url(config: &McpServerConfig, label: &str) -> Result<String> {
+    config
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| anyhow!("{label} MCP server `{}` missing url", config.name))
+        .map(str::to_string)
+}
+
+fn apply_headers(
+    mut builder: reqwest::RequestBuilder,
+    headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    for (k, v) in headers {
+        builder = builder.header(k.as_str(), v.as_str());
+    }
+    builder
+}
+
+/* ─────────────────────────── HTTP client ──────────────────────────── */
+
+struct McpHttpClient {
+    url: String,
+    headers: Vec<(String, String)>,
+    session_id: Option<String>,
+    client: reqwest::Client,
+    next_id: u64,
+    request_timeout: Duration,
+}
+
+impl McpHttpClient {
+    async fn connect_with_timeout(
+        config: &McpServerConfig,
+        request_timeout: Duration,
+    ) -> Result<Self> {
+        let url = remote_url(config, "HTTP")?;
+
+        let headers = config_headers(config);
+
+        let client = reqwest::Client::builder()
+            .timeout(request_timeout + Duration::from_secs(5))
+            .build()
+            .context("unable to build HTTP client")?;
+
+        let mut c = Self {
+            url,
+            headers,
+            session_id: None,
+            client,
+            next_id: 1,
+            request_timeout,
+        };
+        // initialize is best-effort — some servers skip it
+        if let Err(err) = c.initialize().await {
+            warn!("MCP HTTP initialize failed for `{}`: {err}", config.name);
+        }
+        Ok(c)
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        let result = self
+            .request(
+                "initialize",
+                json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": { "name": "sinew", "version": env!("CARGO_PKG_VERSION") }
+                }),
+            )
+            .await?;
+        // Store session id if the server issued one in the JSON body. Most
+        // streamable HTTP servers send it as a response header, which is
+        // captured in `request`, but accepting both keeps older remotes happy.
+        if let Some(id) = result
+            .get("sessionId")
+            .or_else(|| result.get("session_id"))
+            .and_then(Value::as_str)
+        {
+            self.session_id = Some(id.to_string());
+        }
+        self.notify("notifications/initialized", None).await?;
+        Ok(())
+    }
+
+    async fn notify(&mut self, method: &str, params: Option<Value>) -> Result<()> {
+        let mut body = json!({
+            "jsonrpc": "2.0",
+            "method": method
+        });
+        if let Some(params) = params {
+            body["params"] = params;
+        }
+
+        let mut builder = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .json(&body);
+        builder = apply_headers(builder, &self.headers);
+        if let Some(sid) = &self.session_id {
+            builder = builder.header("Mcp-Session-Id", sid.as_str());
+        }
+
+        let resp = timeout(self.request_timeout, builder.send())
+            .await
+            .map_err(|_| anyhow!("HTTP MCP notification `{method}` timed out"))?
+            .with_context(|| format!("HTTP MCP notification `{method}` failed"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            bail!("HTTP MCP notification returned {status}: {text}");
+        }
+        Ok(())
+    }
+
+    async fn list_tools(&mut self) -> Result<Vec<McpServerTool>> {
+        let mut tools = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let params = match cursor.as_deref() {
+                Some(c) => json!({ "cursor": c }),
+                None => json!({}),
+            };
+            let value = self.request("tools/list", params).await?;
+            let page: McpListToolsResult =
+                serde_json::from_value(value).context("invalid MCP tools/list response")?;
+            tools.extend(page.tools);
+            cursor = page.next_cursor;
+            if cursor.as_deref().unwrap_or_default().is_empty() {
+                break;
+            }
+        }
+        Ok(tools)
+    }
+
+    async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<McpCallToolResult> {
+        let params = json!({
+            "name": name,
+            "arguments": match arguments { Value::Object(_) => arguments, _ => json!({}) }
+        });
+        let value = self.request("tools/call", params).await?;
+        serde_json::from_value(value).context("invalid MCP tools/call response")
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        });
+
+        let mut builder = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .json(&body);
+
+        builder = apply_headers(builder, &self.headers);
+        if let Some(sid) = &self.session_id {
+            builder = builder.header("Mcp-Session-Id", sid.as_str());
+        }
+
+        let resp = timeout(self.request_timeout, builder.send())
+            .await
+            .map_err(|_| anyhow!("HTTP MCP request `{method}` timed out"))?
+            .with_context(|| format!("HTTP MCP request `{method}` failed"))?;
+
+        if let Some(sid) = resp
+            .headers()
+            .get("Mcp-Session-Id")
+            .or_else(|| resp.headers().get("mcp-session-id"))
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| !v.trim().is_empty())
+        {
+            self.session_id = Some(sid.to_string());
+        }
+
+        let status = resp.status();
+        let ct = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            bail!("HTTP MCP server returned {status}: {text}");
+        }
+
+        if ct.contains("text/event-stream") {
+            self.collect_sse(resp, id).await
+        } else {
+            let value: Value = resp
+                .json()
+                .await
+                .context("HTTP MCP response was not valid JSON")?;
+            extract_jsonrpc_result(&value)
+        }
+    }
+
+    async fn collect_sse(&self, resp: reqwest::Response, expected_id: u64) -> Result<Value> {
+        let mut stream = resp.bytes_stream().eventsource();
+        while let Some(event) = stream.next().await {
+            let event = event.context("SSE stream error")?;
+            if let Some(value) = jsonrpc_from_sse_event(&event.data) {
+                if value.get("id") == Some(&json!(expected_id)) {
+                    return extract_jsonrpc_result(&value);
+                }
+            }
+        }
+        bail!("HTTP MCP SSE stream closed without matching response")
+    }
+}
+
+/* ─────────────────────────── Legacy SSE client ──────────────────────── */
+
+type SseEventStream = BoxStream<
+    'static,
+    Result<eventsource_stream::Event, eventsource_stream::EventStreamError<reqwest::Error>>,
+>;
+
+struct McpSseClient {
+    message_url: String,
+    headers: Vec<(String, String)>,
+    client: reqwest::Client,
+    stream: SseEventStream,
+    next_id: u64,
+    request_timeout: Duration,
+}
+
+impl McpSseClient {
+    async fn connect_with_timeout(
+        config: &McpServerConfig,
+        request_timeout: Duration,
+    ) -> Result<Self> {
+        let sse_url = remote_url(config, "SSE")?;
+        let headers = config_headers(config);
+        let client = reqwest::Client::builder()
+            .timeout(request_timeout + Duration::from_secs(5))
+            .build()
+            .context("unable to build SSE client")?;
+
+        let (message_url, stream) =
+            open_sse_stream(&client, &sse_url, &headers, request_timeout).await?;
+        let mut c = Self {
+            message_url,
+            headers,
+            client,
+            stream,
+            next_id: 1,
+            request_timeout,
+        };
+        c.initialize().await?;
+        c.notify("notifications/initialized", None).await?;
+        Ok(c)
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        self.request(
+            "initialize",
+            json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": { "name": "sinew", "version": env!("CARGO_PKG_VERSION") }
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn list_tools(&mut self) -> Result<Vec<McpServerTool>> {
+        let mut tools = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let params = match cursor.as_deref() {
+                Some(c) => json!({ "cursor": c }),
+                None => json!({}),
+            };
+            let value = self.request("tools/list", params).await?;
+            let page: McpListToolsResult =
+                serde_json::from_value(value).context("invalid MCP tools/list response")?;
+            tools.extend(page.tools);
+            cursor = page.next_cursor;
+            if cursor.as_deref().unwrap_or_default().is_empty() {
+                break;
+            }
+        }
+        Ok(tools)
+    }
+
+    async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<McpCallToolResult> {
+        let params = json!({
+            "name": name,
+            "arguments": match arguments { Value::Object(_) => arguments, _ => json!({}) }
+        });
+        let value = self.request("tools/call", params).await?;
+        serde_json::from_value(value).context("invalid MCP tools/call response")
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id;
+        self.next_id += 1;
+        let message = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params
+        });
+        self.read_sse_response_after_post(id, &message).await
+    }
+
+    async fn notify(&mut self, method: &str, params: Option<Value>) -> Result<()> {
+        let mut message = json!({
+            "jsonrpc": "2.0",
+            "method": method
+        });
+        if let Some(params) = params {
+            message["params"] = params;
+        }
+        post_sse_message(
+            self.client.clone(),
+            self.message_url.clone(),
+            self.headers.clone(),
+            self.request_timeout,
+            message,
+        )
+        .await
+    }
+
+    async fn read_sse_response_after_post(
+        &mut self,
+        expected_id: u64,
+        message: &Value,
+    ) -> Result<Value> {
+        post_sse_message(
+            self.client.clone(),
+            self.message_url.clone(),
+            self.headers.clone(),
+            self.request_timeout,
+            message.clone(),
+        )
+        .await?;
+        while let Some(event) = self.stream.next().await {
+            let event = event.context("SSE stream error")?;
+            if let Some(value) = jsonrpc_from_sse_event(&event.data) {
+                if value.get("id") == Some(&json!(expected_id)) {
+                    return extract_jsonrpc_result(&value);
+                }
+            }
+        }
+        bail!("SSE MCP stream closed without matching response")
+    }
+}
+
+async fn post_sse_message(
+    client: reqwest::Client,
+    message_url: String,
+    headers: Vec<(String, String)>,
+    request_timeout: Duration,
+    message: Value,
+) -> Result<()> {
+    let builder = client
+        .post(&message_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&message);
+    let resp = timeout(request_timeout, apply_headers(builder, &headers).send())
+        .await
+        .map_err(|_| anyhow!("SSE MCP POST timed out"))?
+        .context("SSE MCP POST failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        bail!("SSE MCP POST returned {status}: {text}");
+    }
+    Ok(())
+}
+
+async fn open_sse_stream(
+    client: &reqwest::Client,
+    sse_url: &str,
+    headers: &[(String, String)],
+    request_timeout: Duration,
+) -> Result<(String, SseEventStream)> {
+    let builder = client.get(sse_url).header("Accept", "text/event-stream");
+    let resp = timeout(request_timeout, apply_headers(builder, headers).send())
+        .await
+        .map_err(|_| anyhow!("SSE MCP endpoint discovery timed out"))?
+        .context("SSE MCP endpoint discovery failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        bail!("SSE MCP endpoint discovery returned {status}: {text}");
+    }
+
+    let base = resp.url().clone();
+    let mut stream = resp.bytes_stream().eventsource().boxed();
+    while let Some(event) = stream.next().await {
+        let event = event.context("SSE endpoint stream error")?;
+        if event.event == "endpoint" {
+            let endpoint = event.data.trim();
+            if endpoint.is_empty() {
+                continue;
+            }
+            let message_url = resolve_url(&base, endpoint)
+                .with_context(|| format!("invalid SSE message endpoint `{endpoint}`"))?;
+            return Ok((message_url, stream));
+        }
+        if let Some(endpoint) = endpoint_from_json_event(&event.data) {
+            let message_url = resolve_url(&base, &endpoint)
+                .with_context(|| format!("invalid SSE message endpoint `{endpoint}`"))?;
+            return Ok((message_url, stream));
+        }
+    }
+    bail!("SSE MCP server did not advertise a message endpoint")
+}
+
+fn jsonrpc_from_sse_event(data: &str) -> Option<Value> {
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str::<Value>(trimmed).ok()
+}
+
+fn endpoint_from_json_event(data: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(data.trim()).ok()?;
+    input_string(&value, &["endpoint", "uri", "url"])
+}
+
+fn resolve_url(base: &url::Url, value: &str) -> Result<String> {
+    Ok(base.join(value)?.to_string())
+}
+
+fn extract_jsonrpc_result(value: &Value) -> Result<Value> {
+    if let Some(error) = value.get("error") {
+        bail!("{}", format_json_rpc_error(error));
+    }
+    value
+        .get("result")
+        .cloned()
+        .ok_or_else(|| anyhow!("MCP response missing result"))
 }
 
 static DEFAULT_MCP_SEARCH_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
@@ -1292,9 +1861,7 @@ impl McpImportFormat {
         match value.trim().to_ascii_lowercase().as_str() {
             "claude" | "claude-json" | "claude_json" => Ok(Self::ClaudeJson),
             "codex" | "codex-toml" | "codex_toml" => Ok(Self::CodexToml),
-            other => bail!(
-                "unknown MCP import format `{other}` (expected `claude` or `codex`)"
-            ),
+            other => bail!("unknown MCP import format `{other}` (expected `claude` or `codex`)"),
         }
     }
 }
@@ -1323,10 +1890,7 @@ pub struct ImportMcpResult {
 /// Read `path` according to `format` and return parsed
 /// `McpServerConfig` entries ready to merge. Each entry already has a
 /// freshly generated id; callers re-key/skip them by name.
-pub fn parse_mcp_import_file(
-    path: &Path,
-    format: McpImportFormat,
-) -> Result<Vec<McpServerConfig>> {
+pub fn parse_mcp_import_file(path: &Path, format: McpImportFormat) -> Result<Vec<McpServerConfig>> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("unable to read MCP import file {}", path.display()))?;
     match format {
@@ -1336,17 +1900,18 @@ pub fn parse_mcp_import_file(
 }
 
 fn parse_claude_mcp_json(raw: &str) -> Result<Vec<McpServerConfig>> {
-    // Claude Code's `~/.claude.json` is a big object with many keys; we
-    // only care about `mcpServers`. Tolerate missing/empty: return [] so
-    // the UI can say "nothing to import" instead of erroring.
+    // Supports two formats:
+    // 1. Claude Desktop: top-level `mcpServers` object
+    // 2. Claude Code settings: `mcp.servers` object (also handles `type: "http"`)
     let root: Value = serde_json::from_str(raw).context("invalid JSON in Claude config")?;
-    let servers = match root.get("mcpServers") {
-        Some(Value::Object(map)) => map.clone(),
-        Some(Value::Null) | None => return Ok(Vec::new()),
-        Some(other) => bail!(
-            "Claude config `mcpServers` must be an object, got {}",
-            value_kind(other)
-        ),
+
+    // Prefer top-level `mcpServers`; fall back to `mcp.servers`
+    let servers = if let Some(Value::Object(map)) = root.get("mcpServers") {
+        map.clone()
+    } else if let Some(Value::Object(map)) = root.get("mcp").and_then(|v| v.get("servers")) {
+        map.clone()
+    } else {
+        return Ok(Vec::new());
     };
 
     let mut out = Vec::with_capacity(servers.len());
@@ -1354,41 +1919,88 @@ fn parse_claude_mcp_json(raw: &str) -> Result<Vec<McpServerConfig>> {
         let Value::Object(entry) = value else {
             continue;
         };
-        let command = entry
-            .get("command")
+
+        let transport = entry
+            .get("type")
+            .or_else(|| entry.get("transport"))
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if command.is_empty() {
-            continue;
+            .unwrap_or("stdio");
+
+        if transport.eq_ignore_ascii_case("http")
+            || transport.eq_ignore_ascii_case("streamable_http")
+            || transport.eq_ignore_ascii_case("streamable-http")
+            || transport.eq_ignore_ascii_case("sse")
+        {
+            // Remote transport
+            let url = entry
+                .get("url")
+                .or_else(|| entry.get("serverUrl"))
+                .or_else(|| entry.get("server_url"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_string);
+            let Some(url) = url else { continue };
+            let headers = parse_env_object(entry.get("headers"));
+            out.push(McpServerConfig {
+                id: generate_mcp_id(&name),
+                name,
+                command: String::new(),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                enabled: true,
+                transport: if transport.eq_ignore_ascii_case("sse") {
+                    McpTransport::Sse
+                } else {
+                    McpTransport::Http
+                },
+                url: Some(url),
+                headers,
+                oauth: parse_oauth_config(&entry),
+            });
+        } else {
+            // stdio transport
+            let command = entry
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if command.is_empty() {
+                continue;
+            }
+            let args = entry
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| s.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let env = parse_env_object(entry.get("env"));
+            let cwd = entry
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            out.push(McpServerConfig {
+                id: generate_mcp_id(&name),
+                name,
+                command,
+                args,
+                env,
+                cwd,
+                enabled: true,
+                transport: McpTransport::Stdio,
+                url: None,
+                headers: Vec::new(),
+                oauth: None,
+            });
         }
-        let args = entry
-            .get("args")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let env = parse_env_object(entry.get("env"));
-        let cwd = entry
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        out.push(McpServerConfig {
-            id: generate_mcp_id(&name),
-            name,
-            command,
-            args,
-            env,
-            cwd,
-            enabled: true,
-        });
     }
     Ok(out)
 }
@@ -1417,6 +2029,51 @@ fn parse_codex_mcp_toml(raw: &str) -> Result<Vec<McpServerConfig>> {
         let Some(entry) = value.as_table() else {
             continue;
         };
+        let transport = entry
+            .get("type")
+            .or_else(|| entry.get("transport"))
+            .and_then(|v| v.as_str())
+            .map(parse_transport_label)
+            .unwrap_or(McpTransport::Stdio);
+        let url = entry
+            .get("url")
+            .or_else(|| entry.get("server_url"))
+            .or_else(|| entry.get("serverUrl"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        if matches!(transport, McpTransport::Http | McpTransport::Sse) || url.is_some() {
+            let Some(url) = url else { continue };
+            let headers = entry
+                .get("headers")
+                .and_then(|v| v.as_table())
+                .map(|tbl| {
+                    tbl.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .map(|(key, value)| McpEnvVar { key, value })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            out.push(McpServerConfig {
+                id: generate_mcp_id(&name),
+                name,
+                command: String::new(),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                enabled: true,
+                transport: if matches!(transport, McpTransport::Sse) {
+                    McpTransport::Sse
+                } else {
+                    McpTransport::Http
+                },
+                url: Some(url),
+                headers,
+                oauth: parse_toml_oauth_config(entry),
+            });
+            continue;
+        }
         let command = entry
             .get("command")
             .and_then(|v| v.as_str())
@@ -1460,9 +2117,21 @@ fn parse_codex_mcp_toml(raw: &str) -> Result<Vec<McpServerConfig>> {
             env,
             cwd,
             enabled: true,
+            transport: McpTransport::Stdio,
+            url: None,
+            headers: Vec::new(),
+            oauth: None,
         });
     }
     Ok(out)
+}
+
+fn parse_transport_label(value: &str) -> McpTransport {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "http" | "streamable_http" | "streamable-http" => McpTransport::Http,
+        "sse" => McpTransport::Sse,
+        _ => McpTransport::Stdio,
+    }
 }
 
 fn parse_env_object(value: Option<&Value>) -> Vec<McpEnvVar> {
@@ -1475,15 +2144,66 @@ fn parse_env_object(value: Option<&Value>) -> Vec<McpEnvVar> {
         .collect()
 }
 
-fn value_kind(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
+fn parse_oauth_config(entry: &serde_json::Map<String, Value>) -> Option<McpOAuthClientConfig> {
+    let nested = entry.get("oauth").and_then(Value::as_object);
+    let string_field = |name: &str| {
+        nested
+            .and_then(|oauth| oauth.get(name))
+            .or_else(|| entry.get(name))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let config = McpOAuthClientConfig {
+        client_id: string_field("clientId").or_else(|| string_field("client_id")),
+        client_secret: string_field("clientSecret").or_else(|| string_field("client_secret")),
+        scope: string_field("scope"),
+        authorization_endpoint: string_field("authorizationEndpoint")
+            .or_else(|| string_field("authorization_endpoint")),
+        token_endpoint: string_field("tokenEndpoint").or_else(|| string_field("token_endpoint")),
+        resource: string_field("resource"),
+        token_endpoint_auth_method: string_field("tokenEndpointAuthMethod")
+            .or_else(|| string_field("token_endpoint_auth_method")),
+    };
+    oauth_config_has_values(&config).then_some(config)
+}
+
+fn parse_toml_oauth_config(
+    entry: &toml::map::Map<String, toml::Value>,
+) -> Option<McpOAuthClientConfig> {
+    let nested = entry.get("oauth").and_then(|value| value.as_table());
+    let string_field = |name: &str| {
+        nested
+            .and_then(|oauth| oauth.get(name))
+            .or_else(|| entry.get(name))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let config = McpOAuthClientConfig {
+        client_id: string_field("clientId").or_else(|| string_field("client_id")),
+        client_secret: string_field("clientSecret").or_else(|| string_field("client_secret")),
+        scope: string_field("scope"),
+        authorization_endpoint: string_field("authorizationEndpoint")
+            .or_else(|| string_field("authorization_endpoint")),
+        token_endpoint: string_field("tokenEndpoint").or_else(|| string_field("token_endpoint")),
+        resource: string_field("resource"),
+        token_endpoint_auth_method: string_field("tokenEndpointAuthMethod")
+            .or_else(|| string_field("token_endpoint_auth_method")),
+    };
+    oauth_config_has_values(&config).then_some(config)
+}
+
+fn oauth_config_has_values(config: &McpOAuthClientConfig) -> bool {
+    config.client_id.is_some()
+        || config.client_secret.is_some()
+        || config.scope.is_some()
+        || config.authorization_endpoint.is_some()
+        || config.token_endpoint.is_some()
+        || config.resource.is_some()
+        || config.token_endpoint_auth_method.is_some()
 }
 
 fn generate_mcp_id(name: &str) -> String {
@@ -1529,4 +2249,91 @@ pub fn merge_imported_mcp_servers(
         settings.servers.push(server);
     }
     (settings, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imports_claude_stdio_http_and_sse_servers() {
+        let raw = r#"{
+          "mcpServers": {
+            "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"] },
+            "figma": { "type": "http", "url": "https://mcp.figma.com/mcp", "headers": { "Authorization": "Bearer token" } },
+            "legacy": { "transport": "sse", "url": "https://example.com/sse" }
+          }
+        }"#;
+
+        let parsed = parse_claude_mcp_json(raw).expect("parse Claude MCP config");
+        assert_eq!(parsed.len(), 3);
+        let filesystem = parsed.iter().find(|s| s.name == "filesystem").unwrap();
+        assert_eq!(filesystem.transport, McpTransport::Stdio);
+        assert_eq!(filesystem.command, "npx");
+
+        let figma = parsed.iter().find(|s| s.name == "figma").unwrap();
+        assert_eq!(figma.transport, McpTransport::Http);
+        assert_eq!(figma.url.as_deref(), Some("https://mcp.figma.com/mcp"));
+        assert_eq!(figma.headers[0].key, "Authorization");
+
+        let legacy = parsed.iter().find(|s| s.name == "legacy").unwrap();
+        assert_eq!(legacy.transport, McpTransport::Sse);
+        assert_eq!(legacy.url.as_deref(), Some("https://example.com/sse"));
+    }
+
+    #[test]
+    fn imports_oauth_hints() {
+        let raw = r#"{
+          "mcpServers": {
+            "remote": {
+              "type": "http",
+              "url": "https://example.com/mcp",
+              "oauth": { "clientId": "abc", "clientSecret": "def", "scope": "mcp:connect" }
+            }
+          }
+        }"#;
+
+        let parsed = parse_claude_mcp_json(raw).expect("parse MCP config with OAuth hints");
+        let oauth = parsed[0].oauth.as_ref().expect("oauth hints");
+        assert_eq!(oauth.client_id.as_deref(), Some("abc"));
+        assert_eq!(oauth.client_secret.as_deref(), Some("def"));
+        assert_eq!(oauth.scope.as_deref(), Some("mcp:connect"));
+    }
+
+    #[test]
+    fn imports_codex_remote_servers() {
+        let raw = r#"
+[mcp_servers.figma]
+type = "http"
+url = "https://mcp.figma.com/mcp"
+headers = { Authorization = "Bearer token" }
+
+[mcp_servers.legacy]
+transport = "sse"
+url = "https://example.com/sse"
+
+[mcp_servers.local]
+command = "node"
+args = ["server.js"]
+"#;
+
+        let parsed = parse_codex_mcp_toml(raw).expect("parse Codex MCP config");
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(
+            parsed.iter().find(|s| s.name == "figma").unwrap().transport,
+            McpTransport::Http
+        );
+        assert_eq!(
+            parsed
+                .iter()
+                .find(|s| s.name == "legacy")
+                .unwrap()
+                .transport,
+            McpTransport::Sse
+        );
+        assert_eq!(
+            parsed.iter().find(|s| s.name == "local").unwrap().transport,
+            McpTransport::Stdio
+        );
+    }
 }

@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use directories::BaseDirs;
 
 use serde::{Deserialize, Serialize};
@@ -15,10 +15,10 @@ use tokio::sync::mpsc;
 
 use crate::tool_run::FileChange;
 use crate::{
-    run_turn, AgentEvent, AgentEventScope, AgentMode, BashTool, CreateImageTool, EditFileTool,
-    GlobTool, GoalWorkflowState, GrepTool, McpSettings, McpToolRegistry, QuestionTool, ReadTool,
-    SkillSettings, SkillTool, ToDoListTool, TodoListState, ToolRunResult, ToolSettings, TurnCancel,
-    TurnContext, WebFetchTool, WebSearchTool, WriteFileTool,
+    run_turn, AgentEvent, AgentEventScope, AgentMode, BashTool, BrowserTools, CreateImageTool,
+    EditFileTool, GlobTool, GoalWorkflowState, GrepTool, McpSettings, McpToolRegistry,
+    QuestionTool, ReadTool, SkillSettings, SkillTool, ToDoListTool, TodoListState, ToolRunResult,
+    ToolSettings, TurnCancel, TurnContext, WebFetchTool, WebSearchTool, WriteFileTool,
 };
 
 const TOOL_PREFIX: &str = "subagent_";
@@ -259,6 +259,10 @@ impl SubAgentTool {
                 self.tool_settings.linkup_api_key(),
             )),
             web_fetch: Arc::new(WebFetchTool::new()),
+            browser: Arc::new(BrowserTools::new(
+                self.workspace_root.to_string_lossy().to_string(),
+                sinew_browser::BrowserSessions::new(),
+            )),
             skill: Arc::new(SkillTool::with_settings(
                 self.workspace_root.clone(),
                 self.skill_settings.clone(),
@@ -519,7 +523,10 @@ fn import_claude_sub_agents(
     }
 
     imported.sort_unstable();
-    Ok((settings.normalized(), ImportSubAgentsResult { imported, skipped }))
+    Ok((
+        settings.normalized(),
+        ImportSubAgentsResult { imported, skipped },
+    ))
 }
 
 fn collect_claude_agent_files(
@@ -736,8 +743,7 @@ mod import_tests {
         )
         .unwrap();
         let default = ModelRef::new("anthropic", "claude-sonnet-4-6");
-        let parsed =
-            parse_claude_agent_file(&path, SubAgentSource::Workspace, &default).unwrap();
+        let parsed = parse_claude_agent_file(&path, SubAgentSource::Workspace, &default).unwrap();
         assert_eq!(parsed.name, "code-reviewer");
         assert_eq!(parsed.description, "Reviews diffs");
         assert!(parsed.prompt.contains("You review code"));

@@ -76,6 +76,13 @@ function isFileToken(value: string): boolean {
   return match?.[0] === value.trim();
 }
 
+// A bare http(s) URL — used to make URLs written as inline `code` (backticks)
+// clickable. GFM autolinks bare URLs in prose, but never inside code spans, so
+// links the model puts in a table cell as `code` stay dead without this.
+function isExternalUrl(value: string): boolean {
+  return /^https?:\/\/\S+$/i.test(value.trim());
+}
+
 function FileLink({
   path,
   children,
@@ -228,6 +235,25 @@ export const Markdown = memo(function Markdown({ text, onOpenFile }: Props) {
                 >
                   {value}
                 </FileLink>
+              );
+            }
+            // A URL written as inline `code` (e.g. in a table cell): keep the
+            // code-chip look but make it open externally like a hyperlink.
+            if (!className && isExternalUrl(value)) {
+              return (
+                <a
+                  className="md-codelink"
+                  href={value}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void api.openExternalUrl(value);
+                  }}
+                >
+                  {children}
+                </a>
               );
             }
             return <code className={className}>{children}</code>;

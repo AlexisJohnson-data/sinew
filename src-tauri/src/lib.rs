@@ -36,22 +36,22 @@ use sinew_anthropic::{
 use sinew_app::{
     checkpoint_from_snapshots, clean_context_descriptor, compact_conversation_history,
     copy_workspace_entries, create_installed_skill, create_workspace_directory,
-    import_skills_from_provider, import_sub_agents_from_provider, ImportSkillsResult,
-    ImportSubAgentsResult,
-    create_workspace_file, delete_workspace_entry, import_workspace_paths, list_installed_skills,
+    create_workspace_file, delete_workspace_entry, import_skills_from_provider,
+    import_sub_agents_from_provider, import_workspace_paths, list_installed_skills,
     list_workspace_entries, list_workspace_files, normalize_workspace_root, probe_mcp_servers,
     read_external_file, read_workspace_file, rename_workspace_entry, resolve_terminal_path,
     restore_turn_checkpoints, restore_workspace_deleted_entries, run_turn, search_workspace_files,
     shell_system_prompt, snapshot_workspace_for_checkpoint, subagent_system_prompt,
     system_prompt_for_mode_with_plan_prompt, system_prompt_with_todo, todo_list_from_history,
     tool_settings_view, trash_workspace_entry, validate_turn_checkpoints_restorable,
-    write_workspace_file, AgentEvent, AgentMode, AppStore, BashTool, ConversationEvent,
-    ConversationSummary, CreateImageTool, EditFileTool, GlobTool, GoalWorkflowState, GrepTool,
-    ImportedEntry, InstalledSkill, McpSettings, McpToolRegistry, ModeModelSettings,
-    OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, QuestionTool, ReadTool,
-    SavedConversation, SkillSettings, SkillTool, SubAgentConfig, SubAgentSettings, SubAgentTool,
-    TeamRuntime, TeamTool, TerminalPathResolution, ToDoListTool, TodoListState, ToolSettings,
-    ToolSettingsView, TurnCancel, TurnContext, WebFetchTool, WebSearchTool, WorkspaceBootstrap,
+    write_workspace_file, AgentEvent, AgentMode, AppStore, BashTool, BrowserTools,
+    ConversationEvent, ConversationSummary, CreateImageTool, EditFileTool, GlobTool,
+    GoalWorkflowState, GrepTool, ImportSkillsResult, ImportSubAgentsResult, ImportedEntry,
+    InstalledSkill, McpSettings, McpToolRegistry, ModeModelSettings, OpenRouterModelRecord,
+    PlanArtifactState, PlanWorkflowState, QuestionTool, ReadTool, SavedConversation, SkillSettings,
+    SkillTool, SubAgentConfig, SubAgentSettings, SubAgentTool, TeamRuntime, TeamTool,
+    TerminalPathResolution, ToDoListTool, TodoListState, ToolSettings, ToolSettingsView,
+    TurnCancel, TurnContext, WebFetchTool, WebSearchTool, WorkspaceBootstrap,
     WorkspaceCopyOperation, WorkspaceDeletedEntry, WorkspaceFileChangeEvent, WorkspaceSearchResult,
     WriteFileTool,
 };
@@ -100,6 +100,7 @@ use tokio::{
 mod context;
 mod conversations;
 mod git;
+mod mcp_oauth;
 mod models;
 mod platform;
 mod providers;
@@ -126,6 +127,12 @@ use workflow::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Both `ring` and `aws-lc-rs` are in the dependency tree (ring directly,
+    // aws-lc-rs via reqwest/rustls), so rustls 0.23 can't auto-pick a
+    // CryptoProvider. Install one explicitly before any HTTPS request (the
+    // MCP probe fires at startup and would otherwise panic).
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -194,11 +201,13 @@ pub fn run() {
         team_runtime: Arc::new(RwLock::new(TeamRuntime::default())),
         remote,
         file_watchers: Arc::new(Mutex::new(HashMap::new())),
+        browser_sessions: sinew_browser::BrowserSessions::new(),
         terminal_sessions: Arc::new(Mutex::new(HashMap::new())),
         openai_login: Arc::new(Mutex::new(None)),
         anthropic_login: Arc::new(Mutex::new(None)),
         google_login: Arc::new(Mutex::new(None)),
         kimi_login: Arc::new(Mutex::new(None)),
+        mcp_login: Arc::new(Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -217,8 +226,18 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            #[cfg(target_os = "windows")]
-            let _ = app;
+            // Point liteparse/PDFium at the bundled `pdfium.dll` shipped in the
+            // app's resources, so PDF reading works on machines that never ran
+            // the build. The lib path baked into the binary at compile time only
+            // exists on the build host; liteparse checks `PDFIUM_LIB_PATH` first.
+            if let Ok(pdfium) = app
+                .path()
+                .resolve("pdfium.dll", tauri::path::BaseDirectory::Resource)
+            {
+                if let Some(dir) = pdfium.parent() {
+                    std::env::set_var("PDFIUM_LIB_PATH", dir);
+                }
+            }
 
             // One-shot purge of legacy Google OAuth tokens so users coming from
             // pre-0.1.14 builds reconnect against the fixed Antigravity flow.
@@ -281,6 +300,7 @@ pub fn run() {
         .manage(updater::UpdaterState::new())
         .invoke_handler(tauri::generate_handler![
             workspace::open_workspace,
+            workspace::seed_recent_workspaces,
             workspace::open_new_window,
             workspace::open_secondary_window,
             workspace::prepare_migration_target,
@@ -327,6 +347,10 @@ pub fn run() {
             conversations::list_mcp_settings,
             conversations::save_mcp_settings,
             conversations::import_mcp_servers_command,
+            mcp_oauth::start_mcp_oauth_login,
+            mcp_oauth::poll_mcp_oauth_login,
+            mcp_oauth::cancel_mcp_oauth_login,
+            mcp_oauth::disconnect_mcp_oauth,
             conversations::list_tool_settings,
             conversations::save_tool_settings,
             conversations::list_sub_agent_settings,

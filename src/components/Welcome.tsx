@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Icon } from "@iconify/react";
-import { loadRecents } from "../lib/recents";
+import { loadRecents, removeRecent, toggleRecentPinned } from "../lib/recents";
 import { api } from "../lib/ipc";
 import { setPendingMigration } from "../lib/pendingMigration";
 import type {
@@ -24,6 +24,34 @@ type Props = {
 const MAX_VISIBLE_RECENTS = 5;
 const IS_WINDOWS = isWindowsPlatform();
 
+// Bump the suffix when the highlighted capabilities change so the card
+// resurfaces once for everyone after an update, then stays dismissed.
+const WHATS_NEW_KEY = "sinew.whatsNewDismissed.v1";
+
+type Capability = {
+  icon: string;
+  title: string;
+  body: string;
+};
+
+const CAPABILITIES: Capability[] = [
+  {
+    icon: "solar:document-text-bold-duotone",
+    title: "Read any PDF",
+    body: "Digital PDFs are extracted instantly; scanned pages are read by the model's vision.",
+  },
+  {
+    icon: "solar:global-bold-duotone",
+    title: "Browse in Chrome",
+    body: "Let the agent open a real browser to inspect your live site, not just the source.",
+  },
+  {
+    icon: "solar:chat-square-like-bold-duotone",
+    title: "Grab context fast",
+    body: "Quote part of a reply or drag files straight into the chat.",
+  },
+];
+
 /// Collapse a list of `ActiveTurnSummary` items down to the set of workspace
 /// paths that currently have an in-flight agent turn. The backend reports
 /// these globally (across every Sinew window), so a recent workspace can be
@@ -44,10 +72,25 @@ export function Welcome({ onPick, error, deriveName }: Props) {
   // and can flip it without having to dig through Settings.
   const [shellPref, setShellPref] = useState<ShellPreference>("auto");
   const [shellPrefBusy, setShellPrefBusy] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   useEffect(() => {
     setRecents(loadRecents());
+    try {
+      setShowWhatsNew(localStorage.getItem(WHATS_NEW_KEY) !== "1");
+    } catch {
+      setShowWhatsNew(true);
+    }
   }, []);
+
+  const dismissWhatsNew = () => {
+    setShowWhatsNew(false);
+    try {
+      localStorage.setItem(WHATS_NEW_KEY, "1");
+    } catch {
+      // ignore quota / privacy-mode failures
+    }
+  };
 
   // Global Ctrl/Cmd+Shift+N to spawn a new Sinew window — mirrors the
   // accelerator the native menu would install on macOS/Linux but is
@@ -240,6 +283,44 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           <div className="welcome__error">{error}</div>
         )}
 
+        {showWhatsNew && (
+          <section className="welcome__whatsnew" aria-label="What's new">
+            <div className="welcome__whatsnew-head">
+              <span className="welcome__whatsnew-badge">
+                <Icon icon="solar:magic-stick-3-bold" width={12} height={12} />
+                New
+              </span>
+              <span className="welcome__whatsnew-title">
+                Things this agent can do
+              </span>
+              <button
+                type="button"
+                className="welcome__whatsnew-dismiss"
+                onClick={dismissWhatsNew}
+                title="Dismiss"
+                aria-label="Dismiss what's new"
+              >
+                <Icon icon="solar:close-circle-linear" width={15} height={15} />
+              </button>
+            </div>
+            <ul className="welcome__whatsnew-list">
+              {CAPABILITIES.map((cap) => (
+                <li key={cap.title} className="welcome__whatsnew-item">
+                  <span className="welcome__whatsnew-icon">
+                    <Icon icon={cap.icon} width={18} height={18} />
+                  </span>
+                  <span className="welcome__whatsnew-body">
+                    <span className="welcome__whatsnew-item-title">
+                      {cap.title}
+                    </span>
+                    <span className="welcome__whatsnew-item-sub">{cap.body}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <MigrationDialog
           open={migrateOpen}
           onCancel={() => setMigrateOpen(false)}
@@ -267,35 +348,79 @@ export function Welcome({ onPick, error, deriveName }: Props) {
             <div className="welcome__recents">
               {recents.slice(0, MAX_VISIBLE_RECENTS).map((recent) => {
                 const isActive = activeWorkspaces.has(recent.path);
+                const isPinned = Boolean(recent.pinned);
                 return (
-                  <button
+                  <div
                     key={recent.path}
                     className="welcome__recent"
                     data-active={isActive ? "true" : "false"}
-                    onClick={() => onPick(recent.path)}
+                    data-pinned={isPinned ? "true" : "false"}
                   >
-                    <span className="welcome__recent-icon">
-                      {isActive ? (
-                        <span
-                          className="welcome__recent-spinner"
-                          role="status"
-                          aria-label="Agent running"
-                        />
-                      ) : (
-                        <Icon
-                          icon="solar:folder-bold-duotone"
-                          width={18}
-                          height={18}
-                        />
-                      )}
-                    </span>
-                    <span className="welcome__recent-body">
-                      <span className="welcome__recent-name">
-                        {recent.name || deriveName(recent.path)}
+                    <button
+                      type="button"
+                      className="welcome__recent-main"
+                      onClick={() => onPick(recent.path)}
+                    >
+                      <span className="welcome__recent-icon">
+                        {isActive ? (
+                          <span
+                            className="welcome__recent-spinner"
+                            role="status"
+                            aria-label="Agent running"
+                          />
+                        ) : (
+                          <Icon
+                            icon="solar:folder-bold-duotone"
+                            width={18}
+                            height={18}
+                          />
+                        )}
                       </span>
-                      <span className="welcome__recent-path">{recent.path}</span>
-                    </span>
-                  </button>
+                      <span className="welcome__recent-body">
+                        <span className="welcome__recent-name">
+                          {recent.name || deriveName(recent.path)}
+                        </span>
+                        <span className="welcome__recent-path">{recent.path}</span>
+                      </span>
+                    </button>
+                    <div className="welcome__recent-actions">
+                      <button
+                        type="button"
+                        className="welcome__recent-action"
+                        data-active={isPinned ? "true" : "false"}
+                        title={isPinned ? "Unpin" : "Pin to top"}
+                        aria-label={isPinned ? "Unpin workspace" : "Pin workspace"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setRecents(toggleRecentPinned(recent.path));
+                        }}
+                      >
+                        <Icon
+                          icon={
+                            isPinned ? "solar:pin-bold" : "solar:pin-linear"
+                          }
+                          width={14}
+                          height={14}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        className="welcome__recent-action welcome__recent-action--danger"
+                        title="Remove from recents"
+                        aria-label="Remove from recents"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setRecents(removeRecent(recent.path));
+                        }}
+                      >
+                        <Icon
+                          icon="solar:close-circle-linear"
+                          width={14}
+                          height={14}
+                        />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>

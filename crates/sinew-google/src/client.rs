@@ -375,6 +375,20 @@ impl GoogleProvider {
             }
             let status = response.status();
             let err = read_http_error(response).await;
+            // On a 400 (INVALID_ARGUMENT) dump the exact request body so we can
+            // see which field the server rejected. Written to the temp dir;
+            // harmless on success paths.
+            if status == reqwest::StatusCode::BAD_REQUEST {
+                if let Ok(json) = serde_json::to_string_pretty(body) {
+                    let path = std::env::temp_dir().join("sinew-google-bad-request.json");
+                    let _ = std::fs::write(&path, json);
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "Antigravity 400; dumped request body"
+                    );
+                }
+            }
             if matches!(
                 status,
                 reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
@@ -580,6 +594,24 @@ fn unsupported_schema_field(key: &str) -> bool {
 }
 
 fn to_contents(transcript: &[ChatMessage], model: &str) -> Result<Vec<wire::Content>> {
+    // Gemini matches each `functionResponse` to its `functionCall` BY NAME. The
+    // tool-call id stored on a ToolResult isn't always in `name__rawid` form, so
+    // recovering the name by parsing the id falls back to "generic_tool" and the
+    // name no longer matches the original call -> 400 INVALID_ARGUMENT once the
+    // transcript carries any tool history. Build an id -> name map from the
+    // ToolCall parts (call and result share the same id) and use it to label the
+    // responses correctly, regardless of the id format.
+    let mut tool_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for message in transcript {
+        for part in &message.parts {
+            if let Part::ToolCall { id, name, .. } = part {
+                if !name.trim().is_empty() {
+                    tool_names.insert(id.clone(), name.clone());
+                }
+            }
+        }
+    }
     let mut contents = Vec::new();
     for message in transcript {
         let role = match message.role {
@@ -614,12 +646,20 @@ fn to_contents(transcript: &[ChatMessage], model: &str) -> Result<Vec<wire::Cont
                     }
                 }
                 Part::Thinking { text, meta } => {
+                    // Gemini 3 / Antigravity rejects a replayed `thought` part
+                    // that doesn't carry its original `thoughtSignature`
+                    // ("Request contains an invalid argument"). The server only
+                    // signs some thinking chunks, so unsigned ones must be
+                    // dropped rather than replayed bare. This is why a fresh
+                    // (empty) project works but one with thinking history 400s.
                     if !text.trim().is_empty() {
-                        parts.push(wire::Part::Text {
-                            text: text.clone(),
-                            thought: Some(true),
-                            thought_signature: thought_signature(meta),
-                        });
+                        if let Some(signature) = thought_signature(meta) {
+                            parts.push(wire::Part::Text {
+                                text: text.clone(),
+                                thought: Some(true),
+                                thought_signature: Some(signature),
+                            });
+                        }
                     }
                 }
                 Part::ToolCall {
@@ -645,7 +685,11 @@ fn to_contents(transcript: &[ChatMessage], model: &str) -> Result<Vec<wire::Cont
                     is_error,
                     ..
                 } => {
-                    let (name, raw_id) = split_prefixed_tool_id(tool_call_id);
+                    let (parsed_name, raw_id) = split_prefixed_tool_id(tool_call_id);
+                    // Prefer the name from the matching ToolCall (paired by id);
+                    // only fall back to the id-parsed name so the response name
+                    // matches the call name Gemini validates against.
+                    let name = tool_names.get(tool_call_id).cloned().unwrap_or(parsed_name);
                     let mut response = json!({
                         "output": content,
                     });

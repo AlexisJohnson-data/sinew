@@ -316,6 +316,16 @@ const MENTION_MAX_RESULTS = 10;
 const EMPTY_ACTIVE_TEAM_NAMES: ReadonlySet<string> = new Set();
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
 const AUTO_COMPACT_OUTPUT_TOKEN_MAX = 32_000;
+// How many consecutive auto-compactions may run while the context is STILL over
+// the compaction window before we give up. Each compaction changes the history
+// signature, so the per-signature guard alone can't stop a compaction that
+// never brings usage back under the window — without this cap the auto-compact
+// effect (and, in Goal mode, the continuation that follows it) loops forever,
+// burning tokens and ignoring Stop. A healthy compaction drops usage below the
+// window and resets the counter; only a genuinely stuck one accumulates.
+const MAX_STUCK_AUTO_COMPACTIONS = 2;
+const CONTEXT_LIMIT_HALT_MESSAGE =
+  "Context limit reached and compaction can't reduce it further — automatic continuation paused. Send a message or start a new conversation.";
 const GOAL_CONTINUATION_PROMPT =
   "Continue working toward the active goal. Do not repeat completed work. If the goal is now truly complete, audit it and call update_goal with status complete.";
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
@@ -459,6 +469,17 @@ export function ChatPane({
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dropActive, setDropActive] = useState(false);
+  // "Reply to a slice of the assistant message": when the user highlights
+  // text inside an assistant bubble, surface a floating "Add to context"
+  // pill near the selection. Clicking it prepends the quoted text into the
+  // composer so the next user turn talks about that fragment.
+  const [quoteAction, setQuoteAction] = useState<
+    { text: string; x: number; y: number; ts: number } | null
+  >(null);
+  // One-shot "use the real browser" mode. When ON, the next user message
+  // is wrapped with a strong instruction to drive the browser_* tools
+  // instead of reading source code. Resets after the message is sent.
+  const [forceBrowser, setForceBrowser] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [optimisticModeSelectionsByConversation, setOptimisticModeSelectionsByConversation] =
@@ -588,6 +609,10 @@ export function ChatPane({
   const contextEstimateSignatureRef = useRef<string | null>(null);
   const autoCompactAttemptKeysRef = useRef<Set<string>>(new Set());
   const goalContinuationKeysRef = useRef<Set<string>>(new Set());
+  // Consecutive auto-compactions that ran while context stayed over the window.
+  // Reset once usage drops back under the window (compaction worked) or when the
+  // user sends a message. Caps the token-burning compaction loop at the limit.
+  const stuckCompactionCountRef = useRef(0);
   const [contextEstimate, setContextEstimate] =
     useState<ConversationContextEstimateState>({
       conversationId,
@@ -1594,6 +1619,39 @@ export function ChatPane({
     return unsubscribe;
   }, [externalDrops]);
 
+  // Workspace file-tree → chat handoff: the sidebar dispatches a custom event
+  // when the user drags an entry onto the chat or picks "Add to chat" from
+  // the context menu. Folders are ignored (chat attachments are file-only).
+  useEffect(() => {
+    if (activeSubAgentId !== null) return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        entries?: Array<{
+          name: string;
+          relativePath: string;
+          absolutePath: string;
+          kind: "file" | "directory";
+        }>;
+      }>).detail;
+      const entries = detail?.entries ?? [];
+      const incoming: Attachment[] = entries
+        .filter((entry) => entry.kind === "file")
+        .map((entry) => ({
+          path: entry.absolutePath || entry.relativePath,
+          name: entry.name,
+          origin: "sidebar",
+        }));
+      if (!incoming.length) return;
+      setAttachments((prev) => mergeAttachments(prev, incoming));
+      setDropActive(false);
+      textareaRef.current?.focus();
+    };
+    window.addEventListener("sinew:add-files-to-chat", handler);
+    return () => {
+      window.removeEventListener("sinew:add-files-to-chat", handler);
+    };
+  }, [activeSubAgentId]);
+
   useEffect(() => {
     if (activeSubAgentId !== null) {
       setDropActive(false);
@@ -1927,9 +1985,12 @@ export function ChatPane({
   const handleSend = useCallback(async () => {
     if (!modelEntry) return;
     const currentAttachments = composerAttachments;
-    const value = text.trim() || attachmentOnlyMessage(currentAttachments);
+    let value = text.trim() || attachmentOnlyMessage(currentAttachments);
     if (!value && currentAttachments.length === 0) {
       return;
+    }
+    if (forceBrowser && value) {
+      value = `Use the browser_* tools to actually open and visually inspect what I am describing — do NOT just read the source code. Launch the browser via browser_open, then drive it with browser_screenshot / browser_dom / browser_click / browser_eval as needed. My request:\n\n${value}`;
     }
     if (view.status === "streaming" || isStreaming) {
       const editing =
@@ -1958,6 +2019,7 @@ export function ChatPane({
       setSkillMention(null);
       setRewriteState(null);
       setEditingQueuedPrompt(null);
+      setForceBrowser(false);
       setSendTick((t) => t + 1);
       return;
     }
@@ -1993,6 +2055,10 @@ export function ChatPane({
     setInlineMentions([]);
     setSkillMention(null);
     setRewriteState(null);
+    setForceBrowser(false);
+    // A manual send clears any context-limit halt and gives compaction a fresh
+    // budget for the new turn.
+    stuckCompactionCountRef.current = 0;
     setSendTick((t) => t + 1);
     try {
       await onSend(
@@ -2033,6 +2099,7 @@ export function ChatPane({
     thinking,
     effectiveMode,
     serviceTier,
+    forceBrowser,
   ]);
 
   const sendQueuedPrompt = useCallback(
@@ -2179,6 +2246,9 @@ export function ChatPane({
     if (contextEstimate.status !== "ready") return;
     if (contextEstimateSignatureRef.current !== autoCompactHistorySignature(history)) return;
     if (view.status === "streaming" || isStreaming) return;
+    // The user stopped (or the last turn errored): don't auto-relaunch. Stays
+    // "stopped" until the user sends again, so Stop actually sticks.
+    if (view.status === "stopped") return;
     if (activeSubAgentId !== null) return;
     if (history.length === 0) return;
     if (!modelEntry) return;
@@ -2190,11 +2260,31 @@ export function ChatPane({
     if (!estimate.exact) return;
     const compactWindow = autoCompactWindow(estimate);
     if (compactWindow <= 0) return;
-    if (estimate.usedTokens < compactWindow) return;
+    if (estimate.usedTokens < compactWindow) {
+      // Back under the window — the previous compaction (if any) worked.
+      stuckCompactionCountRef.current = 0;
+      return;
+    }
+
+    // Still over the window. If earlier auto-compactions never brought us back
+    // under, stop: retrying only burns tokens (each compaction changes the
+    // history signature, so the per-signature guard below can't catch it) and,
+    // in Goal mode, feeds an unstoppable continuation loop.
+    if (stuckCompactionCountRef.current >= MAX_STUCK_AUTO_COMPACTIONS) {
+      setView((prev) => ({
+        ...prev,
+        status: "stopped",
+        streamPhase: "idle",
+        lastError: CONTEXT_LIMIT_HALT_MESSAGE,
+        turnStartedAtMs: null,
+      }));
+      return;
+    }
 
     const key = `${conversationId}:${autoCompactHistorySignature(history)}`;
     if (autoCompactAttemptKeysRef.current.has(key)) return;
     autoCompactAttemptKeysRef.current.add(key);
+    stuckCompactionCountRef.current += 1;
 
     setSendTick((t) => t + 1);
     void onCompact(modelRefFromId(model), thinking, serviceTier, {
@@ -2232,6 +2322,8 @@ export function ChatPane({
     if (goalWorkflow.status !== "active") return;
     if (planWorkflow.status !== "idle") return;
     if (view.status === "streaming" || isStreaming) return;
+    // Stop / error halts the auto-loop until the user acts again.
+    if (view.status === "stopped") return;
     if (activeSubAgentId !== null) return;
     if (history.length === 0) return;
     if (rewriteState !== null) return;
@@ -3314,6 +3406,95 @@ export function ChatPane({
     setAutoCloseSubAgentId(null);
   }, [activeSubAgent, autoCloseSubAgentId]);
 
+  useEffect(() => {
+    const container = dropZoneRef.current;
+    if (!container) return;
+    // Selection events only land on mouseup reliably across browsers; using
+    // `selectionchange` would also fire during drag and require debouncing.
+    const onMouseUp = (event: MouseEvent) => {
+      // A mouseup on the pill itself must NOT re-run selection handling. The
+      // selection is still active (the pill's mousedown preventDefault keeps
+      // it), so without this guard we'd re-arm `quoteAction.ts` and the click
+      // guard below would reject every real click. React's stopPropagation
+      // can't help: this is a native listener that fires before React
+      // dispatches the pill's own handlers.
+      if ((event.target as Element | null)?.closest?.(".quote-pill")) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        setQuoteAction(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const anchorEl =
+        range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.commonAncestorContainer as Element)
+          : range.commonAncestorContainer.parentElement;
+      if (!anchorEl) {
+        setQuoteAction(null);
+        return;
+      }
+      // Only surface the pill for assistant bubbles. User messages don't
+      // need quoting (you wrote them), and tool cards already have their
+      // own copy actions.
+      const bubble = anchorEl.closest<HTMLElement>('[data-role="assistant"]');
+      if (!bubble || !container.contains(bubble)) {
+        setQuoteAction(null);
+        return;
+      }
+      const text = sel.toString().trim();
+      if (!text) {
+        setQuoteAction(null);
+        return;
+      }
+      const containerRect = container.getBoundingClientRect();
+      // Anchor the pill where the mouse was released (the end of the drag /
+      // the cursor), not the selection's bounding box. A multi-line selection's
+      // box spans the full pane width, which threw the pill far to the right.
+      // Clamp so it stays inside the pane.
+      const x = Math.max(
+        8,
+        Math.min(event.clientX - containerRect.left + 8, containerRect.width - 150),
+      );
+      const y = Math.max(8, event.clientY - containerRect.top + 12);
+      setQuoteAction({ text, x, y, ts: Date.now() });
+    };
+    const onScroll = () => setQuoteAction(null);
+    container.addEventListener("mouseup", onMouseUp);
+    container.addEventListener("scroll", onScroll, true);
+    return () => {
+      container.removeEventListener("mouseup", onMouseUp);
+      container.removeEventListener("scroll", onScroll, true);
+    };
+  }, [dropZoneRef]);
+
+  const applyQuoteToComposer = useCallback(
+    (quoted: string) => {
+      const trimmed = quoted.trim();
+      if (!trimmed) return;
+      const block = trimmed
+        .split(/\r?\n/)
+        .map((line) => `> ${line}`)
+        .join("\n");
+      // A markdown blockquote is enough of a convention for the model to read
+      // this as quoted/referenced text rather than a fresh instruction — no
+      // extra lead-in prose (keeps input tokens down).
+      setText((current) => {
+        const prefix = current.trim().length > 0 ? `${block}\n\n${current}` : `${block}\n\n`;
+        return prefix;
+      });
+      setQuoteAction(null);
+      window.getSelection()?.removeAllRanges();
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      });
+    },
+    [],
+  );
+
   return (
     <div
       className="chat-col"
@@ -3323,6 +3504,27 @@ export function ChatPane({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {quoteAction && (
+        <button
+          type="button"
+          className="quote-pill"
+          style={{ left: quoteAction.x, top: quoteAction.y }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            // A small drag-selection makes the browser fire a synthetic
+            // `click` right after `mouseup`, landing on the freshly-rendered
+            // pill (it sits at the selection's bottom-right, under the cursor)
+            // and applying the quote without a real click. Ignore clicks that
+            // fire within a human-reaction window of the pill appearing.
+            if (Date.now() - quoteAction.ts < 250) return;
+            applyQuoteToComposer(quoteAction.text);
+          }}
+          title="Quote this in your next message"
+        >
+          <Icon icon="solar:quote-up-square-linear" width={13} height={13} />
+          <span>Add to context</span>
+        </button>
+      )}
       {previewImage && (
         <div
           className="img-preview"
@@ -3791,6 +3993,21 @@ export function ChatPane({
                 aria-label="Attach files"
               >
                 <Icon icon="solar:add-circle-linear" width={18} height={18} />
+              </button>
+              <button
+                type="button"
+                className="composer__iconbtn"
+                data-active={forceBrowser ? "true" : "false"}
+                onClick={() => setForceBrowser((value) => !value)}
+                title={
+                  forceBrowser
+                    ? "Browser mode ON — agent will open Chrome and inspect the page visually"
+                    : "Force browser inspection — click to make the next turn use the browser_* tools instead of reading source code"
+                }
+                aria-label="Force browser mode"
+                aria-pressed={forceBrowser}
+              >
+                <Icon icon="solar:global-linear" width={18} height={18} />
               </button>
               {noProvidersConfigured ? (
                 <button
@@ -6183,7 +6400,24 @@ function BlockView({
             tabIndex={rewindDisabled ? undefined : 0}
             title={rewindDisabled ? undefined : "Click to edit from here"}
             aria-label={rewindDisabled ? undefined : "Edit from this message"}
-            onClick={rewindDisabled ? undefined : () => onRewindMessage(block)}
+            onClick={
+              rewindDisabled
+                ? undefined
+                : () => {
+                    // Selecting text inside the bubble registers as a click.
+                    // Don't rewind (which dumps the whole message back into the
+                    // composer) when the user is actually selecting/copying.
+                    const sel = window.getSelection();
+                    if (
+                      sel &&
+                      !sel.isCollapsed &&
+                      sel.toString().trim().length > 0
+                    ) {
+                      return;
+                    }
+                    onRewindMessage(block);
+                  }
+            }
             onKeyDown={
               rewindDisabled
                 ? undefined

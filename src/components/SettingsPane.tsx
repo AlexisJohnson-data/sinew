@@ -1010,6 +1010,22 @@ export function SettingsPane({ workspacePath }: Props) {
     [parseError, saving, settings],
   );
 
+  // Re-run the MCP probe (used after an OAuth sign-in completes so the
+  // freshly authenticated server lights up with its tool list).
+  const reprobeMcp = useCallback(async () => {
+    setProbing(true);
+    try {
+      const nextProbes = await api.probeMcpTools();
+      setProbes(nextProbes);
+      const failures = nextProbes.filter((p) => p.enabled && !p.ok).length;
+      setStatus(failures ? `${failures} server${failures === 1 ? "" : "s"} failed` : null);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProbing(false);
+    }
+  }, []);
+
   // ---- Skills load ------------------------------------------------------
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true);
@@ -1618,6 +1634,7 @@ export function SettingsPane({ workspacePath }: Props) {
             onToggleEnabled={toggleEnabled}
             onMount={handleEditorMount}
             onImport={() => void importMcpFromFile()}
+            onReprobe={() => void reprobeMcp()}
           />
         ) : section === "skills" ? (
           <SkillsSection
@@ -2804,6 +2821,7 @@ type McpSectionProps = {
   onToggleEnabled: (id: string) => void;
   onMount: OnMount;
   onImport: () => void;
+  onReprobe: () => void;
 };
 
 function McpSection({
@@ -2827,6 +2845,7 @@ function McpSection({
   onToggleEnabled,
   onMount,
   onImport,
+  onReprobe,
 }: McpSectionProps) {
   const enabledCount = servers.filter((server) => server.enabled).length;
   const failedCount = probes.filter((probe) => probe.enabled && !probe.ok).length;
@@ -2840,7 +2859,7 @@ function McpSection({
             {loading
               ? "Loading servers…"
               : servers.length === 0
-                ? "Add servers in advanced config, then turn them on here."
+        ? "Add remote HTTP/SSE servers like Figma, or stdio servers in advanced config."
                 : `${enabledCount}/${servers.length} enabled${failedCount ? ` · ${failedCount} need attention` : ""}`}
           </p>
         </div>
@@ -2963,7 +2982,7 @@ function McpSection({
             })}
             {servers.length === 0 && (
               <div className="settings-pane__nav-list-empty">
-                No servers yet — add one in the raw config.
+                No servers yet — import from Claude/Codex or add one in the raw config.
               </div>
             )}
           </div>
@@ -3034,13 +3053,16 @@ function McpSection({
               probe={selectedProbe}
               probing={probing}
               knownToolCount={knownToolCounts[selectedServer.id]}
+              onReprobe={onReprobe}
             />
           ) : (
             <div className="settings-pane__empty-state">
               <Icon icon="solar:server-square-cloud-linear" width={18} height={18} />
               <div>
                 <strong>No MCP servers configured yet.</strong>
-                <span>Use Advanced config to paste an MCP server block.</span>
+                <span>
+                  Use Advanced config to paste <code>stdio</code>, <code>http</code>, or <code>sse</code> MCP server blocks.
+                </span>
               </div>
             </div>
           )}
@@ -3055,12 +3077,58 @@ type ServerDetailProps = {
   probe: McpServerProbe | null;
   probing: boolean;
   knownToolCount: number | undefined;
+  onReprobe: () => void;
 };
 
-function ServerDetail({ server, probe, probing, knownToolCount }: ServerDetailProps) {
+function ServerDetail({ server, probe, probing, knownToolCount, onReprobe }: ServerDetailProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(
     () => new Set<string>(),
   );
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthMessage, setOauthMessage] = useState<string | null>(null);
+
+  const signIn = useCallback(async () => {
+    setOauthBusy(true);
+    setOauthMessage("Opening browser…");
+    try {
+      const login = await api.startMcpOAuthLogin(server.id);
+      await api.openExternalUrl(login.authUrl);
+      setOauthMessage("Waiting for browser confirmation…");
+      // Poll until the loopback callback resolves the attempt.
+      for (let i = 0; i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const status = await api.pollMcpOAuthLogin();
+        if (!status.pending) {
+          if (status.success) {
+            setOauthMessage("Connected");
+            onReprobe();
+          } else {
+            setOauthMessage(status.error ?? "Sign-in failed");
+          }
+          return;
+        }
+      }
+      setOauthMessage("Sign-in timed out");
+    } catch (err) {
+      setOauthMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOauthBusy(false);
+    }
+  }, [server.id, onReprobe]);
+
+  const signOut = useCallback(async () => {
+    setOauthBusy(true);
+    setOauthMessage(null);
+    try {
+      await api.disconnectMcpOAuth(server.id);
+      setOauthMessage("Disconnected");
+      onReprobe();
+    } catch (err) {
+      setOauthMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOauthBusy(false);
+    }
+  }, [server.id, onReprobe]);
   const toggleTool = useCallback((toolName: string) => {
     setExpandedTools((prev) => {
       const next = new Set(prev);
@@ -3090,7 +3158,9 @@ function ServerDetail({ server, probe, probing, knownToolCount }: ServerDetailPr
       : !probe.ok
         ? "failed"
         : `${probe.tools.length} tool${probe.tools.length === 1 ? "" : "s"}`;
-  const command = [server.command, ...server.args].join(" ").trim();
+  const transport = server.transport ?? (server.url?.trim() ? "http" : "stdio");
+  const isRemote = transport === "http" || transport === "sse" || !!server.url?.trim();
+  const command = isRemote ? server.url! : [server.command, ...server.args].join(" ").trim();
 
   return (
     <div className="settings-pane__detail">
@@ -3108,22 +3178,75 @@ function ServerDetail({ server, probe, probing, knownToolCount }: ServerDetailPr
             {command}
           </code>
         )}
-        {server.cwd && (
+        {!isRemote && server.cwd && (
           <div className="settings-pane__detail-meta">
             <span className="settings-pane__detail-key">cwd</span>
             <code>{server.cwd}</code>
           </div>
         )}
-        {server.env.length > 0 && (
+        {!isRemote && server.env.length > 0 && (
           <div className="settings-pane__detail-meta">
             <span className="settings-pane__detail-key">env</span>
             <code>{server.env.map((item) => item.key).join(", ")}</code>
+          </div>
+        )}
+        {isRemote && (server.headers ?? []).length > 0 && (
+          <div className="settings-pane__detail-meta">
+            <span className="settings-pane__detail-key">headers</span>
+            <code>{(server.headers ?? []).map((h) => h.key).join(", ")}</code>
+          </div>
+        )}
+
+        {isRemote && (
+          <div className="settings-pane__detail-meta">
+            <span className="settings-pane__detail-key">transport</span>
+            <code>{transport === "sse" ? "SSE (legacy)" : "HTTP (streamable)"}</code>
           </div>
         )}
 
         {probe?.error && (
           <div className="settings-pane__tools-error">{probe.error}</div>
         )}
+
+        {isRemote && (() => {
+          const hasAuth = (server.headers ?? []).some(
+            (h) =>
+              h.key.trim().toLowerCase() === "authorization" &&
+              h.value.trim().length > "Bearer ".length,
+          );
+          return (
+            <div className="settings-pane__oauth-row">
+              <button
+                type="button"
+                className="settings-pane__btn"
+                onClick={() => void signIn()}
+                disabled={oauthBusy}
+              >
+                <Icon icon="solar:key-minimalistic-square-2-linear" width={14} height={14} />
+                {oauthBusy
+                  ? "Signing in…"
+                  : hasAuth
+                    ? "Re-authenticate (OAuth)"
+                    : "Sign in with OAuth"}
+              </button>
+              {hasAuth && !oauthBusy && (
+                <button
+                  type="button"
+                  className="settings-pane__btn"
+                  onClick={() => void signOut()}
+                  disabled={oauthBusy}
+                >
+                  Sign out
+                </button>
+              )}
+              {oauthMessage && (
+                <span className="settings-pane__status" data-tone="ok">
+                  {oauthMessage}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         <div className="settings-pane__detail-section">Tools</div>
         <div className="settings-pane__tool-list">
@@ -4672,17 +4795,22 @@ function serverFromUnknown(value: unknown, fallbackName: string): McpServerConfi
   }
 
   const name = stringValue(value.name) || fallbackName;
+  const url = stringValue(value.url);
   const command = stringValue(value.command);
-  if (!command) throw new Error(`Missing command for ${name}`);
+  if (!url && !command) throw new Error(`Missing command or url for ${name}`);
 
   return {
     id: stringValue(value.id) || deterministicId(name),
     name,
-    command,
+    command: command ?? "",
     args: arrayOfStrings(value.args),
     env: envFromUnknown(value.env),
     cwd: stringValue(value.cwd) || null,
     enabled: value.enabled === false || value.disabled === true ? false : true,
+    transport: transportFromUnknown(value.transport ?? value.type, url),
+    url: url || null,
+    headers: envFromUnknown(value.headers),
+    oauth: oauthFromUnknown(value.oauth ?? value),
   };
 }
 
@@ -4703,20 +4831,42 @@ function normalizeSettings(settings: McpSettings): McpSettings {
         env: server.env ?? [],
         cwd: server.cwd ?? null,
         enabled: server.enabled ?? true,
+        transport: normalizeTransport(server.transport, server.url),
+        url: server.url ?? null,
+        headers: server.headers ?? [],
+        oauth: normalizeOauth(server.oauth),
       };
     }),
   };
 }
 
+function normalizeTransport(value: unknown, url?: string | null): "stdio" | "http" | "sse" {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "sse") return "sse";
+  if (raw === "http" || raw === "streamable_http" || raw === "streamable-http") return "http";
+  return url?.trim() ? "http" : "stdio";
+}
+
+function transportFromUnknown(value: unknown, url?: string | null): "stdio" | "http" | "sse" {
+  return normalizeTransport(value, url);
+}
+
 function settingsToJson(settings: McpSettings): string {
   const mcpServers: Record<string, unknown> = {};
   for (const server of settings.servers) {
-    const entry: Record<string, unknown> = {
-      command: server.command,
-    };
-    if (server.args.length) entry.args = server.args;
-    if (server.cwd) entry.cwd = server.cwd;
-    if (server.env.length) entry.env = envToObject(server.env);
+    const isRemote = !!(server.url?.trim());
+    const transport = normalizeTransport(server.transport, server.url);
+    const entry: Record<string, unknown> = isRemote
+      ? { transport, url: server.url }
+      : { transport: "stdio", command: server.command };
+    if (isRemote && transport !== "http") entry.type = transport;
+    if (!isRemote && server.args.length) entry.args = server.args;
+    if (!isRemote && server.cwd) entry.cwd = server.cwd;
+    if (!isRemote && server.env.length) entry.env = envToObject(server.env);
+    if (isRemote && (server.headers ?? []).length)
+      entry.headers = envToObject(server.headers ?? []);
+    const oauth = normalizeOauth(server.oauth);
+    if (isRemote && oauth) entry.oauth = oauth;
     if (!server.enabled) entry.disabled = true;
     mcpServers[server.name || server.id] = entry;
   }
@@ -4743,6 +4893,46 @@ function arrayOfStrings(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function oauthFromUnknown(value: unknown): McpServerConfig["oauth"] {
+  if (!isRecord(value)) return null;
+  const source = isRecord(value.oauth) ? value.oauth : value;
+  const oauth = {
+    clientId: stringValue(source.clientId) || stringValue(source.client_id) || null,
+    clientSecret: stringValue(source.clientSecret) || stringValue(source.client_secret) || null,
+    scope: stringValue(source.scope) || null,
+    authorizationEndpoint:
+      stringValue(source.authorizationEndpoint) ||
+      stringValue(source.authorization_endpoint) ||
+      null,
+    tokenEndpoint:
+      stringValue(source.tokenEndpoint) || stringValue(source.token_endpoint) || null,
+    resource: stringValue(source.resource) || null,
+    tokenEndpointAuthMethod:
+      stringValue(source.tokenEndpointAuthMethod) ||
+      stringValue(source.token_endpoint_auth_method) ||
+      null,
+  };
+  return hasOauthValues(oauth) ? oauth : null;
+}
+
+function normalizeOauth(oauth: McpServerConfig["oauth"]): McpServerConfig["oauth"] {
+  if (!oauth) return null;
+  const normalized = {
+    clientId: oauth.clientId?.trim() || null,
+    clientSecret: oauth.clientSecret?.trim() || null,
+    scope: oauth.scope?.trim() || null,
+    authorizationEndpoint: oauth.authorizationEndpoint?.trim() || null,
+    tokenEndpoint: oauth.tokenEndpoint?.trim() || null,
+    resource: oauth.resource?.trim() || null,
+    tokenEndpointAuthMethod: oauth.tokenEndpointAuthMethod?.trim() || null,
+  };
+  return hasOauthValues(normalized) ? normalized : null;
+}
+
+function hasOauthValues(oauth: NonNullable<McpServerConfig["oauth"]>): boolean {
+  return Object.values(oauth).some((value) => typeof value === "string" && value.length > 0);
 }
 
 function envFromUnknown(value: unknown): McpEnvVar[] {

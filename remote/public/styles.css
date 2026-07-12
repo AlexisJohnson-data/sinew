@@ -684,6 +684,26 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .question__actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
 /* ── Composer ──────────────────────────────────────────────────────────── */
+/* ── Plan approval ─────────────────────────────────────────────────────── */
+.plan-approval {
+  margin: 10px 14px 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(196, 181, 253, 0.28);
+  background: rgba(196, 181, 253, 0.07);
+}
+.plan-approval__text { color: var(--text-1); font-size: 13px; }
+.plan-approval__actions { display: flex; gap: 8px; margin-top: 9px; }
+.plan-approval button {
+  border: 1px solid var(--line-strong);
+  padding: 7px 10px;
+  color: var(--text-1);
+  background: var(--bg-3);
+  font: inherit;
+  font-size: 12px;
+}
+.plan-approval__implement { border-color: var(--accent) !important; background: var(--accent) !important; color: white !important; }
+.plan-approval button:disabled { opacity: 0.45; }
+
 .composer {
   flex: 0 0 auto;
   padding: 8px 12px calc(env(safe-area-inset-bottom) + 10px);
