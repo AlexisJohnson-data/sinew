@@ -930,6 +930,7 @@ function App() {
     if (!conv) return [];
     return [...blocksFromHistory(conv.history || []), ...blocksFromLiveEvents(events)];
   }, [conv, events]);
+  const hasPendingQuestion = blocks.some((block) => block.kind === "tool" && block.name === "question" && block.status === "running");
   const isStreaming = Boolean(conv && activeTurns.some((turn) => turn.conversationId === conv.id));
   const showInstallHint = Boolean(session && !installHintDismissed && !isStandaloneDisplay());
   const currentModel = conv ? conv.modeModelSettings?.[mode] || conv.model : null;
@@ -942,8 +943,11 @@ function App() {
 
   useEffect(() => {
     const body = bodyRef.current;
-    if (body && stickRef.current) body.scrollTop = body.scrollHeight;
-  }, [blocks, view]);
+    // A question can be taller than the viewport. Do not keep pinning the
+    // scroll position to the bottom while its turn is waiting for an answer:
+    // on iOS that makes the lower options/actions impossible to reach.
+    if (body && stickRef.current && !hasPendingQuestion) body.scrollTop = body.scrollHeight;
+  }, [blocks, view, hasPendingQuestion]);
 
   function onBodyScroll() {
     const body = bodyRef.current;

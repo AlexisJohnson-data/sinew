@@ -430,10 +430,19 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .conv-row__delete[data-armed="true"] { color: var(--danger); font-size: var(--fs-xs); font-weight: 600; }
 
 /* ── Chat ──────────────────────────────────────────────────────────────── */
+.pane--chat {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 .chat-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
   padding: 10px 14px 18px;
   display: flex;
   flex-direction: column;
