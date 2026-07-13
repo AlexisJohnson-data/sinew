@@ -1,7 +1,7 @@
 use crate::*;
 
 const RECENT_WORKSPACES_KEY: &str = "recent_workspaces_v1";
-const RECENT_WORKSPACES_CAP: usize = 20;
+const RECENT_WORKSPACES_CAP: usize = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

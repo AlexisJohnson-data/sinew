@@ -2,7 +2,7 @@ import type { RecentWorkspace } from "../types";
 
 const RECENTS_KEY = "sinew.recentWorkspaces";
 const LAST_KEY = "sinew.lastWorkspace";
-const MAX_RECENTS = 12;
+const MAX_RECENTS = 40;
 
 export function loadRecents(): RecentWorkspace[] {
   try {

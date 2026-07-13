@@ -303,8 +303,10 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   left: 12px;
   right: 12px;
   max-width: 340px;
-  max-height: 50dvh;
+  max-height: 72dvh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 6px;
   border-radius: var(--r-card);
   background: var(--bg-3);
