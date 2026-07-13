@@ -185,6 +185,23 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
             </p>
           </details>
           <details>
+            <summary>Guide français — configuration autonome avec Railway</summary>
+            <ol>
+              <li>Crée un projet Railway depuis ton dépôt GitHub et sélectionne la branche à déployer.</li>
+              <li>Dans <strong>Settings → Source</strong>, règle <code>Root Directory</code> sur <code>remote</code>. Laisse les commandes Build/Start vides, ne crée pas de base de données et conserve <strong>1 replica</strong>.</li>
+              <li>Dans <strong>Settings → Networking</strong>, clique <strong>Generate Domain</strong>. Dans le champ Relay URL ci-dessous, sauvegarde <code>wss://ton-domaine.up.railway.app/ws</code>.</li>
+              <li>Active Remote, ouvre l’appairage, puis ouvre le domaine HTTPS Railway sur le téléphone. Scanne le QR code ou saisis le code à six chiffres.</li>
+              <li>Installe la page sur l’écran d’accueil. Sur iPhone : Safari → Partager → Sur l’écran d’accueil.</li>
+              <li>Pour les notifications, génère des clés avec <code>npx web-push generate-vapid-keys</code>. Dans Railway → Variables, ajoute <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code> et <code>VAPID_SUBJECT</code> avec une valeur de forme <code>mailto:toi@example.com</code>. Ne configure jamais <code>PORT</code> : Railway le fournit.</li>
+            </ol>
+            <p>
+              Sécurité : ne publie jamais les clés VAPID privées, clés API, codes d’appairage, tokens d’appareil ou fichiers <code>.env</code>. Révoque immédiatement un téléphone perdu. Le relay ne lit pas les messages, mais un téléphone appairé peut piloter l’agent qui tourne sur ce PC.
+            </p>
+            <p>
+              Pour demander de l’aide à un LLM, copie : <em>« Lis le guide <code>remote/README.md</code> de mon fork Sinew et guide-moi clic par clic pour déployer le relay sur Railway et appairer mon téléphone. Ne me demande jamais de partager ou publier mes clés VAPID privées, clés API, tokens, codes d’appairage, fichiers .env ou identifiants. »</em>
+            </p>
+          </details>
+          <details>
             <summary>Give this to an LLM for help</summary>
             <p>
               Ask: <em>“Read the Remote setup guide in this repository at remote/README.md. Guide me step by step to deploy the Sinew relay on Railway. Do not ask me to share VAPID private keys, API keys, pairing codes, or device tokens.”</em>

@@ -728,12 +728,16 @@ export function ChatPane({
 
   const planWorkflowActive = planWorkflow.status !== "idle";
   const goalWorkflowActive = goalWorkflow.status === "active";
-  const effectiveMode: AgentMode = planWorkflowActive
-    ? "plan"
-    : goalWorkflowActive
-      ? "goal"
-      : mode;
-  const selectorLocked = isStreaming || view.status === "streaming";
+  // While a turn is running, the pickers configure the *next queued prompt*.
+  // They never alter the model/mode of the already-running turn.
+  const effectiveMode: AgentMode = isStreaming
+    ? mode
+    : planWorkflowActive
+      ? "plan"
+      : goalWorkflowActive
+        ? "goal"
+        : mode;
+  const selectorLocked = false;
   const rawCurrentSelection = selectorLocked
     ? selectionFromRef(streamingModel ?? activeModel)
     : modeSelections[effectiveMode] ?? selectionFromRef(activeModel);
@@ -2485,6 +2489,10 @@ export function ChatPane({
         return updated;
       });
       try {
+        // A running turn owns its persisted conversation settings. Store the
+        // selection optimistically for the queued prompt only; it is captured
+        // by buildQueuedPrompt and passed when that prompt starts.
+        if (isStreaming || view.status === "streaming") return;
         await onModelPreferenceChange(
           targetMode,
           modelRefFromId(next.model),
@@ -2510,7 +2518,7 @@ export function ChatPane({
         }));
       }
     },
-    [conversationId, modeSelections, onModelPreferenceChange],
+    [conversationId, modeSelections, onModelPreferenceChange, isStreaming, view.status],
   );
 
   // Keep the migration prefill handler — which is bound at mount in a
@@ -2568,6 +2576,11 @@ export function ChatPane({
       }
       setMode(nextMode);
       setModeOpen(false);
+      if (view.status === "streaming" || isStreaming) {
+        // This is the desired mode for the next queued prompt. Do not persist
+        // it while the active turn owns the conversation workflow state.
+        return;
+      }
       try {
         await onModeChange(nextMode);
       } catch (err) {
@@ -2581,7 +2594,7 @@ export function ChatPane({
         }));
       }
     },
-    [effectiveMode, onModeChange, selectorLocked],
+    [effectiveMode, onModeChange, selectorLocked, isStreaming, view.status],
   );
 
   const commandSelectionForMode = useCallback(
@@ -4034,7 +4047,7 @@ export function ChatPane({
                     setModelOpen(false);
                     setThinkingOpen(false);
                   }}
-                  title={selectorLocked ? "Mode locked while streaming" : "Mode"}
+                    title="Mode for the next message (can be changed while a turn is running)"
                 >
                   <span className="composer__picker-label">{modeEntry.label}</span>
                   <Icon
@@ -4089,14 +4102,14 @@ export function ChatPane({
                   className="composer__picker-btn"
                   data-open={modelOpen ? "true" : "false"}
                   data-locked={selectorLocked ? "true" : "false"}
-                  disabled={selectorLocked || availableModels.length === 0}
+                  disabled={availableModels.length === 0}
                   onClick={() => {
                     if (selectorLocked) return;
                     setModelOpen((o) => !o);
                     setThinkingOpen(false);
                     setModeOpen(false);
                   }}
-                  title={selectorLocked ? "Model locked while streaming" : "Model"}
+                    title="Model for the next message (can be changed while a turn is running)"
                 >
                   <span className="composer__picker-label">
                     {displayModelEntry?.label ?? "No models"}
@@ -4154,7 +4167,6 @@ export function ChatPane({
                   data-open={thinkingOpen ? "true" : "false"}
                   data-locked={selectorLocked ? "true" : "false"}
                   disabled={
-                    selectorLocked ||
                     availableModels.length === 0 ||
                     availableThinking.length === 0
                   }
@@ -4164,7 +4176,7 @@ export function ChatPane({
                     setModelOpen(false);
                     setModeOpen(false);
                   }}
-                  title={selectorLocked ? "Thinking locked while streaming" : "Thinking"}
+                  title="Thinking level for the next message (can be changed while a turn is running)"
                 >
                   <span className="composer__picker-label">{thinkingLabel}</span>
                   <Icon
