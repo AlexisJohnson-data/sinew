@@ -21,7 +21,7 @@ type Props = {
   deriveName: (path: string) => string;
 };
 
-const MAX_VISIBLE_RECENTS = 5;
+const MAX_VISIBLE_RECENTS = 40;
 const IS_WINDOWS = isWindowsPlatform();
 
 // Bump the suffix when the highlighted capabilities change so the card

@@ -688,6 +688,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .welcome__recent {
