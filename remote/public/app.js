@@ -969,23 +969,40 @@ function App() {
     }
   }
 
+  function applyWorkspaceResponse(data, path) {
+    const bootstrap = data.bootstrap || data;
+    const resolvedPath = data.workspacePath || path;
+    workspacePathRef.current = resolvedPath;
+    setWorkspacePath(resolvedPath);
+    setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
+    setWorkspace(bootstrap.workspace || null);
+    setConversations(bootstrap.conversations || []);
+    if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
+    if (Array.isArray(data.features)) setFeatures(data.features);
+    setConv(null);
+    setView("list");
+  }
+
   async function switchWorkspace(path) {
     setWsMenuOpen(false);
     if (!path || path === workspacePathRef.current || !statusRef.current.pcReachable) return;
     try {
       const data = await clientRef.current.command({ type: "bootstrap" }, path);
-      const bootstrap = data.bootstrap || data;
-      const resolvedPath = data.workspacePath || path;
-      workspacePathRef.current = resolvedPath;
-      setWorkspacePath(resolvedPath);
-      setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
-      setWorkspace(bootstrap.workspace || null);
-      setConversations(bootstrap.conversations || []);
-      if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
-      if (Array.isArray(data.features)) setFeatures(data.features);
-      setConv(null);
-      setView("list");
+      applyWorkspaceResponse(data, path);
     } catch (err) {
+      // The workspace may no longer be open on the PC (a window was closed).
+      // If the PC supports headless open, transparently open it instead of
+      // failing — the phone shouldn't require the project to already be open.
+      if (features.includes("open_workspace")) {
+        try {
+          const data = await clientRef.current.command({ type: "open_workspace", workspace_path: path });
+          applyWorkspaceResponse(data, path);
+          return;
+        } catch (openErr) {
+          setError(String(openErr.message || openErr));
+          return;
+        }
+      }
       setError(String(err.message || err));
     }
   }
@@ -995,17 +1012,7 @@ function App() {
     if (!path || !statusRef.current.pcReachable) return;
     try {
       const data = await clientRef.current.command({ type: "open_workspace", workspace_path: path });
-      const bootstrap = data.bootstrap || data;
-      const resolvedPath = data.workspacePath || path;
-      workspacePathRef.current = resolvedPath;
-      setWorkspacePath(resolvedPath);
-      setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
-      setWorkspace(bootstrap.workspace || null);
-      setConversations(bootstrap.conversations || []);
-      if (Array.isArray(data.activeTurns)) setActiveTurns(data.activeTurns);
-      if (Array.isArray(data.features)) setFeatures(data.features);
-      setConv(null);
-      setView("list");
+      applyWorkspaceResponse(data, path);
     } catch (err) {
       setError(String(err.message || err));
     }
