@@ -170,7 +170,7 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
             Remote keeps your project and agent on this PC. Your phone sends encrypted commands through a relay; the relay cannot read your chats or files.
           </p>
           <ol>
-            <li>Enable Remote, then save a relay URL. The default works as-is; use a self-hosted URL only if you deploy your own relay.</li>
+            <li>Enable Remote, then save a relay URL. Use a relay URL supplied by your organization or deploy the self-hosted relay described below.</li>
             <li>Click <strong>Open pairing</strong>, then scan the QR code or open its link on your phone.</li>
             <li>Enter the six-digit code on the phone to pair it. Install the mobile page to the home screen for the best iPhone experience.</li>
             <li>On the phone, press <strong>Push</strong> and allow notifications if you want alerts for questions and completed turns.</li>
