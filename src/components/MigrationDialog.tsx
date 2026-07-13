@@ -36,7 +36,11 @@ type Props = {
   }) => void;
 };
 
-const DEFAULT_WSL_PROJECTS_PARENT = "\\\\wsl$\\Ubuntu\\home\\alexi\\projects";
+// Neutral fallback used only when the app can't resolve the real WSL home
+// (WSL not installed, or resolution failed). The dialog resolves the actual
+// per-user path at runtime via `default_wsl_projects_parent`, so no username
+// is baked into the source.
+const DEFAULT_WSL_PROJECTS_PARENT = "\\\\wsl$\\Ubuntu\\home";
 
 function basename(path: string): string {
   const cleaned = path.replace(/[\\/]+$/, "");
@@ -73,6 +77,7 @@ export function MigrationDialog({
   // the providers they have configured. The chosen model travels with
   // the migration handoff so the agent runs on it from the first turn.
   const [defaultGoalModel, setDefaultGoalModel] = useState<ModelRef | null>(null);
+  const [resolvedParent, setResolvedParent] = useState(defaultTargetParent);
   const [selectedModelId, setSelectedModelId] = useState<ModelId | "">("");
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
@@ -81,6 +86,7 @@ export function MigrationDialog({
   // Reset every time the dialog (re)opens.
   useEffect(() => {
     if (!open) return;
+    setResolvedParent(defaultTargetParent);
     setSource(initialSourcePath ?? "");
     setTarget(
       initialSourcePath
@@ -118,6 +124,28 @@ export function MigrationDialog({
     };
   }, [open]);
 
+  // Resolve the real WSL projects parent (per-user) when the dialog opens,
+  // then re-suggest the target from it. Silent fallback to the neutral
+  // default keeps the field usable even without WSL.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void api
+      .defaultWslProjectsParent()
+      .then((parent) => {
+        if (cancelled || !parent) return;
+        setResolvedParent(parent);
+        setTarget((current) => {
+          const src = source || initialSourcePath || "";
+          return src ? suggestTarget(src, parent) : current;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialSourcePath]);
+
   const availableModels: ModelEntry[] = useMemo(
     () => availableModelsForProviders(configuredProviders, openRouterModels),
     [configuredProviders, openRouterModels],
@@ -139,12 +167,12 @@ export function MigrationDialog({
   const lastSuggestedTargetRef = useRef<string>("");
   useEffect(() => {
     if (!source) return;
-    const suggested = suggestTarget(source, defaultTargetParent);
+    const suggested = suggestTarget(source, resolvedParent);
     if (target === "" || target === lastSuggestedTargetRef.current) {
       setTarget(suggested);
     }
     lastSuggestedTargetRef.current = suggested;
-  }, [source, defaultTargetParent, target]);
+  }, [source, resolvedParent, target]);
 
   const pickSource = async () => {
     setPicking(true);

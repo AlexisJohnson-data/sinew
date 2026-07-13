@@ -865,7 +865,7 @@ fn repo_root(path: &Path) -> Result<PathBuf> {
         anyhow::bail!("unable to locate git repository root");
     }
     // When routed through wsl.exe, git returned a Linux-style path
-    // (`/home/alexi/projects/foo`). All downstream git calls would
+    // (for example `/home/<user>/projects/foo`). All downstream git calls would
     // then fail their wsl-routing detection (`path_targets_wsl_filesystem`
     // doesn't recognise Linux paths) and silently fall back to native
     // git.exe with an invalid cwd. Convert back to a `\\wsl$\<distro>\…`

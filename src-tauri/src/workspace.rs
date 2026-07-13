@@ -58,6 +58,42 @@ pub(super) async fn seed_recent_workspaces(
     Ok(recents)
 }
 
+/// Resolve a sensible default parent directory for "Migrate to WSL" that works
+/// for any user, instead of hard-coding a username. Asks the default WSL
+/// distribution for the Windows (UNC) path of `$HOME` via `wslpath`, then
+/// appends `projects`. Returns `None` when WSL isn't available so the UI can
+/// fall back to a neutral placeholder.
+#[tauri::command]
+pub(super) async fn default_wsl_projects_parent() -> std::result::Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let mut cmd = Command::new("wsl.exe");
+        cmd.args(["--", "bash", "-lc", "wslpath -w \"$HOME\""]);
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = match cmd.output() {
+            Ok(output) if output.status.success() => output,
+            _ => return Ok(None),
+        };
+        // WSL emits UTF-16LE on some setups; assume UTF-8 which covers the
+        // common Ubuntu default and trim the trailing newline.
+        let home = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if home.is_empty() || !home.starts_with("\\\\") {
+            return Ok(None);
+        }
+        let sep = if home.ends_with('\\') { "" } else { "\\" };
+        return Ok(Some(format!("{home}{sep}projects")));
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
+}
+
 #[tauri::command]
 pub(super) async fn open_workspace(
     state: State<'_, DesktopState>,

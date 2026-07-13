@@ -301,6 +301,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspace::open_workspace,
             workspace::seed_recent_workspaces,
+            workspace::default_wsl_projects_parent,
             workspace::open_new_window,
             workspace::open_secondary_window,
             workspace::prepare_migration_target,

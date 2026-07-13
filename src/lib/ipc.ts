@@ -69,6 +69,9 @@ export const api = {
       { entries },
     );
   },
+  defaultWslProjectsParent() {
+    return invoke<string | null>("default_wsl_projects_parent");
+  },
   gitSnapshot(workspacePath: string) {
     return invoke<GitRepositorySnapshot>("git_repository_snapshot_command", {
       input: { workspacePath },

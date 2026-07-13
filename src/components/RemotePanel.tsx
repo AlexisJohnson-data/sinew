@@ -164,6 +164,37 @@ export function RemotePanel({ initialStatus = null, onStatusChange }: Props) {
           />
         </div>
 
+        <section className="remote-panel__guide">
+          <h2>Set up Remote</h2>
+          <p>
+            Remote keeps your project and agent on this PC. Your phone sends encrypted commands through a relay; the relay cannot read your chats or files.
+          </p>
+          <ol>
+            <li>Enable Remote, then save a relay URL. The default works as-is; use a self-hosted URL only if you deploy your own relay.</li>
+            <li>Click <strong>Open pairing</strong>, then scan the QR code or open its link on your phone.</li>
+            <li>Enter the six-digit code on the phone to pair it. Install the mobile page to the home screen for the best iPhone experience.</li>
+            <li>On the phone, press <strong>Push</strong> and allow notifications if you want alerts for questions and completed turns.</li>
+          </ol>
+          <details>
+            <summary>Self-hosted relay (Railway)</summary>
+            <p>
+              Deploy this repository with <code>remote</code> as the Railway Root Directory, keep one replica, and do not set <code>PORT</code>. Generate VAPID keys with <code>npx web-push generate-vapid-keys</code>, then set <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code>, and <code>VAPID_SUBJECT</code> (for example <code>mailto:you@example.com</code>).
+            </p>
+            <p>
+              Generate a Railway domain and save its WebSocket address here as <code>wss://your-domain.up.railway.app/ws</code>. Re-pair phones after changing relay origin. The full copyable guide is <code>remote/README.md</code> in the repository.
+            </p>
+          </details>
+          <details>
+            <summary>Give this to an LLM for help</summary>
+            <p>
+              Ask: <em>“Read the Remote setup guide in this repository at remote/README.md. Guide me step by step to deploy the Sinew relay on Railway. Do not ask me to share VAPID private keys, API keys, pairing codes, or device tokens.”</em>
+            </p>
+          </details>
+          <p className="remote-panel__guide-note">
+            Security: revoke a lost phone immediately. The relay routes encrypted data only, but a paired phone can control the agent running on this PC.
+          </p>
+        </section>
+
         <section className="remote-panel__block">
           <div className="remote-panel__block-head">
             <div>

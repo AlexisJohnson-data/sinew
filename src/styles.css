@@ -10499,6 +10499,32 @@ textarea {
 .remote-panel__chip[data-tone="ok"] > svg { color: var(--ok); }
 .remote-panel__chip[data-tone="ok"] .remote-panel__chip-value { color: var(--ok); }
 
+/* ── Remote setup guide ────────────────────────────────────────────────── */
+.remote-panel__guide {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-1);
+}
+.remote-panel__guide h2 { margin: 0; font-size: 15px; color: var(--text-0); }
+.remote-panel__guide p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+.remote-panel__guide ol { margin: 0; padding-left: 20px; color: var(--text-1); font-size: 13px; line-height: 1.65; }
+.remote-panel__guide details { border-top: 1px solid var(--line); padding-top: 10px; }
+.remote-panel__guide summary { cursor: pointer; color: var(--accent-hi); font-size: 13px; font-weight: 600; }
+.remote-panel__guide details p { margin-top: 8px; }
+.remote-panel__guide code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.remote-panel__guide-note { color: var(--text-3) !important; }
+
 /* ── Blocks ────────────────────────────────────────────────────────────── */
 .remote-panel__relay-url {
   display: flex;

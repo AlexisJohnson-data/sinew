@@ -62,6 +62,7 @@ daily use.
 - [Migration agent model picker](#migration-agent-model-picker)
 - [Quick Open (Ctrl+P) and Chat search (Ctrl+F)](#quick-open-ctrlp-and-chat-search-ctrlf)
 - [Workflow notifications](#workflow-notifications)
+- [Remote mobile relay: self-hosting, questions, push and project switching](#remote-mobile-relay-self-hosting-questions-push-and-project-switching)
 - [Layout: collapsible panels, separate Settings/Remote windows](#layout-collapsible-panels-separate-settingsremote-windows)
 - [Chat UX: iMessage bubbles + code-block copy](#chat-ux-imessage-bubbles--code-block-copy)
 - [Skills: thematic grouping, accordion, "Enable/Disable all"](#skills-thematic-grouping-accordion-enabledisable-all)
@@ -359,6 +360,35 @@ flash via `request_user_attention`. Toggleable in
 Helper: `src/lib/notify.ts` (`notify`, `pingUserAttention`,
 `isWindowFocused`, `flashTaskbar` — all best-effort, errors
 swallowed). Triggers live in `src/components/chat/ChatPane.tsx`.
+
+### Remote mobile relay: self-hosting, questions, push and project switching
+
+Sinew Remote lets a paired phone drive the agent running on your PC. It is a
+**remote-control feature, not a cloud agent**: your PC must remain online, as
+it runs the models, tools, shell commands, browser automation and project
+files. The phone and PC encrypt all commands and events end-to-end; the relay
+only routes opaque encrypted packets.
+
+The Remote panel contains a concise setup guide. For a complete copyable guide
+that an LLM can follow, see [`remote/README.md`](remote/README.md). It covers:
+
+- deploying the independent `remote/` relay on Railway (Root Directory:
+  `remote`, single replica, Railway-provided `PORT`);
+- generating VAPID keys for optional question/completion Web Push;
+- setting the desktop Relay URL to `wss://<your-domain>/ws`;
+- pairing a phone, installing the PWA and enabling notifications;
+- safely revoking a lost or replaced device.
+
+Mobile Remote supports live streaming, plan-mode questions with reconnect
+replay, **Stop** for active turns, plan approval, notifications when a question
+needs an answer, and switching/opening projects that the PC has previously
+opened. A phone can only open a stored recent project; arbitrary paths sent by
+a client are rejected.
+
+**Security:** never commit or share VAPID private keys, pairing codes, device
+tokens, API keys, or `.env` files. Revoke a paired phone immediately if it is
+lost. A paired device can command the agent on your PC, so only pair devices
+you control.
 
 ### Layout: collapsible panels, separate Settings/Remote windows
 
