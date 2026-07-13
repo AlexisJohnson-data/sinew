@@ -695,6 +695,7 @@ textarea {
 
 .welcome__recent {
   display: flex;
+  flex: 0 0 auto;
   align-items: stretch;
   background: var(--bg-2);
   border-radius: 12px;
