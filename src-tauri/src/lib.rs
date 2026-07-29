@@ -92,6 +92,7 @@ use sinew_openrouter::{
     OpenRouterCatalogModel, OpenRouterProvider, PROVIDER_ID as OPENROUTER_PROVIDER_ID,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{mpsc, Mutex, Notify, RwLock},
@@ -298,6 +299,46 @@ pub fn run() {
         })
         .manage(state)
         .manage(updater::UpdaterState::new())
+        .on_window_event(|window, event| {
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            // A turn is only written to the store once it finishes, so closing
+            // mid-turn silently discards everything the agent produced. Confirm on
+            // every window, not just the last one — the window being closed may
+            // well be the one showing the running turn.
+            // `active_turns` is a tokio mutex and this handler is sync, so probe it
+            // without blocking. A contended lock means a turn is being registered
+            // or torn down right now — treat "unknown" as busy and ask rather than
+            // risk closing over live work.
+            let desktop_state = window.state::<state::DesktopState>();
+            let busy = desktop_state
+                .active_turns
+                .try_lock()
+                .map(|turns| !turns.is_empty())
+                .unwrap_or(true);
+            if !busy {
+                return;
+            }
+
+            api.prevent_close();
+            let window = window.clone();
+            window
+                .dialog()
+                .message(
+                    "An agent turn is still running. Closing now discards everything it has produced in this turn.",
+                )
+                .title("Sinew — turn in progress")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Close anyway".into(),
+                    "Keep working".into(),
+                ))
+                .show(move |confirmed| {
+                    if confirmed {
+                        let _ = window.destroy();
+                    }
+                });
+        })
         .invoke_handler(tauri::generate_handler![
             workspace::open_workspace,
             workspace::seed_recent_workspaces,

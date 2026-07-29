@@ -1574,6 +1574,7 @@ export function Workspace({
       planControl?: PlanControl,
       messageVisibility?: MessageVisibility,
       revertWorkspaceChanges?: boolean,
+      implementSkills?: string[],
     ) => {
       const conversationId = activeConv.id;
       const workspaceAtRequest = workspacePath;
@@ -1604,6 +1605,7 @@ export function Workspace({
           planControl,
           messageVisibility,
           revertWorkspaceChanges,
+          implementSkills,
         );
       } catch (err) {
         markConversationStreaming(conversationId, false);
@@ -1763,6 +1765,7 @@ export function Workspace({
     async (
       plan: PlanArtifact,
       prompt = "Implement completely this plan. Use the attached markdown plan as the source of truth.",
+      implementSkills?: string[],
     ) => {
       const next = await api.createConversation(workspacePath);
       const conversationId = next.activeConversation.id;
@@ -1812,6 +1815,8 @@ export function Workspace({
           undefined,
           "implementPlan",
           "systemReminder",
+          undefined,
+          implementSkills,
         );
         const loaded = await api.loadConversation(workspacePath, conversationId);
         startTransition(() => {
@@ -1902,6 +1907,22 @@ export function Workspace({
     const max = Math.max(MIN_TERMINAL_HEIGHT, window.innerHeight * MAX_TERMINAL_RATIO);
     return Math.max(MIN_TERMINAL_HEIGHT, Math.min(max, v));
   }, []);
+
+  // Re-clamp the side columns whenever the viewport shrinks (half-screen snap
+  // with Win+Arrow, un-maximizing, a display change). The widths are stored in
+  // pixels, so without this they keep their large-window values, overflow the
+  // viewport and let flexbox squeeze the centre — and the chat — down to zero.
+  useEffect(() => {
+    const onResize = () => {
+      // Cap each side column so the centre always keeps usable room.
+      const cap = Math.max(MIN_COL, (window.innerWidth - MIN_COL) * 0.4);
+      setLeftWidth((v) => Math.max(MIN_COL, Math.min(v, cap)));
+      setRightWidth((v) => Math.max(MIN_COL, Math.min(v, cap)));
+      setTerminalHeight((v) => clampTerminal(v));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [clampTerminal]);
 
   const showTerminal = useCallback(() => {
     setTerminalAvailable(true);

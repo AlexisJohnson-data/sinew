@@ -117,7 +117,12 @@ pub(super) fn create_new_window(app: &AppHandle) -> Result<()> {
         WebviewWindowBuilder::new(app, label, WebviewUrl::App(PathBuf::from(NEW_WINDOW_URL)))
             .title("Sinew")
             .inner_size(1500.0, 940.0)
-            .min_inner_size(1100.0, 720.0)
+            // Keep in sync with `tauri.conf.json`. These are LOGICAL pixels, so
+            // DPI scaling matters: a 1920x1080 screen at 150% is 1280x720 logical,
+            // where a half-screen snap is 640x720 and a quarter is 640x360. Any
+            // minimum above that makes Windows refuse to snap at all, so stay
+            // clearly below rather than exactly on the limit.
+            .min_inner_size(480.0, 360.0)
             .resizable(true)
             .center();
 
