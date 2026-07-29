@@ -18,6 +18,7 @@ const THINKING_LABELS = { off: "Off", low: "Low", medium: "Medium", high: "High"
 // desktop-only; the remote protocol clamps it to "low".
 const MODEL_CATALOG = [
   { value: "anthropic:claude-fable-5", provider: "anthropic", label: "Fable 5", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
+  { value: "anthropic:claude-opus-5", provider: "anthropic", label: "Opus 5", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-opus-4-8", provider: "anthropic", label: "Opus 4.8", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-opus-4-7", provider: "anthropic", label: "Opus 4.7", thinking: ["off", "low", "medium", "high", "xhigh", "max"], defaultThinking: "medium" },
   { value: "anthropic:claude-opus-4-6", provider: "anthropic", label: "Opus 4.6", thinking: ["off", "low", "medium", "high", "max"], defaultThinking: "medium" },
@@ -34,6 +35,7 @@ const MODEL_CATALOG = [
   { value: "openai:gpt-5.3-codex-spark", provider: "openai", label: "GPT-5.3 Codex Spark", thinking: ["low", "medium", "high", "xhigh"], defaultThinking: "low" },
   { value: "openai:gpt-5.2", provider: "openai", label: "GPT-5.2", thinking: ["off", "low", "medium", "high", "xhigh"], defaultThinking: "medium" },
   { value: "google:gemini-3.1-pro", provider: "google", label: "Gemini 3.1 Pro", thinking: ["low", "medium", "high"], defaultThinking: "high" },
+  { value: "google:gemini-3.6-flash", provider: "google", label: "Gemini 3.6 Flash", thinking: ["low", "medium", "high"], defaultThinking: "high" },
   { value: "google:gemini-3-flash", provider: "google", label: "Gemini 3 Flash", thinking: ["low", "medium", "high"], defaultThinking: "high" },
   { value: "google:gemini-3.5-flash", provider: "google", label: "Gemini 3.5 Flash", thinking: ["low", "medium", "high"], defaultThinking: "high" },
   { value: "kimi:kimi-for-coding", provider: "kimi", label: "Kimi 2.6", thinking: ["off", "high"], defaultThinking: "high" },

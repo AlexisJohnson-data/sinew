@@ -99,6 +99,8 @@ where
 
 struct EventParser {
     model: String,
+    requested_model: String,
+    logged_model_version: bool,
     started: bool,
     next_index: usize,
     open_part: Option<(usize, PartKind)>,
@@ -112,7 +114,9 @@ struct EventParser {
 impl EventParser {
     fn new(model: String) -> Self {
         Self {
+            requested_model: model.clone(),
             model,
+            logged_model_version: false,
             started: false,
             next_index: 0,
             open_part: None,
@@ -138,6 +142,21 @@ impl EventParser {
             }
             if let Some(model_version) = response.model_version {
                 if !model_version.trim().is_empty() {
+                    // The wire id we requested (e.g. an Antigravity-internal
+                    // alias like `gemini-3.6-flash-tiered`) doesn't prove which
+                    // checkpoint actually answered — `modelVersion` is Google's
+                    // own confirmation, straight from the response body. Log it
+                    // once per message at info so it's visible in the
+                    // `npm run tauri dev` terminal without extra flags, whether
+                    // it matches what we asked for or not.
+                    if !self.logged_model_version {
+                        self.logged_model_version = true;
+                        tracing::info!(
+                            requested_model = %self.requested_model,
+                            served_model_version = %model_version,
+                            "Google Antigravity confirmed model_version for this response"
+                        );
+                    }
                     self.model = model_version;
                 }
             }

@@ -13,6 +13,12 @@ struct AnthropicModelInfo {
 
 const MODELS: &[AnthropicModelInfo] = &[
     AnthropicModelInfo {
+        id: "claude-opus-5",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: 128_000,
+    },
+    AnthropicModelInfo {
         id: "claude-opus-4-7",
         context_window: 1_000_000,
         preferred_window: 900_000,

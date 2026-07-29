@@ -71,6 +71,13 @@ export const MODELS: ModelEntry[] = [
     defaultThinking: "medium",
   },
   {
+    value: "anthropic:claude-opus-5",
+    provider: "anthropic",
+    label: "Opus 5",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+  },
+  {
     value: "anthropic:claude-opus-4-8",
     provider: "anthropic",
     label: "Opus 4.8",
@@ -189,6 +196,13 @@ export const MODELS: ModelEntry[] = [
     provider: "google",
     label: "Gemini 3.1 Pro",
     thinking: ["low", "medium", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "google:gemini-3.6-flash",
+    provider: "google",
+    label: "Gemini 3.6 Flash",
+    thinking: ["minimal", "low", "medium", "high"],
     defaultThinking: "high",
   },
   {

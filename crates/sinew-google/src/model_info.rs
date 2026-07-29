@@ -21,6 +21,13 @@ const MODELS: &[GoogleModelInfo] = &[
         supports_images: true,
     },
     GoogleModelInfo {
+        id: "gemini-3.6-flash",
+        context_window: GEMINI_WINDOW,
+        preferred_window: 950_000,
+        max_output_tokens: GEMINI_MAX_OUTPUT,
+        supports_images: true,
+    },
+    GoogleModelInfo {
         id: "gemini-3-flash",
         context_window: GEMINI_WINDOW,
         preferred_window: 950_000,
@@ -87,6 +94,19 @@ pub fn antigravity_model_and_thinking(
     // Le thinkingLevel reste libre, mais l'ID modèle est figé.
     if base == "gemini-3.5-flash" {
         return ("gemini-3.5-flash-low".into(), Some(thinking_level));
+    }
+    // UNVERIFIED: the plain `gemini-3.6-flash` id 404s against Antigravity
+    // (`NOT_FOUND`), mirroring the 3.5-flash situation above — Antigravity
+    // wants a different wire id than the public Gemini API name. Press
+    // coverage of the pre-launch leak spotted the model inside the
+    // Antigravity IDE under the internal label `gemini-3.6-flash-tiered`;
+    // this is our best guess at the real wire id, not a confirmed mapping.
+    // If this still 404s, Antigravity likely hasn't rolled out routing for
+    // this model to this client cohort yet (same class of issue as the GPT
+    // Luna rollout gap) rather than a wrong id — test in dev before relying
+    // on it.
+    if base == "gemini-3.6-flash" {
+        return ("gemini-3.6-flash-tiered".into(), Some(thinking_level));
     }
     // Gemini 3.1 Pro on Antigravity is always routed to the agentic variant
     // (`gemini-pro-agent`), which is the fine-tuned artefact for tool use and
