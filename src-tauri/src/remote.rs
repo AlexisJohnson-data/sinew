@@ -893,6 +893,10 @@ impl RemoteRuntime {
                         message_visibility,
                         rewrite_from_history_index: None,
                         revert_workspace_changes: false,
+                        // The remote/mobile PWA doesn't expose the skill
+                        // picker yet; implement-plan requests from it carry
+                        // no forced skills.
+                        implement_skills: Vec::new(),
                     },
                 )
                 .await

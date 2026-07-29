@@ -119,6 +119,7 @@ pub(super) async fn send_message(
         &conversation.plan_workflow,
         &input.attachments,
         plan_control,
+        &input.implement_skills,
     )?;
     let turn_system_prompt = with_turn_plan_reminder(&effective_system_prompt, turn_plan_reminder);
     let mut mode_model_settings = conversation.mode_model_settings.clone();
@@ -287,6 +288,18 @@ pub(super) async fn send_message(
     let workspace_root_for_output = workspace_root.clone();
     let workspace_root_for_wake = workspace_root.clone();
     let plan_requested = policy.attach_plan;
+    // The plan-mode system prompt tells the model to always end its turn by
+    // calling the Question tool unless the user sent `stop_questions`, so
+    // normally `plan_requested` (only true on that explicit stop) is the
+    // right gate. But strong models sometimes ignore that instruction and
+    // write the full plan directly in one shot with no Question call. Without
+    // this, that plan text renders in chat but is never saved to
+    // `.sinew/plans` and never reaches `PlanReady`, so the user gets no
+    // Implement/Clear Context buttons. `attach_latest_plan_artifact` already
+    // no-ops via `turn_has_question_tool` when the turn is genuinely still in
+    // the Question loop, so it's safe to always attempt this on plan-mode
+    // turns and let that existing guard decide.
+    let plan_mode_turn = policy.mode == AgentMode::Plan;
     let before_turn_snapshot_for_checkpoint = before_turn_snapshot;
 
     tauri::async_runtime::spawn(async move {
@@ -333,7 +346,7 @@ pub(super) async fn send_message(
                                 &history,
                                 turn_user_history_index,
                             );
-                            if plan_requested || question_stop_requested {
+                            if plan_requested || question_stop_requested || plan_mode_turn {
                                 match attach_latest_plan_artifact(
                                     &workspace_root_for_output,
                                     &conversation_id,
@@ -1183,6 +1196,7 @@ pub(super) fn plan_implementation_turn_reminder(
     workflow: &PlanWorkflowState,
     attachments: &[AttachmentInput],
     control: Option<PlanControlInput>,
+    implement_skills: &[String],
 ) -> std::result::Result<Option<String>, String> {
     if !matches!(control, Some(PlanControlInput::ImplementPlan)) {
         return Ok(None);
@@ -1208,6 +1222,18 @@ pub(super) fn plan_implementation_turn_reminder(
         "Use the ToDoList tool to track implementation progress when the plan has multiple steps, and keep it updated until the plan is complete.".to_string(),
         "Read the plan file when you need details, keep changes aligned with it, and complete the implementation before your final response.".to_string(),
     ]);
+
+    let skills: Vec<&str> = implement_skills
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .collect();
+    if !skills.is_empty() {
+        lines.push(format!(
+            "The user selected the following skill(s) for this implementation: {}. Call the skill tool to load each one before you start implementing, and follow its instructions throughout.",
+            skills.join(", ")
+        ));
+    }
 
     Ok(Some(lines.join("\n")))
 }

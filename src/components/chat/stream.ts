@@ -326,16 +326,31 @@ function blocksFromHistory(history: ChatMessage[]): ChatBlock[] {
         attachedToFirstText = true;
       }
     } else {
+      // Accumulates the plan's raw markdown across the `plan_source`-marked
+      // text part(s) that precede the `plan_artifact` marker part in the same
+      // message, so the plan card can offer a "Copy" fallback without an
+      // extra file read — see PlanCard's copy button.
+      let planSourceText = "";
       for (const part of message.parts) {
         const planArtifact = planArtifactFromMeta(part.meta);
         if (planArtifact) {
+          const text = planSourceText.trim();
           blocks.push({
             kind: "plan",
             id: id("p"),
-            artifact: planArtifact,
+            artifact: text ? { ...planArtifact, text } : planArtifact,
           });
+          planSourceText = "";
         } else if (part.type === "text") {
-          if (isPlanSource(part)) continue;
+          if (isPlanSource(part)) {
+            const trimmed = part.text.trim();
+            if (trimmed) {
+              planSourceText = planSourceText
+                ? `${planSourceText}\n\n${trimmed}`
+                : trimmed;
+            }
+            continue;
+          }
           if (!part.text) continue;
           blocks.push({ kind: "assistant-text", id: id("a"), text: part.text });
         } else if (part.type === "thinking") {

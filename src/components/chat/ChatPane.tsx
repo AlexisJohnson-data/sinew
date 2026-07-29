@@ -139,6 +139,7 @@ const MODES: {
 ];
 
 const FAST_SERVICE_TIER_STORAGE_KEY = "sinew.fastServiceTier";
+const COMPOSER_DRAFT_KEY_PREFIX = "sinew.composerDraft.";
 
 const CONTEXT_BREAKDOWN_COLORS: Record<string, string> = {
   system: "#85888f",
@@ -179,6 +180,7 @@ type Props = {
     planControl?: PlanControl,
     messageVisibility?: MessageVisibility,
     revertWorkspaceChanges?: boolean,
+    implementSkills?: string[],
   ) => Promise<void>;
   onCompact: (
     model: ModelRef,
@@ -195,6 +197,7 @@ type Props = {
   onImplementPlanFresh: (
     plan: PlanArtifact,
     prompt?: string,
+    implementSkills?: string[],
   ) => Promise<void>;
   onStop: () => Promise<void>;
   onOpenFile: (path: string) => void;
@@ -313,6 +316,7 @@ type TeamAgentRosterItem = SubAgentViewRecord & {
 type PartialModeModelSelections = Partial<Record<AgentMode, ModeModelSelection>>;
 
 const MENTION_MAX_RESULTS = 10;
+const PLAN_SKILL_MAX_RESULTS = 10;
 const EMPTY_ACTIVE_TEAM_NAMES: ReadonlySet<string> = new Set();
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
 const AUTO_COMPACT_OUTPUT_TOKEN_MAX = 32_000;
@@ -397,6 +401,36 @@ function loadFastServiceTierPreference(): boolean {
   }
 }
 
+/**
+ * Composer drafts are persisted per conversation. What the user has typed but
+ * not sent is otherwise pure React state, so it dies with the window — an
+ * accidental close, a reload or a webview restart silently threw it away.
+ */
+function loadComposerDraft(conversationId: string): string {
+  if (!conversationId) return "";
+  try {
+    return (
+      window.localStorage.getItem(`${COMPOSER_DRAFT_KEY_PREFIX}${conversationId}`) ?? ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function saveComposerDraft(conversationId: string, draft: string) {
+  if (!conversationId) return;
+  const key = `${COMPOSER_DRAFT_KEY_PREFIX}${conversationId}`;
+  try {
+    if (draft.trim().length === 0) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, draft);
+    }
+  } catch {
+    // Draft persistence is best-effort.
+  }
+}
+
 function saveFastServiceTierPreference(enabled: boolean) {
   try {
     if (enabled) {
@@ -466,7 +500,21 @@ export function ChatPane({
   const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
   const activeSubAgentIdRef = useRef<string | null>(null);
   const [autoCloseSubAgentId, setAutoCloseSubAgentId] = useState<string | null>(null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => loadComposerDraft(conversationId));
+  // Tracks which conversation the current `text` belongs to, so switching
+  // conversations swaps drafts instead of carrying one over to the other.
+  const draftConversationRef = useRef(conversationId);
+  // Persist the draft, and adopt the right one when the conversation changes, so
+  // an accidental close or a webview reload no longer throws away typed text.
+  // Sending clears `text`, which removes the stored draft via the empty check.
+  useEffect(() => {
+    if (draftConversationRef.current !== conversationId) {
+      draftConversationRef.current = conversationId;
+      setText(loadComposerDraft(conversationId));
+      return;
+    }
+    saveComposerDraft(conversationId, text);
+  }, [conversationId, text]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dropActive, setDropActive] = useState(false);
   // "Reply to a slice of the assistant message": when the user highlights
@@ -2614,6 +2662,7 @@ export function ChatPane({
       nextMode: AgentMode,
       planControl: PlanControl,
       messageVisibility: MessageVisibility = "normal",
+      implementSkills?: string[],
     ) => {
       if (view.status === "streaming" || !modelEntry) return;
       const planAttachment = {
@@ -2643,6 +2692,8 @@ export function ChatPane({
           undefined,
           planControl,
           messageVisibility,
+          undefined,
+          implementSkills,
         );
       } catch (err) {
         setView((prev) => ({
@@ -2681,7 +2732,7 @@ export function ChatPane({
   );
 
   const handlePlanImplement = useCallback(
-    (plan: PlanArtifact) => {
+    (plan: PlanArtifact, implementSkills?: string[]) => {
       pendingPlanWriteModeRef.current = null;
       setMode("act");
       void sendPlanCommand(
@@ -2690,13 +2741,14 @@ export function ChatPane({
         "act",
         "implementPlan",
         "systemReminder",
+        implementSkills,
       );
     },
     [sendPlanCommand],
   );
 
   const handlePlanImplementWithSwarm = useCallback(
-    (plan: PlanArtifact) => {
+    (plan: PlanArtifact, implementSkills?: string[]) => {
       if (!agentTeamsEnabled) return;
       pendingPlanWriteModeRef.current = null;
       setMode("act");
@@ -2706,13 +2758,14 @@ export function ChatPane({
         "act",
         "implementPlan",
         "systemReminder",
+        implementSkills,
       );
     },
     [agentTeamsEnabled, sendPlanCommand],
   );
 
   const handlePlanImplementFresh = useCallback(
-    async (plan: PlanArtifact) => {
+    async (plan: PlanArtifact, implementSkills?: string[]) => {
       if (view.status === "streaming") return;
       pendingPlanWriteModeRef.current = null;
       setMode("act");
@@ -2723,8 +2776,11 @@ export function ChatPane({
         // global default (the user's most recent model choice anywhere).
         // We deliberately do NOT pass the current conversation's selection
         // here — that would contaminate the fresh conversation with the
-        // old conversation's preference.
-        await onImplementPlanFresh(plan);
+        // old conversation's preference. Skills picked at implement-time
+        // still need to be forwarded explicitly, though: the fresh
+        // conversation has no history, so it can't pick up an earlier
+        // `/skill-name` mention on its own.
+        await onImplementPlanFresh(plan, undefined, implementSkills);
       } catch (err) {
         setView((prev) => ({
           ...prev,
@@ -2739,7 +2795,7 @@ export function ChatPane({
   );
 
   const handlePlanImplementFreshWithSwarm = useCallback(
-    async (plan: PlanArtifact) => {
+    async (plan: PlanArtifact, implementSkills?: string[]) => {
       if (view.status === "streaming" || !agentTeamsEnabled) return;
       pendingPlanWriteModeRef.current = null;
       setMode("act");
@@ -2748,7 +2804,11 @@ export function ChatPane({
         // Same reasoning as handlePlanImplementFresh: this spawns a new
         // conversation, which the parent seeds from the workspace's global
         // default.
-        await onImplementPlanFresh(plan, IMPLEMENT_PLAN_WITH_SWARM_PROMPT);
+        await onImplementPlanFresh(
+          plan,
+          IMPLEMENT_PLAN_WITH_SWARM_PROMPT,
+          implementSkills,
+        );
       } catch (err) {
         setView((prev) => ({
           ...prev,
@@ -3659,6 +3719,7 @@ export function ChatPane({
                   }
                   planActionDisabled={viewingSubAgent || view.status === "streaming"}
                   agentTeamsEnabled={!viewingSubAgent && agentTeamsEnabled}
+                  availableSkills={enabledSkills}
                   onOpenSubAgent={viewingSubAgent ? () => {} : handleOpenSubAgent}
                   onStopAgentSwarm={viewingSubAgent ? undefined : handleStopAgentSwarm}
                   teamAgents={activeTeamAgentRoster}
@@ -6264,6 +6325,7 @@ function ChatBlocks({
   onPlanImplementFreshWithSwarm,
   planActionDisabled,
   agentTeamsEnabled,
+  availableSkills,
   onOpenSubAgent,
   onStopAgentSwarm,
   teamAgents,
@@ -6285,12 +6347,19 @@ function ChatBlocks({
   answerQuestionDisabled: boolean;
   allowStopQuestions: boolean;
   onPlanKeepUpdating: (plan: PlanArtifact) => void;
-  onPlanImplement: (plan: PlanArtifact) => void;
-  onPlanImplementWithSwarm: (plan: PlanArtifact) => void;
-  onPlanImplementFresh: (plan: PlanArtifact) => void;
-  onPlanImplementFreshWithSwarm: (plan: PlanArtifact) => void;
+  onPlanImplement: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onPlanImplementWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
+  onPlanImplementFresh: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onPlanImplementFreshWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
   planActionDisabled: boolean;
   agentTeamsEnabled: boolean;
+  availableSkills: InstalledSkill[];
   onOpenSubAgent: (block: Extract<ChatBlock, { kind: "tool" }>) => void;
   onStopAgentSwarm?: (teamName?: string) => void | Promise<void>;
   teamAgents?: ToolCardTeamAgent[];
@@ -6335,6 +6404,7 @@ function ChatBlocks({
             onPlanImplementFreshWithSwarm={onPlanImplementFreshWithSwarm}
             planActionDisabled={planActionDisabled}
             agentTeamsEnabled={agentTeamsEnabled}
+            availableSkills={availableSkills}
             onOpenSubAgent={onOpenSubAgent}
             onStopAgentSwarm={onStopAgentSwarm}
             teamAgents={teamAgents}
@@ -6362,6 +6432,7 @@ function BlockView({
   onPlanImplementFreshWithSwarm,
   planActionDisabled,
   agentTeamsEnabled,
+  availableSkills,
   onOpenSubAgent,
   onStopAgentSwarm,
   teamAgents,
@@ -6376,12 +6447,19 @@ function BlockView({
   rewriteHistoryIndex: number | null;
   onOpenFile: (path: string) => void;
   onPlanKeepUpdating: (plan: PlanArtifact) => void;
-  onPlanImplement: (plan: PlanArtifact) => void;
-  onPlanImplementWithSwarm: (plan: PlanArtifact) => void;
-  onPlanImplementFresh: (plan: PlanArtifact) => void;
-  onPlanImplementFreshWithSwarm: (plan: PlanArtifact) => void;
+  onPlanImplement: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onPlanImplementWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
+  onPlanImplementFresh: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onPlanImplementFreshWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
   planActionDisabled: boolean;
   agentTeamsEnabled: boolean;
+  availableSkills: InstalledSkill[];
   onOpenSubAgent: (block: Extract<ChatBlock, { kind: "tool" }>) => void;
   onStopAgentSwarm?: (teamName?: string) => void | Promise<void>;
   teamAgents?: ToolCardTeamAgent[];
@@ -6524,6 +6602,7 @@ function BlockView({
             artifact={block.artifact}
             disabled={planActionDisabled}
             agentTeamsEnabled={agentTeamsEnabled}
+            availableSkills={availableSkills}
             onOpenFile={onOpenFile}
             onKeepUpdating={onPlanKeepUpdating}
             onImplement={onPlanImplement}
@@ -6663,10 +6742,45 @@ function PlanSwarmGlyph() {
   );
 }
 
+// Copy fallback for the plan card: if the "Implement/Clear Context" buttons
+// ever fail to appear for some other reason, the user can still grab the raw
+// markdown here instead of losing the plan. `text` is reconstructed
+// client-side in stream.ts from the history, so it's present for any plan
+// saved after this feature shipped; older conversations silently no-op like
+// `MessageCopyButton` does on empty text.
+function PlanCopyButton({ text }: { text: string | undefined }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    const trimmed = (text ?? "").trim();
+    if (!trimmed) return;
+    navigator.clipboard
+      .writeText(trimmed)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <button
+      type="button"
+      className="plan-card__view"
+      onClick={copy}
+      title={text?.trim() ? "Copy plan as Markdown" : "Plan text unavailable"}
+      disabled={!text?.trim()}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function PlanCard({
   artifact,
   disabled,
   agentTeamsEnabled,
+  availableSkills,
   onOpenFile,
   onKeepUpdating,
   onImplement,
@@ -6677,16 +6791,57 @@ function PlanCard({
   artifact: PlanArtifact;
   disabled: boolean;
   agentTeamsEnabled: boolean;
+  availableSkills: InstalledSkill[];
   onOpenFile: (path: string) => void;
   onKeepUpdating: (plan: PlanArtifact) => void;
-  onImplement: (plan: PlanArtifact) => void;
-  onImplementWithSwarm: (plan: PlanArtifact) => void;
-  onImplementFresh: (plan: PlanArtifact) => void;
-  onImplementFreshWithSwarm: (plan: PlanArtifact) => void;
+  onImplement: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onImplementWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
+  onImplementFresh: (plan: PlanArtifact, implementSkills?: string[]) => void;
+  onImplementFreshWithSwarm: (
+    plan: PlanArtifact,
+    implementSkills?: string[],
+  ) => void;
 }) {
   const [step, setStep] = useState<"choose" | "runner">("choose");
   const [implementMode, setImplementMode] =
     useState<PlanImplementMode>("continue");
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [skillQuery, setSkillQuery] = useState("");
+
+  const toggleSkill = (name: string) => {
+    if (disabled) return;
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const skillMatches = useMemo<InstalledSkill[]>(() => {
+    const q = skillQuery.trim().toLowerCase();
+    if (!q) return availableSkills.slice(0, PLAN_SKILL_MAX_RESULTS);
+    const scored: { skill: InstalledSkill; score: number }[] = [];
+    for (const skill of availableSkills) {
+      const name = skill.name.toLowerCase();
+      let score = 0;
+      if (name === q) score = 1000;
+      else if (name.startsWith(q)) score = 800;
+      else if (name.includes(q)) score = 600;
+      else if (skill.description?.toLowerCase().includes(q)) score = 300;
+      else continue;
+      scored.push({ skill, score });
+    }
+    scored.sort(
+      (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+    );
+    return scored.slice(0, PLAN_SKILL_MAX_RESULTS).map((s) => s.skill);
+  }, [skillQuery, availableSkills]);
 
   const startImplement = (mode: PlanImplementMode) => {
     if (disabled) return;
@@ -6696,14 +6851,16 @@ function PlanCard({
 
   const launchNormal = () => {
     if (disabled) return;
-    if (implementMode === "continue") onImplement(artifact);
-    else onImplementFresh(artifact);
+    const skills = Array.from(selectedSkills);
+    if (implementMode === "continue") onImplement(artifact, skills);
+    else onImplementFresh(artifact, skills);
   };
 
   const launchSwarm = () => {
     if (disabled || !agentTeamsEnabled) return;
-    if (implementMode === "continue") onImplementWithSwarm(artifact);
-    else onImplementFreshWithSwarm(artifact);
+    const skills = Array.from(selectedSkills);
+    if (implementMode === "continue") onImplementWithSwarm(artifact, skills);
+    else onImplementFreshWithSwarm(artifact, skills);
   };
 
   return (
@@ -6717,14 +6874,89 @@ function PlanCard({
           />
           <span>{artifact.title ?? "Plan created"}</span>
         </span>
-        <button
-          type="button"
-          className="plan-card__view"
-          onClick={() => onOpenFile(artifact.path)}
-        >
-          View
-        </button>
+        <span className="plan-card__head-actions">
+          <PlanCopyButton text={artifact.text} />
+          <button
+            type="button"
+            className="plan-card__view"
+            onClick={() => onOpenFile(artifact.path)}
+          >
+            View
+          </button>
+        </span>
       </div>
+
+      {step === "choose" && availableSkills.length > 0 && (
+        <div className="plan-card__skills">
+          <span className="plan-card__skills-label">
+            Skills for implementation
+          </span>
+          {selectedSkills.size > 0 && (
+            <div className="plan-card__skill-selected">
+              {Array.from(selectedSkills).map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="plan-card__skill-chip"
+                  data-selected="true"
+                  onClick={() => toggleSkill(name)}
+                  disabled={disabled}
+                  title={`Remove ${name}`}
+                >
+                  <span>{name}</span>
+                  <Icon icon="solar:close-circle-linear" width={12} height={12} />
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            type="text"
+            className="plan-card__skill-search"
+            placeholder="Search skills…"
+            value={skillQuery}
+            onChange={(event) => setSkillQuery(event.target.value)}
+            disabled={disabled}
+          />
+          <div className="plan-card__skill-list">
+            {skillMatches.length === 0 ? (
+              <div className="plan-card__skill-empty">No matches</div>
+            ) : (
+              skillMatches.map((skill) => {
+                const selected = selectedSkills.has(skill.name);
+                return (
+                  <button
+                    key={skill.name}
+                    type="button"
+                    className="plan-card__skill-row"
+                    data-selected={selected ? "true" : "false"}
+                    onClick={() => toggleSkill(skill.name)}
+                    disabled={disabled}
+                    title={skill.description ?? skill.name}
+                  >
+                    <Icon
+                      icon={
+                        selected
+                          ? "solar:check-square-bold"
+                          : "solar:square-linear"
+                      }
+                      width={14}
+                      height={14}
+                    />
+                    <span className="plan-card__skill-row-name">
+                      {skill.name}
+                    </span>
+                    {skill.description && (
+                      <span className="plan-card__skill-row-desc">
+                        {skill.description}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
       {step === "choose" ? (
         <div className="plan-card__actions">

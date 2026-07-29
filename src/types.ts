@@ -402,6 +402,10 @@ export type PlanArtifact = {
   absolutePath?: string;
   title?: string;
   updatedAtMs?: number;
+  // Raw plan markdown, reconstructed client-side from the history's
+  // `plan_source`-marked text part(s) that precede this artifact's marker.
+  // Lets the plan card offer a "Copy" fallback without a file read.
+  text?: string;
 };
 
 export type PlanWorkflowState =

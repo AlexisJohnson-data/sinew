@@ -575,6 +575,7 @@ export const api = {
     planControl?: PlanControl,
     messageVisibility?: MessageVisibility,
     revertWorkspaceChanges?: boolean,
+    implementSkills?: string[],
   ) {
     return invoke<void>("send_message", {
       input: {
@@ -590,6 +591,7 @@ export const api = {
         planControl,
         messageVisibility,
         revertWorkspaceChanges,
+        implementSkills,
       },
     });
   },

@@ -291,6 +291,11 @@ pub(super) struct SendMessageInput {
     pub(super) rewrite_from_history_index: Option<usize>,
     #[serde(default)]
     pub(super) revert_workspace_changes: bool,
+    // Skills the user explicitly picked when clicking "Implement the plan",
+    // so they still get used even when "clear context" drops the rest of the
+    // plan-mode conversation (and with it, any earlier `/skill-name` mention).
+    #[serde(default)]
+    pub(super) implement_skills: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
