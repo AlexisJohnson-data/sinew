@@ -12,6 +12,14 @@ use sinew_core::ToolDescriptor;
 
 use crate::tool_run::ToolRunResult;
 
+#[cfg(windows)]
+use std::{
+    os::windows::process::CommandExt,
+    process::Command,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
+
 const SKILL_TOOL_NAME: &str = "skill";
 const SKILL_FILE_NAME: &str = "SKILL.md";
 
@@ -110,6 +118,13 @@ impl SkillTool {
             self.workspace_root.join(".agents/skills"),
             self.workspace_root.join(".sinew/skills"),
         ];
+        // WSL skills win over the Windows home: the user installs/updates skills
+        // inside WSL now, so scan those roots BEFORE the Windows home. First-seen
+        // wins the name-dedup, so an updated WSL copy beats a stale `~/.agents`
+        // one; workspace-local skills are scanned first of all and still win.
+        // (Sinew is a Windows process, so `BaseDirs` only ever sees the Windows
+        // home — without `extra_skill_roots` the WSL copies are invisible.)
+        roots.extend(extra_skill_roots());
         if let Some(base_dirs) = BaseDirs::new() {
             let home = base_dirs.home_dir();
             roots.push(home.join(".agents/skills"));
@@ -207,6 +222,94 @@ fn scan_skill_root(root: &Path) -> Vec<SkillEntry> {
     skills
 }
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Skill roots that live outside the Windows home. Sinew ships as a Windows
+/// binary, so `BaseDirs` only ever resolves `C:\Users\<user>`; skills a user
+/// installs inside WSL (`\\wsl.localhost\<distro>\home\<user>\.claude\skills`,
+/// or `.agents`/`.sinew`) sit on a separate filesystem it never sees.
+///
+/// Detection (spawning `wsl.exe`, probing the 9p share) is cached for a few
+/// minutes so the hot `discover()` path — run every turn, per (sub)agent —
+/// doesn't respawn a process each call. The scan of the returned roots stays
+/// live, so a newly added skill shows up on the next rescan without waiting for
+/// the cache to expire.
+fn extra_skill_roots() -> Vec<PathBuf> {
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+    #[cfg(windows)]
+    {
+        static CACHE: OnceLock<Mutex<Option<(Instant, Vec<PathBuf>)>>> = OnceLock::new();
+        const TTL: Duration = Duration::from_secs(300);
+
+        let cache = CACHE.get_or_init(|| Mutex::new(None));
+        let mut guard = cache.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some((cached_at, roots)) = guard.as_ref() {
+            if cached_at.elapsed() < TTL {
+                return roots.clone();
+            }
+        }
+        let roots = detect_wsl_skill_roots();
+        *guard = Some((Instant::now(), roots.clone()));
+        roots
+    }
+}
+
+#[cfg(windows)]
+fn detect_wsl_skill_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for distro in wsl_distros() {
+        let home_base = PathBuf::from(format!(r"\\wsl.localhost\{distro}\home"));
+        let Ok(entries) = fs::read_dir(&home_base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let user_home = entry.path();
+            if !user_home.is_dir() {
+                continue;
+            }
+            for sub in [".claude", ".agents", ".sinew"] {
+                let root = user_home.join(sub).join("skills");
+                if root.is_dir() {
+                    roots.push(root);
+                }
+            }
+        }
+    }
+    roots
+}
+
+#[cfg(windows)]
+fn wsl_distros() -> Vec<String> {
+    // `wsl.exe --list` only reads the registry; it does NOT start the VM, so
+    // detection stays cheap and never wakes an idle distro on its own.
+    let output = Command::new("wsl.exe")
+        .args(["--list", "--quiet"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    // `wsl.exe --list --quiet` prints UTF-16LE with a BOM. Keeping only the ASCII
+    // bytes drops the nulls and the BOM and leaves the distro names ("Ubuntu").
+    let text: String = output
+        .stdout
+        .iter()
+        .filter(|&&byte| byte != 0 && byte.is_ascii())
+        .map(|&byte| byte as char)
+        .collect();
+    text.lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
 fn parse_skill_name(content: &str) -> Option<String> {
     parse_frontmatter(content)
         .remove("name")
@@ -269,6 +372,13 @@ pub fn list_installed_skills(
         ),
         (SkillSource::Workspace, workspace_root.join(".sinew/skills")),
     ];
+    // WSL wins over the Windows home (see `discover`): scan WSL roots first so an
+    // updated WSL copy shadows a stale Windows one on a `name:` clash. Skills the
+    // user installs inside a WSL distro live on a filesystem the Windows home
+    // never covers.
+    for root in extra_skill_roots() {
+        roots.push((SkillSource::Global, root));
+    }
     if let Some(home) = home_dir.as_ref() {
         roots.push((SkillSource::Global, home.join(".agents/skills")));
         roots.push((SkillSource::Global, home.join(".sinew/skills")));
@@ -414,7 +524,27 @@ fn format_root_label(root: &Path, workspace_root: &Path, home_dir: Option<&Path>
             return format!("~/{}", rel.display());
         }
     }
+    if let Some(label) = wsl_root_label(root) {
+        return label;
+    }
     root.display().to_string()
+}
+
+/// Friendly label for a WSL UNC skills root, e.g.
+/// `\\wsl.localhost\Ubuntu\home\alexi\.claude\skills` -> `wsl:Ubuntu/home/alexi/.claude/skills`.
+fn wsl_root_label(root: &Path) -> Option<String> {
+    let raw = root.to_str()?;
+    let rest = raw
+        .strip_prefix(r"\\wsl.localhost\")
+        .or_else(|| raw.strip_prefix(r"\\wsl$\"))?;
+    let mut parts = rest.split('\\');
+    let distro = parts.next()?;
+    let tail = parts.collect::<Vec<_>>().join("/");
+    if tail.is_empty() {
+        Some(format!("wsl:{distro}"))
+    } else {
+        Some(format!("wsl:{distro}/{tail}"))
+    }
 }
 
 fn clean_yaml_string(value: &str) -> &str {
