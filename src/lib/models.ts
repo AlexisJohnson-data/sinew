@@ -7,7 +7,13 @@ import type {
 } from "../types";
 
 export type ModelId = string;
-export type ProviderId = "anthropic" | "openai" | "google" | "kimi" | "openrouter";
+export type ProviderId =
+  | "anthropic"
+  | "openai"
+  | "google"
+  | "kimi"
+  | "deepseek"
+  | "openrouter";
 export type ModeModelSelection = { model: ModelId; thinking: ThinkingLevel };
 export type ModeModelSelections = Record<AgentMode, ModeModelSelection>;
 
@@ -44,6 +50,11 @@ export const PROVIDERS: {
     value: "kimi",
     label: "Kimi",
     icon: "local:kimi",
+  },
+  {
+    value: "deepseek",
+    label: "DeepSeek",
+    icon: "simple-icons:deepseek",
   },
   {
     value: "openrouter",
@@ -231,6 +242,20 @@ export const MODELS: ModelEntry[] = [
     provider: "kimi",
     label: "Kimi K2.6",
     thinking: ["off", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "deepseek:deepseek-v4-flash",
+    provider: "deepseek",
+    label: "DeepSeek V4 Flash",
+    thinking: ["high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "deepseek:deepseek-v4-pro",
+    provider: "deepseek",
+    label: "DeepSeek V4 Pro",
+    thinking: ["high"],
     defaultThinking: "high",
   },
 ];

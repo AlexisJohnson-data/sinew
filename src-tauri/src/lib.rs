@@ -59,6 +59,14 @@ use sinew_core::{
     ChatMessage, Effort, ModelCapabilities, ModelRef, Part, Provider, ProviderRequest, Role,
     ServiceTier, ToolDescriptor,
 };
+use sinew_deepseek::{
+    delete_default_auth as delete_default_deepseek_auth,
+    load_default_api_key as load_default_deepseek_api_key,
+    load_default_auth_status as load_default_deepseek_auth_status,
+    save_default_api_key as save_default_deepseek_api_key,
+    validate_api_key as validate_deepseek_api_key_remote, DeepSeekAuthStatus, DeepSeekProvider,
+    MODEL_ID as DEEPSEEK_MODEL_ID, PROVIDER_ID as DEEPSEEK_PROVIDER_ID,
+};
 use sinew_google::{
     delete_default_auth as delete_default_google_auth,
     exchange_oauth_code as exchange_google_oauth_code, generate_pkce as generate_google_pkce,
@@ -165,6 +173,12 @@ pub fn run() {
     if let Ok(provider) = KimiProvider::from_default_sources() {
         providers.insert("kimi".into(), Arc::new(provider) as Arc<dyn Provider>);
     }
+    if let Ok(provider) = DeepSeekProvider::from_default_sources() {
+        providers.insert(
+            DEEPSEEK_PROVIDER_ID.into(),
+            Arc::new(provider) as Arc<dyn Provider>,
+        );
+    }
     if let Ok(provider) =
         OpenRouterProvider::from_default_sources(openrouter_capabilities(&openrouter_models))
     {
@@ -180,6 +194,8 @@ pub fn run() {
         ModelRef::new("openai", OPENAI_MODEL_ID).with_effort(Effort::Medium)
     } else if providers.contains_key("kimi") {
         ModelRef::new("kimi", KIMI_MODEL_ID).with_effort(Effort::High)
+    } else if providers.contains_key(DEEPSEEK_PROVIDER_ID) {
+        ModelRef::new(DEEPSEEK_PROVIDER_ID, DEEPSEEK_MODEL_ID).with_effort(Effort::High)
     } else if providers.contains_key(OPENROUTER_PROVIDER_ID) {
         openrouter_models
             .first()
@@ -419,6 +435,9 @@ pub fn run() {
             providers::start_kimi_oauth_login,
             providers::cancel_kimi_oauth_login,
             providers::disconnect_kimi_provider,
+            providers::get_deepseek_provider_status,
+            providers::validate_deepseek_api_key,
+            providers::disconnect_deepseek_provider,
             providers::get_openrouter_provider_status,
             providers::validate_openrouter_api_key,
             providers::disconnect_openrouter_provider,

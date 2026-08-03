@@ -39,6 +39,8 @@ const MODEL_CATALOG = [
   { value: "google:gemini-3-flash", provider: "google", label: "Gemini 3 Flash", thinking: ["low", "medium", "high"], defaultThinking: "high" },
   { value: "google:gemini-3.5-flash", provider: "google", label: "Gemini 3.5 Flash", thinking: ["low", "medium", "high"], defaultThinking: "high" },
   { value: "kimi:kimi-for-coding", provider: "kimi", label: "Kimi 2.6", thinking: ["off", "high"], defaultThinking: "high" },
+  { value: "deepseek:deepseek-v4-flash", provider: "deepseek", label: "DeepSeek V4 Flash", thinking: ["high"], defaultThinking: "high" },
+  { value: "deepseek:deepseek-v4-pro", provider: "deepseek", label: "DeepSeek V4 Pro", thinking: ["high"], defaultThinking: "high" },
 ];
 
 function sanitizeOpenRouterName(name) {

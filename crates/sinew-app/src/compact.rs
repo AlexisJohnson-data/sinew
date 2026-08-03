@@ -141,7 +141,20 @@ async fn stream_compaction_summary(
     cmd_rx: &mut mpsc::UnboundedReceiver<EngineCommand>,
     summary_delta_tx: Option<&mpsc::UnboundedSender<String>>,
 ) -> Result<String> {
-    let mut stream = provider.stream(request).await?;
+    // Setting up the compaction stream is cancelable too, so a Stop click
+    // during compaction doesn't have to wait for the connection to establish.
+    let mut stream = {
+        let setup = provider.stream(request);
+        tokio::pin!(setup);
+        tokio::select! {
+            biased;
+            command = cmd_rx.recv() => match command {
+                Some(EngineCommand::Cancel) => bail!("compaction cancelled"),
+                None => setup.await?,
+            },
+            result = &mut setup => result?,
+        }
+    };
     let mut summary = String::new();
     let mut completed = false;
 

@@ -24,6 +24,7 @@ import {
 } from "../lib/models";
 import type {
   AnthropicProviderStatus,
+  DeepSeekProviderStatus,
   GoogleProviderStatus,
   ImageProvider,
   InstalledSkill,
@@ -275,6 +276,7 @@ export function SettingsPane({ workspacePath }: Props) {
   const [anthropicStatus, setAnthropicStatus] = useState<AnthropicProviderStatus | null>(null);
   const [googleStatus, setGoogleStatus] = useState<GoogleProviderStatus | null>(null);
   const [kimiStatus, setKimiStatus] = useState<KimiProviderStatus | null>(null);
+  const [deepSeekStatus, setDeepSeekStatus] = useState<DeepSeekProviderStatus | null>(null);
   const [openRouterStatus, setOpenRouterStatus] = useState<OpenRouterProviderStatus | null>(null);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [providersLoading, setProvidersLoading] = useState(false);
@@ -603,6 +605,21 @@ export function SettingsPane({ workspacePath }: Props) {
     }
   }, [loadConfiguredProviders]);
 
+  const loadDeepSeekStatus = useCallback(async () => {
+    setProvidersLoading(true);
+    try {
+      const status = await api.getDeepSeekProviderStatus();
+      setDeepSeekStatus(status);
+      setProvidersMessage(status.error ?? null);
+      void loadConfiguredProviders();
+      window.dispatchEvent(new CustomEvent(PROVIDERS_CHANGED_EVENT));
+    } catch (err) {
+      setProvidersMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, [loadConfiguredProviders]);
+
   const loadOpenRouterStatus = useCallback(async () => {
     setProvidersLoading(true);
     try {
@@ -629,6 +646,7 @@ export function SettingsPane({ workspacePath }: Props) {
     if (anthropicStatus === null) void loadAnthropicStatus();
     if (googleStatus === null) void loadGoogleStatus();
     if (kimiStatus === null) void loadKimiStatus();
+    if (deepSeekStatus === null) void loadDeepSeekStatus();
     if (openRouterStatus === null) void loadOpenRouterStatus();
   }, [
     section,
@@ -636,11 +654,13 @@ export function SettingsPane({ workspacePath }: Props) {
     anthropicStatus,
     googleStatus,
     kimiStatus,
+    deepSeekStatus,
     openRouterStatus,
     loadOpenAiStatus,
     loadAnthropicStatus,
     loadGoogleStatus,
     loadKimiStatus,
+    loadDeepSeekStatus,
     loadOpenRouterStatus,
   ]);
 
@@ -858,6 +878,21 @@ export function SettingsPane({ workspacePath }: Props) {
     setProvidersMessage(null);
     try {
       setKimiStatus(await api.disconnectKimiProvider());
+      setProvidersMessage("Disconnected");
+      void loadConfiguredProviders();
+      window.dispatchEvent(new CustomEvent(PROVIDERS_CHANGED_EVENT));
+    } catch (err) {
+      setProvidersMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProvidersBusy(false);
+    }
+  }, [loadConfiguredProviders]);
+
+  const disconnectDeepSeek = useCallback(async () => {
+    setProvidersBusy(true);
+    setProvidersMessage(null);
+    try {
+      setDeepSeekStatus(await api.disconnectDeepSeekProvider());
       setProvidersMessage("Disconnected");
       void loadConfiguredProviders();
       window.dispatchEvent(new CustomEvent(PROVIDERS_CHANGED_EVENT));
@@ -1560,6 +1595,7 @@ export function SettingsPane({ workspacePath }: Props) {
             anthropicStatus={anthropicStatus}
             googleStatus={googleStatus}
             kimiStatus={kimiStatus}
+            deepSeekStatus={deepSeekStatus}
             openRouterStatus={openRouterStatus}
             openRouterModels={openRouterModels}
             loading={providersLoading}
@@ -1570,6 +1606,7 @@ export function SettingsPane({ workspacePath }: Props) {
               void loadAnthropicStatus();
               void loadGoogleStatus();
               void loadKimiStatus();
+              void loadDeepSeekStatus();
               void loadOpenRouterStatus();
             }}
             onConnect={() => void connectOpenAi()}
@@ -1584,6 +1621,8 @@ export function SettingsPane({ workspacePath }: Props) {
             onConnectKimi={() => void connectKimi()}
             onCancelKimi={() => void cancelKimi()}
             onDisconnectKimi={() => void disconnectKimi()}
+            onDisconnectDeepSeek={() => void disconnectDeepSeek()}
+            onDeepSeekStatusChange={setDeepSeekStatus}
             onDisconnectOpenRouter={() => void disconnectOpenRouter()}
             onOpenRouterStatusChange={setOpenRouterStatus}
             onOpenRouterModelsChange={setOpenRouterModels}
@@ -1743,6 +1782,7 @@ type ProvidersSectionProps = {
   anthropicStatus: AnthropicProviderStatus | null;
   googleStatus: GoogleProviderStatus | null;
   kimiStatus: KimiProviderStatus | null;
+  deepSeekStatus: DeepSeekProviderStatus | null;
   openRouterStatus: OpenRouterProviderStatus | null;
   openRouterModels: OpenRouterModel[];
   loading: boolean;
@@ -1761,6 +1801,8 @@ type ProvidersSectionProps = {
   onConnectKimi: () => void;
   onCancelKimi: () => void;
   onDisconnectKimi: () => void;
+  onDisconnectDeepSeek: () => void;
+  onDeepSeekStatusChange: (status: DeepSeekProviderStatus) => void;
   onDisconnectOpenRouter: () => void;
   onOpenRouterStatusChange: (status: OpenRouterProviderStatus) => void;
   onOpenRouterModelsChange: (models: OpenRouterModel[]) => void;
@@ -1790,6 +1832,9 @@ function ProvidersSection({
   onConnectKimi,
   onCancelKimi,
   onDisconnectKimi,
+  deepSeekStatus,
+  onDisconnectDeepSeek,
+  onDeepSeekStatusChange,
   onDisconnectOpenRouter,
   onOpenRouterStatusChange,
   onOpenRouterModelsChange,
@@ -1882,6 +1927,12 @@ function ProvidersSection({
           onConnect={onConnectKimi}
           onCancel={onCancelKimi}
           onDisconnect={onDisconnectKimi}
+        />
+        <DeepSeekProviderCard
+          status={deepSeekStatus}
+          busy={busy}
+          onDisconnect={onDisconnectDeepSeek}
+          onStatusChange={onDeepSeekStatusChange}
         />
         <OpenRouterProviderCard
           status={openRouterStatus}
@@ -2027,6 +2078,147 @@ type OpenRouterProviderCardProps = {
   onModelsChange: (models: OpenRouterModel[]) => void;
   onChanged: () => void;
 };
+
+type DeepSeekProviderCardProps = {
+  status: DeepSeekProviderStatus | null;
+  busy: boolean;
+  onDisconnect: () => void;
+  onStatusChange: (status: DeepSeekProviderStatus) => void;
+};
+
+function DeepSeekProviderCard({
+  status,
+  busy,
+  onDisconnect,
+  onStatusChange,
+}: DeepSeekProviderCardProps) {
+  const [apiKey, setApiKey] = useState("");
+  const [revealed, setRevealed] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const validationSeq = useRef(0);
+
+  const displayStatus: DeepSeekProviderStatus = validating
+    ? { connected: false, connectionState: "connecting" }
+    : status ?? { connected: false, connectionState: "disconnected" };
+  const state = displayStatus.connectionState;
+  const connected = Boolean(displayStatus.connected);
+  const connecting = state === "connecting";
+  const error = validationError ?? (state === "error" ? displayStatus.error : null);
+  const statusLabel = connecting
+    ? "Connecting"
+    : connected
+      ? "Connected"
+      : state === "error"
+        ? "Needs attention"
+        : "Not connected";
+  const statusTone = connecting
+    ? "pending"
+    : connected
+      ? "ok"
+      : state === "error"
+        ? "error"
+        : "off";
+
+  useEffect(() => {
+    const key = apiKey.trim();
+    validationSeq.current += 1;
+    const seq = validationSeq.current;
+    setValidationError(null);
+    if (!key) {
+      setValidating(false);
+      return;
+    }
+    setValidating(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const next = await api.validateDeepSeekApiKey(key);
+          if (validationSeq.current !== seq) return;
+          onStatusChange(next);
+          setApiKey("");
+          setValidationError(null);
+        } catch (err) {
+          if (validationSeq.current !== seq) return;
+          const message = err instanceof Error ? err.message : String(err);
+          setValidationError(message);
+          onStatusChange({
+            connected: false,
+            connectionState: "error",
+            error: message,
+          });
+        } finally {
+          if (validationSeq.current === seq) setValidating(false);
+        }
+      })();
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [apiKey, onStatusChange]);
+
+  return (
+    <section className="settings-pane__provider-card settings-pane__provider-card--deepseek">
+      <div className="settings-pane__provider-main">
+        <div className="settings-pane__provider-mark" aria-hidden>
+          <Icon icon="simple-icons:deepseek" width={24} height={24} />
+        </div>
+        <div className="settings-pane__provider-copy">
+          <div className="settings-pane__provider-title-row">
+            <h2>DeepSeek</h2>
+            <span className="settings-pane__chip" data-tone={statusTone}>
+              <span className="settings-pane__chip-dot" />
+              {statusLabel}
+            </span>
+          </div>
+          <p>Use DeepSeek V4 Flash and Pro with your own DeepSeek API key.</p>
+          {error && <div className="settings-pane__provider-error">{error}</div>}
+        </div>
+      </div>
+
+      <div className="settings-pane__provider-detail">
+        <label className="settings-pane__tool-credential">
+          <span className="settings-pane__tool-credential-label">API key</span>
+          <div className="settings-pane__tool-credential-field">
+            <input
+              type={revealed ? "text" : "password"}
+              value={apiKey}
+              placeholder={connected ? displayStatus.keyPreview ?? "Key saved" : "sk-..."}
+              onChange={(event) => setApiKey(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <div className="settings-pane__tool-credential-actions">
+              <button
+                type="button"
+                className="settings-pane__icon-btn"
+                onClick={() => setRevealed((value) => !value)}
+                title={revealed ? "Hide key" : "Show key"}
+                aria-label={revealed ? "Hide key" : "Show key"}
+              >
+                <Icon
+                  icon={revealed ? "solar:eye-closed-linear" : "solar:eye-linear"}
+                  width={13}
+                  height={13}
+                />
+              </button>
+              {connected && (
+                <button
+                  type="button"
+                  className="settings-pane__icon-btn"
+                  onClick={onDisconnect}
+                  disabled={busy}
+                  title="Remove API key"
+                  aria-label="Remove API key"
+                >
+                  <Icon icon="solar:trash-bin-trash-linear" width={13} height={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        </label>
+      </div>
+    </section>
+  );
+}
 
 function OpenRouterProviderCard({
   status,

@@ -279,6 +279,14 @@ export type OpenRouterProviderStatus = {
   error?: string | null;
 };
 
+export type DeepSeekProviderStatus = {
+  connected: boolean;
+  connectionState: ProviderConnectionState;
+  keyPreview?: string | null;
+  lastValidatedMs?: number | null;
+  error?: string | null;
+};
+
 export type OpenRouterModel = {
   id: string;
   name: string;

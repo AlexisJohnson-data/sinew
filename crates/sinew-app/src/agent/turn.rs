@@ -39,6 +39,35 @@ use crate::{system_prompt_with_todo, tool_names, ReadFingerprint, TodoListState,
 
 const SAFE_STREAM_MAX_RETRIES: usize = 5;
 
+/// Outcome of awaiting a future that can be pre-empted by a Stop click.
+enum Guarded<T> {
+    Done(T),
+    Cancelled,
+}
+
+/// Await `fut`, but return early the moment a Cancel command arrives on
+/// `cmd_rx`. The mid-stream and mid-tool loops already race the cancel channel;
+/// this covers the *other* awaits in a turn — provider stream setup and retry
+/// backoff — which are otherwise unguarded, so a Stop click during a slow
+/// connection or a retry sleep would appear to do nothing until the await
+/// finished on its own. Biased so Cancel always wins a tie.
+async fn guard_cancel<T>(
+    cmd_rx: &mut mpsc::UnboundedReceiver<EngineCommand>,
+    fut: impl std::future::Future<Output = T>,
+) -> Guarded<T> {
+    tokio::pin!(fut);
+    tokio::select! {
+        biased;
+        command = cmd_rx.recv() => match command {
+            Some(EngineCommand::Cancel) => Guarded::Cancelled,
+            // The command channel closed: no further cancels can arrive, so
+            // just let the future finish.
+            None => Guarded::Done(fut.await),
+        },
+        value = &mut fut => Guarded::Done(value),
+    }
+}
+
 pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
     let TurnContext {
         provider,
@@ -223,7 +252,18 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
 
         let mut stream_retry_attempts = 0usize;
         let (message_builder, mut stop_reason, response_usage) = 'stream_attempt: loop {
-            let mut stream = match provider.stream(request.clone()).await {
+            // Setting up the SSE connection can block for seconds on a slow or
+            // stalling provider; race it against Stop so the button works here
+            // too, not only once tokens start flowing.
+            let stream_setup = match guard_cancel(&mut cmd_rx, provider.stream(request.clone())).await
+            {
+                Guarded::Cancelled => {
+                    cancelled = true;
+                    break 'conversation;
+                }
+                Guarded::Done(result) => result,
+            };
+            let mut stream = match stream_setup {
                 Ok(stream) => stream,
                 Err(err) => {
                     if should_retry_stream(&err, stream_retry_attempts) {
@@ -235,7 +275,18 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                             error = %err,
                             "retrying provider stream setup"
                         );
-                        tokio::time::sleep(stream_retry_delay(stream_retry_attempts)).await;
+                        // The backoff sleep is also cancelable, so Stop during a
+                        // retry wait ends the turn immediately instead of making
+                        // the user sit through the delay.
+                        if let Guarded::Cancelled = guard_cancel(
+                            &mut cmd_rx,
+                            tokio::time::sleep(stream_retry_delay(stream_retry_attempts)),
+                        )
+                        .await
+                        {
+                            cancelled = true;
+                            break 'conversation;
+                        }
                         continue 'stream_attempt;
                     }
 
