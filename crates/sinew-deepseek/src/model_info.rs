@@ -48,8 +48,11 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         supports_thinking: true,
         visible_thinking: true,
         supports_tools: true,
-        // DeepSeek V4 is text + vision; the API accepts image_url content parts.
-        supports_images: true,
+        // DeepSeek V4 (api.deepseek.com) is text-only: the `/chat/completions`
+        // endpoint rejects `image_url` content parts ("unknown variant
+        // 'image_url', expected 'text'"). Images in history are downgraded to a
+        // text placeholder by the client instead of being sent.
+        supports_images: false,
         effort_mode: EffortMode::Flag,
     }
 }

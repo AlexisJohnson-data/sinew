@@ -118,7 +118,7 @@ impl Provider for DeepSeekProvider {
         // a plain OpenAI-compatible request and let the stream surface thinking.
         let body = wire::ChatCompletionsRequest {
             model: &request.model.name,
-            messages: to_wire_messages(&request)?,
+            messages: to_wire_messages(&request, caps.supports_images)?,
             tools: request.tools.iter().map(to_wire_tool).collect(),
             max_tokens: Some(request.output_token_budget(&caps)),
             temperature: request.temperature,
@@ -178,7 +178,10 @@ fn to_wire_tool(tool: &ToolDescriptor) -> wire::WireTool<'_> {
     }
 }
 
-fn to_wire_messages<'a>(request: &'a ProviderRequest) -> Result<Vec<wire::WireMessage<'a>>> {
+fn to_wire_messages<'a>(
+    request: &'a ProviderRequest,
+    supports_images: bool,
+) -> Result<Vec<wire::WireMessage<'a>>> {
     let mut messages = Vec::new();
     if let Some(system) = request
         .system_prompt
@@ -193,7 +196,7 @@ fn to_wire_messages<'a>(request: &'a ProviderRequest) -> Result<Vec<wire::WireMe
 
     for message in &request.transcript {
         match message.role {
-            Role::User => push_user_messages(message, &mut messages),
+            Role::User => push_user_messages(message, &mut messages, supports_images),
             Role::Assistant => push_assistant_message(message, &mut messages),
         }
     }
@@ -201,8 +204,12 @@ fn to_wire_messages<'a>(request: &'a ProviderRequest) -> Result<Vec<wire::WireMe
     Ok(messages)
 }
 
-fn push_user_messages<'a>(message: &'a ChatMessage, messages: &mut Vec<wire::WireMessage<'a>>) {
-    let mut builder = ContentBuilder::default();
+fn push_user_messages<'a>(
+    message: &'a ChatMessage,
+    messages: &mut Vec<wire::WireMessage<'a>>,
+    supports_images: bool,
+) {
+    let mut builder = ContentBuilder::new(supports_images);
     for part in &message.parts {
         if part_is_ui_only(part) {
             continue;
@@ -219,7 +226,7 @@ fn push_user_messages<'a>(message: &'a ChatMessage, messages: &mut Vec<wire::Wir
                 ..
             } => {
                 flush_user_builder(&mut builder, messages);
-                let mut result = ContentBuilder::default();
+                let mut result = ContentBuilder::new(supports_images);
                 result.push_text(content);
                 for image in images {
                     if !image.data.trim().is_empty() {
@@ -295,9 +302,17 @@ struct ContentBuilder {
     text: String,
     blocks: Vec<wire::WireContentBlock>,
     has_media: bool,
+    supports_images: bool,
 }
 
 impl ContentBuilder {
+    fn new(supports_images: bool) -> Self {
+        Self {
+            supports_images,
+            ..Self::default()
+        }
+    }
+
     fn push_text(&mut self, text: &str) {
         if text.is_empty() {
             return;
@@ -313,6 +328,13 @@ impl ContentBuilder {
 
     fn push_image(&mut self, media_type: &str, data: &str) {
         if data.trim().is_empty() {
+            return;
+        }
+        // DeepSeek V4 is text-only; downgrade images to a text placeholder so
+        // conversations that accumulated screenshots still stream instead of
+        // getting rejected with "unknown variant 'image_url'".
+        if !self.supports_images {
+            self.push_text(&format!("\n[Image omitted: {media_type}]\n"));
             return;
         }
         if !self.has_media {
