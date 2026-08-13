@@ -199,6 +199,11 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                 "\n\n<browser_tools>\nYou have a real Chromium-based browser available through the browser_* tools (browser_open, browser_screenshot, browser_click, browser_dom, browser_eval, browser_console, browser_network, browser_wait, browser_scroll, browser_select, browser_hover, browser_close, browser_record_start/stop, browser_resize, browser_back, browser_forward, browser_find, browser_pdf, browser_upload, browser_cookies, browser_keys, browser_iframe). When the user asks you to look at, open, navigate, screenshot, or interact with a web page (including a local dev server), use these tools — they drive a headed Chrome/Edge instance on the host OS. Do NOT install a browser inside the shell; the browser tool launches one for you.\n</browser_tools>",
             );
         }
+        if tool_settings.ponytail_enabled {
+            current_system_prompt.push_str("\n\n<ponytail>\n");
+            current_system_prompt.push_str(tool_settings.ponytail_prompt());
+            current_system_prompt.push_str("\n</ponytail>");
+        }
         let current_system_prompt = current_system_prompt;
 
         if auto_compact {

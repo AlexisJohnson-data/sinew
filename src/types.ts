@@ -186,6 +186,10 @@ export type ToolSettings = {
   linkupApiKey: string;
   shellPreference: ShellPreference;
   notificationsEnabled: boolean;
+  ponytailEnabled: boolean;
+  ponytailPrompt: string;
+  defaultPonytailPrompt: string;
+  rtkEnabled: boolean;
 };
 
 export type ProviderConnectionState =

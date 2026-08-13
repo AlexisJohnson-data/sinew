@@ -4,7 +4,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::{
-    tool_names, BashTool, BrowserTools, CreateImageTool, EditFileTool, GlobTool, GrepTool,
+    rtk, tool_names, BashTool, BrowserTools, CreateImageTool, EditFileTool, GlobTool, GrepTool,
     McpToolRegistry, QuestionTool, ReadFingerprint, ReadTool, SkillTool, SubAgentTool, TeamTool,
     ToDoListTool, TodoListState, ToolRunResult, ToolSettings, WebFetchTool, WebSearchTool,
     WriteFileTool,
@@ -61,7 +61,32 @@ pub(super) async fn run_tool(
         );
     }
     if canonical_name == tool_names::BASH {
-        bash.run(input).await
+        let (input, rtk_meta) = if tool_settings.rtk_enabled {
+            if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
+                if let Some(rewrite) = rtk::maybe_rewrite_command(command) {
+                    let mut patched = input.clone();
+                    patched["command"] = serde_json::Value::String(rewrite.rewritten.clone());
+                    let meta = serde_json::json!({
+                        "rtk": {
+                            "original": rewrite.original,
+                            "rewritten": rewrite.rewritten,
+                        }
+                    });
+                    (patched, Some(meta))
+                } else {
+                    (input, None)
+                }
+            } else {
+                (input, None)
+            }
+        } else {
+            (input, None)
+        };
+        let mut result = bash.run(input).await;
+        if let Some(meta) = rtk_meta {
+            result.meta = Some(meta);
+        }
+        result
     } else if canonical_name == tool_names::BASH_INPUT {
         bash.run_input(input).await
     } else if canonical_name == tool_names::GLOB {

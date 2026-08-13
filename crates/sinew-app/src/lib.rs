@@ -13,6 +13,7 @@ mod powershell;
 pub mod question;
 pub mod read;
 mod ripgrep;
+pub mod rtk;
 pub mod skill;
 pub mod store;
 pub mod subagent;
@@ -68,7 +69,7 @@ pub use store::{
     OpenRouterModelRecord, PlanArtifactState, PlanWorkflowState, SavedConversation,
     ShellPreference, ToolConfig, ToolConfigView, ToolSettings, ToolSettingsView,
     TurnCheckpointRecord, WebSearchProvider, WorkspaceBootstrap, DEFAULT_PLAN_MODE_PROMPT,
-    MIGRATION_AGENT_PROMPT,
+    DEFAULT_PONYTAIL_PROMPT, MIGRATION_AGENT_PROMPT,
 };
 pub use subagent::{
     import_sub_agents_from_provider, is_subagent_tool_name, subagent_system_prompt,

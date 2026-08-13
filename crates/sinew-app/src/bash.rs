@@ -220,6 +220,17 @@ fn active_shell_kind() -> ShellKind {
     ShellKind::from_preference(pref)
 }
 
+pub fn is_wsl_shell_active() -> bool {
+    #[cfg(windows)]
+    {
+        matches!(active_shell_kind(), ShellKind::Wsl)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 pub fn active_shell_display_name() -> &'static str {
     active_shell_kind().display_name()
 }

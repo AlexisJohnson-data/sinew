@@ -214,6 +214,10 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   linkupApiKey: "",
   shellPreference: "auto",
   notificationsEnabled: true,
+  ponytailEnabled: false,
+  ponytailPrompt: "",
+  defaultPonytailPrompt: "",
+  rtkEnabled: false,
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -497,6 +501,24 @@ export function SettingsPane({ workspacePath }: Props) {
     (notificationsEnabled: boolean) => {
       setToolSettings((current) =>
         current ? { ...current, notificationsEnabled } : current,
+      );
+    },
+    [],
+  );
+
+  const updatePonytailEnabled = useCallback(
+    (ponytailEnabled: boolean) => {
+      setToolSettings((current) =>
+        current ? { ...current, ponytailEnabled } : current,
+      );
+    },
+    [],
+  );
+
+  const updateRtkEnabled = useCallback(
+    (rtkEnabled: boolean) => {
+      setToolSettings((current) =>
+        current ? { ...current, rtkEnabled } : current,
       );
     },
     [],
@@ -1645,6 +1667,8 @@ export function SettingsPane({ workspacePath }: Props) {
             onWebSearchProviderChange={updateWebSearchProvider}
             onShellPreferenceChange={updateShellPreference}
             onNotificationsEnabledChange={updateNotificationsEnabled}
+            onPonytailEnabledChange={updatePonytailEnabled}
+            onRtkEnabledChange={updateRtkEnabled}
             onLinkupApiKeyChange={updateLinkupApiKey}
             openAiStatus={openAiStatus}
           />
@@ -2542,6 +2566,8 @@ type ToolsSectionProps = {
   onWebSearchProviderChange: (value: WebSearchProvider) => void;
   onShellPreferenceChange: (value: ShellPreference) => void;
   onNotificationsEnabledChange: (value: boolean) => void;
+  onPonytailEnabledChange: (value: boolean) => void;
+  onRtkEnabledChange: (value: boolean) => void;
   onLinkupApiKeyChange: (value: string) => void;
   openAiStatus: OpenAiProviderStatus | null;
 };
@@ -2574,6 +2600,8 @@ function ToolsSection({
   onWebSearchProviderChange,
   onShellPreferenceChange,
   onNotificationsEnabledChange,
+  onPonytailEnabledChange,
+  onRtkEnabledChange,
   onLinkupApiKeyChange,
   openAiStatus,
 }: ToolsSectionProps) {
@@ -2588,6 +2616,8 @@ function ToolsSection({
   const linkupApiKey = settings?.linkupApiKey ?? "";
   const shellPreference = settings?.shellPreference ?? "auto";
   const notificationsEnabled = settings?.notificationsEnabled ?? true;
+  const ponytailEnabled = settings?.ponytailEnabled ?? false;
+  const rtkEnabled = settings?.rtkEnabled ?? false;
   const openAiConnected = openAiStatus?.connected === true;
   const subscriptionActive =
     imageProvider === "gptImage2" && openAiConnected && openaiImageUseSubscription;
@@ -2798,6 +2828,66 @@ function ToolsSection({
               {notificationsEnabled
                 ? "Sinew pings the taskbar and sends an OS notification when the agent finishes a turn or asks a question and the window is not focused."
                 : "Sinew stays silent. You'll need to come back to the window to know an answer is ready."}
+            </p>
+          </section>
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>Ponytail</h2>
+            </div>
+            <div
+              className="settings-pane__tool-provider-switch"
+              role="group"
+              aria-label="Ponytail lazy senior dev mode"
+            >
+              <button
+                type="button"
+                data-active={ponytailEnabled ? "true" : "false"}
+                onClick={() => onPonytailEnabledChange(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                data-active={!ponytailEnabled ? "true" : "false"}
+                onClick={() => onPonytailEnabledChange(false)}
+              >
+                Off
+              </button>
+            </div>
+            <p className="settings-pane__field-hint">
+              {ponytailEnabled
+                ? "Ponytail is active. The agent follows a YAGNI philosophy: it reuses existing code, avoids unnecessary abstractions, and writes the shortest working diff."
+                : "Ponytail is off. The agent uses its default coding style without additional constraints."}
+            </p>
+          </section>
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>RTK</h2>
+            </div>
+            <div
+              className="settings-pane__tool-provider-switch"
+              role="group"
+              aria-label="RTK command compression"
+            >
+              <button
+                type="button"
+                data-active={rtkEnabled ? "true" : "false"}
+                onClick={() => onRtkEnabledChange(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                data-active={!rtkEnabled ? "true" : "false"}
+                onClick={() => onRtkEnabledChange(false)}
+              >
+                Off
+              </button>
+            </div>
+            <p className="settings-pane__field-hint">
+              {rtkEnabled
+                ? "RTK is active. Shell commands (git, cargo, npm, etc.) are automatically routed through RTK for compressed output, reducing token usage by 60–90%."
+                : "RTK is off. Shell output goes to the context as-is. Requires the rtk binary on the system PATH."}
             </p>
           </section>
           {IS_WINDOWS && (
@@ -4913,6 +5003,10 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
           ? "powershell"
           : "auto",
     notificationsEnabled: settings.notificationsEnabled !== false,
+    ponytailEnabled: settings.ponytailEnabled === true,
+    ponytailPrompt: settings.ponytailPrompt ?? "",
+    defaultPonytailPrompt: settings.defaultPonytailPrompt ?? "",
+    rtkEnabled: settings.rtkEnabled === true,
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];
