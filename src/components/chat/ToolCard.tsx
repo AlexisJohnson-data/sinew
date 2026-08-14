@@ -1392,6 +1392,14 @@ export function ToolCard({
         ) : (
           <span className="tool-card__title">{title}</span>
         )}
+        {isBash && meta?.rtk && status !== "running" && (
+          <span
+            className="tool-card__rtk-badge"
+            title={`RTK: ${(meta.rtk as Record<string, unknown>).rewritten ?? title}`}
+          >
+            RTK
+          </span>
+        )}
         {showTeamStop && (
           <button
             type="button"

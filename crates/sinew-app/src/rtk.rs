@@ -220,6 +220,7 @@ pub fn maybe_rewrite_command(command: &str) -> Option<RtkRewrite> {
     }
 
     if any_changed {
+        tracing::debug!(original = command, rewritten = %result, "rtk rewrite");
         Some(RtkRewrite {
             original: command.to_string(),
             rewritten: result,
