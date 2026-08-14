@@ -27,6 +27,16 @@ pub(super) struct RemoteRuntime {
     relay_tx: Arc<Mutex<Option<mpsc::UnboundedSender<RelayClientFrame>>>>,
 }
 
+/// Result of a non-blocking window→workspace lookup from a sync context.
+pub(super) enum WindowWorkspaceProbe {
+    /// The window is showing this workspace.
+    Workspace(String),
+    /// The window has no workspace mapped (e.g. never opened a project).
+    NoWorkspace,
+    /// The map was locked and couldn't be read without blocking.
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteSettings {
@@ -1204,6 +1214,20 @@ impl RemoteRuntime {
             .open_workspaces
             .insert(window_label, workspace_id.clone());
         inner.current_workspace = Some(workspace_id);
+    }
+
+    /// Non-blocking lookup of the workspace shown in a given window, for use
+    /// from the synchronous `CloseRequested` handler. Returns `Unknown` when
+    /// the map is momentarily locked (treat as "ask" upstream rather than risk
+    /// closing over live work).
+    pub(super) fn window_workspace_blocking(&self, window_label: &str) -> WindowWorkspaceProbe {
+        match self.inner.try_lock() {
+            Ok(inner) => match inner.open_workspaces.get(window_label) {
+                Some(workspace) => WindowWorkspaceProbe::Workspace(workspace.clone()),
+                None => WindowWorkspaceProbe::NoWorkspace,
+            },
+            Err(_) => WindowWorkspaceProbe::Unknown,
+        }
     }
 
     pub(super) async fn remove_window_workspace(&self, window_label: &str) {

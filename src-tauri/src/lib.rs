@@ -320,19 +320,39 @@ pub fn run() {
                 return;
             };
             // A turn is only written to the store once it finishes, so closing
-            // mid-turn silently discards everything the agent produced. Confirm on
-            // every window, not just the last one — the window being closed may
-            // well be the one showing the running turn.
-            // `active_turns` is a tokio mutex and this handler is sync, so probe it
-            // without blocking. A contended lock means a turn is being registered
-            // or torn down right now — treat "unknown" as busy and ask rather than
-            // risk closing over live work.
+            // mid-turn silently discards everything the agent produced. But the
+            // warning must be scoped to the window actually at risk:
+            //
+            //  - Secondary utility windows (settings, remote) never own a turn's
+            //    persistence — the turn is tied to its project window — so
+            //    closing one can never lose live work. Never warn on them.
+            //  - A project window must only warn when a turn is running in *its
+            //    own* workspace. Closing project A's window must stay silent
+            //    while an agent runs in project B's window.
+            //
+            // Both `open_workspaces` (tokio mutex) and `active_turn_details`
+            // (std mutex) are probed without blocking; a contended lock means a
+            // turn is being registered or torn down right now — treat that
+            // "unknown" as busy and ask rather than risk closing over live work.
+            if window.label().starts_with("secondary-") {
+                return;
+            }
             let desktop_state = window.state::<state::DesktopState>();
-            let busy = desktop_state
-                .active_turns
-                .try_lock()
-                .map(|turns| !turns.is_empty())
-                .unwrap_or(true);
+            let busy = match desktop_state.remote.window_workspace_blocking(window.label()) {
+                remote::WindowWorkspaceProbe::Unknown => true,
+                // A project window with no workspace mapped has no open project,
+                // so no turn of its own can be running.
+                remote::WindowWorkspaceProbe::NoWorkspace => false,
+                remote::WindowWorkspaceProbe::Workspace(workspace_id) => desktop_state
+                    .active_turn_details
+                    .try_lock()
+                    .map(|details| {
+                        details
+                            .values()
+                            .any(|record| record.workspace_id == workspace_id)
+                    })
+                    .unwrap_or(true),
+            };
             if !busy {
                 return;
             }
