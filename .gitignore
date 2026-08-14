@@ -18,4 +18,4 @@
 # Tauri updater signing keys — NEVER commit private keys
 /.tauri-keys/
 *.key
-src-tauri/pdfium.dll
+# pdfium.dll (PDF resource) is committed on purpose — the CI needs it to bundle.
