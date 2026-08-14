@@ -203,6 +203,13 @@ export const MODELS: ModelEntry[] = [
     supportsFast: true,
   },
   {
+    value: "google:gemini-3.7-flash",
+    provider: "google",
+    label: "Gemini 3.7 Flash",
+    thinking: ["low", "medium", "high"],
+    defaultThinking: "high",
+  },
+  {
     value: "google:gemini-3.1-pro",
     provider: "google",
     label: "Gemini 3.1 Pro",

@@ -1141,6 +1141,12 @@ export function ToolCard({
     );
   }
 
+  const rtkRewritten = (() => {
+    const rtk = meta?.rtk;
+    if (!rtk || typeof rtk !== "object") return null;
+    const rewritten = (rtk as Record<string, unknown>).rewritten;
+    return typeof rewritten === "string" ? rewritten : null;
+  })();
   const isBash = canonicalName === "bash" || canonicalName === "bash_input";
   const isGlob = canonicalName === "glob";
   const isGrep = canonicalName === "grep";
@@ -1392,11 +1398,8 @@ export function ToolCard({
         ) : (
           <span className="tool-card__title">{title}</span>
         )}
-        {isBash && meta?.rtk && status !== "running" && (
-          <span
-            className="tool-card__rtk-badge"
-            title={`RTK: ${(meta.rtk as Record<string, unknown>).rewritten ?? title}`}
-          >
+        {isBash && status !== "running" && rtkRewritten && (
+          <span className="tool-card__rtk-badge" title={`RTK: ${rtkRewritten}`}>
             RTK
           </span>
         )}

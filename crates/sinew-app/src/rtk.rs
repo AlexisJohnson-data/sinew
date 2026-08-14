@@ -56,8 +56,13 @@ fn resolve_native_rtk() -> Option<PathBuf> {
 fn probe_wsl_rtk() -> bool {
     #[cfg(windows)]
     {
+        // Must mirror how commands actually run (`spawn_wsl_piped_session`):
+        // `wsl.exe -- bash -lc <cmd>`. A bare `wsl.exe -- which rtk` uses a
+        // non-login shell that never sources `~/.profile`, so `~/.local/bin`
+        // is absent from PATH and rtk (installed there) reads as missing even
+        // though it resolves fine at execution time. Use a login shell here.
         std::process::Command::new("wsl.exe")
-            .args(["--", "which", "rtk"])
+            .args(["--", "bash", "-lc", "command -v rtk"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
