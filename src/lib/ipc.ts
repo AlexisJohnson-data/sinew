@@ -28,6 +28,7 @@ import type {
   StartMcpLoginOutput,
   ModeModelSettings,
   DeepSeekProviderStatus,
+  OpenCodeGoProviderStatus,
   ModelRef,
   OpenAiProviderStatus,
   OpenRouterModel,
@@ -521,6 +522,17 @@ export const api = {
   },
   disconnectDeepSeekProvider() {
     return invoke<DeepSeekProviderStatus>("disconnect_deepseek_provider");
+  },
+  getOpenCodeGoProviderStatus() {
+    return invoke<OpenCodeGoProviderStatus>("get_opencode_go_provider_status");
+  },
+  validateOpenCodeGoApiKey(apiKey: string) {
+    return invoke<OpenCodeGoProviderStatus>("validate_opencode_go_api_key", {
+      input: { apiKey },
+    });
+  },
+  disconnectOpenCodeGoProvider() {
+    return invoke<OpenCodeGoProviderStatus>("disconnect_opencode_go_provider");
   },
   listOpenRouterModels() {
     return invoke<OpenRouterModel[]>("list_openrouter_models");

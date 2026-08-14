@@ -291,6 +291,14 @@ export type DeepSeekProviderStatus = {
   error?: string | null;
 };
 
+export type OpenCodeGoProviderStatus = {
+  connected: boolean;
+  connectionState: ProviderConnectionState;
+  keyPreview?: string | null;
+  lastValidatedMs?: number | null;
+  error?: string | null;
+};
+
 export type OpenRouterModel = {
   id: string;
   name: string;

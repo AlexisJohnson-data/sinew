@@ -115,6 +115,16 @@ pub(super) struct DeepSeekProviderStatus {
     pub(super) error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct OpenCodeGoProviderStatus {
+    pub(super) connected: bool,
+    pub(super) connection_state: String,
+    pub(super) key_preview: Option<String>,
+    pub(super) last_validated_ms: Option<i64>,
+    pub(super) error: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WorkspaceInput {
@@ -459,6 +469,12 @@ pub(super) struct ValidateOpenRouterApiKeyInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ValidateDeepSeekApiKeyInput {
+    pub(super) api_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ValidateOpenCodeGoApiKeyInput {
     pub(super) api_key: String,
 }
 

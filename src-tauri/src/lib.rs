@@ -67,6 +67,14 @@ use sinew_deepseek::{
     validate_api_key as validate_deepseek_api_key_remote, DeepSeekAuthStatus, DeepSeekProvider,
     MODEL_ID as DEEPSEEK_MODEL_ID, PROVIDER_ID as DEEPSEEK_PROVIDER_ID,
 };
+use sinew_opencode_go::{
+    delete_default_auth as delete_default_opencode_go_auth,
+    load_default_api_key as load_default_opencode_go_api_key,
+    load_default_auth_status as load_default_opencode_go_auth_status,
+    save_default_api_key as save_default_opencode_go_api_key,
+    validate_api_key as validate_opencode_go_api_key_remote, OpenCodeGoAuthStatus,
+    OpenCodeGoProvider, PROVIDER_ID as OPENCODE_GO_PROVIDER_ID,
+};
 use sinew_google::{
     delete_default_auth as delete_default_google_auth,
     exchange_oauth_code as exchange_google_oauth_code, generate_pkce as generate_google_pkce,
@@ -176,6 +184,12 @@ pub fn run() {
     if let Ok(provider) = DeepSeekProvider::from_default_sources() {
         providers.insert(
             DEEPSEEK_PROVIDER_ID.into(),
+            Arc::new(provider) as Arc<dyn Provider>,
+        );
+    }
+    if let Ok(provider) = OpenCodeGoProvider::from_default_sources() {
+        providers.insert(
+            OPENCODE_GO_PROVIDER_ID.into(),
             Arc::new(provider) as Arc<dyn Provider>,
         );
     }
@@ -458,6 +472,9 @@ pub fn run() {
             providers::get_deepseek_provider_status,
             providers::validate_deepseek_api_key,
             providers::disconnect_deepseek_provider,
+            providers::get_opencode_go_provider_status,
+            providers::validate_opencode_go_api_key,
+            providers::disconnect_opencode_go_provider,
             providers::get_openrouter_provider_status,
             providers::validate_openrouter_api_key,
             providers::disconnect_openrouter_provider,

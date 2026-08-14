@@ -4,6 +4,7 @@ members = [
     "crates/sinew-core",
     "crates/sinew-anthropic",
     "crates/sinew-deepseek",
+    "crates/sinew-opencode-go",
     "crates/sinew-google",
     "crates/sinew-kimi",
     "crates/sinew-openai",
@@ -26,6 +27,7 @@ too_many_arguments = "allow"
 sinew-core = { path = "crates/sinew-core" }
 sinew-anthropic = { path = "crates/sinew-anthropic" }
 sinew-deepseek = { path = "crates/sinew-deepseek" }
+sinew-opencode-go = { path = "crates/sinew-opencode-go" }
 sinew-google = { path = "crates/sinew-google" }
 sinew-kimi = { path = "crates/sinew-kimi" }
 sinew-openai = { path = "crates/sinew-openai" }

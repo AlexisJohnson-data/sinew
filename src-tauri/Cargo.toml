@@ -20,6 +20,7 @@ sinew-app = { workspace = true }
 sinew-browser = { workspace = true }
 sinew-core = { workspace = true }
 sinew-deepseek = { workspace = true }
+sinew-opencode-go = { workspace = true }
 sinew-google = { workspace = true }
 sinew-kimi = { workspace = true }
 sinew-openai = { workspace = true }

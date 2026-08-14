@@ -135,6 +135,44 @@ pub(super) fn deepseek_provider_status_from_auth(
     }
 }
 
+pub(super) fn install_opencode_go_provider(
+    providers: &Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
+) -> std::result::Result<(), String> {
+    let provider = OpenCodeGoProvider::from_default_sources().map_err(error_to_string)?;
+    providers
+        .lock()
+        .map_err(|_| "provider registry is unavailable".to_string())?
+        .insert(
+            OPENCODE_GO_PROVIDER_ID.into(),
+            Arc::new(provider) as Arc<dyn Provider>,
+        );
+    Ok(())
+}
+
+pub(super) fn remove_opencode_go_provider(
+    providers: &Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
+) -> std::result::Result<(), String> {
+    providers
+        .lock()
+        .map_err(|_| "provider registry is unavailable".to_string())?
+        .remove(OPENCODE_GO_PROVIDER_ID);
+    Ok(())
+}
+
+pub(super) fn opencode_go_provider_status_from_auth(
+    auth: OpenCodeGoAuthStatus,
+    connection_state: &str,
+    error: Option<String>,
+) -> OpenCodeGoProviderStatus {
+    OpenCodeGoProviderStatus {
+        connected: auth.connected && connection_state == "connected",
+        connection_state: connection_state.to_string(),
+        key_preview: auth.key_preview,
+        last_validated_ms: auth.last_validated_ms,
+        error,
+    }
+}
+
 pub(super) fn install_openrouter_provider(
     providers: &Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
     models: &[OpenRouterModelRecord],
@@ -1573,6 +1611,73 @@ pub(super) async fn disconnect_deepseek_provider(
     remove_deepseek_provider(&state.providers)?;
     Ok(deepseek_provider_status_from_auth(
         DeepSeekAuthStatus::disconnected(),
+        "disconnected",
+        None,
+    ))
+}
+
+#[tauri::command]
+pub(super) async fn get_opencode_go_provider_status(
+    state: State<'_, DesktopState>,
+) -> std::result::Result<OpenCodeGoProviderStatus, String> {
+    let auth = load_default_opencode_go_auth_status().map_err(error_to_string)?;
+    let Some(api_key) = load_default_opencode_go_api_key().map_err(error_to_string)? else {
+        remove_opencode_go_provider(&state.providers)?;
+        return Ok(opencode_go_provider_status_from_auth(
+            auth,
+            "disconnected",
+            None,
+        ));
+    };
+
+    match validate_opencode_go_api_key_remote(&api_key).await {
+        Ok(()) => {
+            install_opencode_go_provider(&state.providers)?;
+            let auth = load_default_opencode_go_auth_status().map_err(error_to_string)?;
+            Ok(opencode_go_provider_status_from_auth(auth, "connected", None))
+        }
+        Err(err) => {
+            remove_opencode_go_provider(&state.providers)?;
+            Ok(opencode_go_provider_status_from_auth(
+                auth,
+                "error",
+                Some(error_to_string(err)),
+            ))
+        }
+    }
+}
+
+#[tauri::command]
+pub(super) async fn validate_opencode_go_api_key(
+    state: State<'_, DesktopState>,
+    input: ValidateOpenCodeGoApiKeyInput,
+) -> std::result::Result<OpenCodeGoProviderStatus, String> {
+    let api_key = input.api_key.trim().to_string();
+    if api_key.is_empty() {
+        return Ok(opencode_go_provider_status_from_auth(
+            OpenCodeGoAuthStatus::disconnected(),
+            "disconnected",
+            None,
+        ));
+    }
+
+    validate_opencode_go_api_key_remote(&api_key)
+        .await
+        .map_err(error_to_string)?;
+    let auth = save_default_opencode_go_api_key(&api_key).map_err(error_to_string)?;
+    install_opencode_go_provider(&state.providers)?;
+    Ok(opencode_go_provider_status_from_auth(auth, "connected", None))
+}
+
+#[tauri::command]
+pub(super) async fn disconnect_opencode_go_provider(
+    state: State<'_, DesktopState>,
+) -> std::result::Result<OpenCodeGoProviderStatus, String> {
+    cancel_active_turns_for_provider(&state, OPENCODE_GO_PROVIDER_ID).await;
+    delete_default_opencode_go_auth().map_err(error_to_string)?;
+    remove_opencode_go_provider(&state.providers)?;
+    Ok(opencode_go_provider_status_from_auth(
+        OpenCodeGoAuthStatus::disconnected(),
         "disconnected",
         None,
     ))

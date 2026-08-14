@@ -27,6 +27,7 @@ dependencies = [
  "sinew-google",
  "sinew-kimi",
  "sinew-openai",
+ "sinew-opencode-go",
  "sinew-openrouter",
  "tauri",
  "tauri-build",
@@ -4785,6 +4786,24 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sinew-opencode-go"
+version = "0.2.2"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "directories",
+ "eventsource-stream",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sinew-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
