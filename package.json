@@ -8,6 +8,7 @@
     "remote": "node remote/server.mjs",
     "build": "tsc --noEmit && vite build",
     "prepare-sidecars": "node scripts/prepare-sidecars.mjs",
+    "prepare-pdfium": "node scripts/prepare-pdfium.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

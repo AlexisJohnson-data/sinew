@@ -257,13 +257,22 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Point liteparse/PDFium at the bundled `pdfium.dll` shipped in the
+            // Point liteparse/PDFium at the bundled pdfium library shipped in the
             // app's resources, so PDF reading works on machines that never ran
             // the build. The lib path baked into the binary at compile time only
             // exists on the build host; liteparse checks `PDFIUM_LIB_PATH` first.
+            // The bundled file is per-OS (see the tauri.<platform>.conf.json
+            // resources + scripts/prepare-pdfium.mjs).
+            let pdfium_lib = if cfg!(target_os = "windows") {
+                "pdfium.dll"
+            } else if cfg!(target_os = "macos") {
+                "libpdfium.dylib"
+            } else {
+                "libpdfium.so"
+            };
             if let Ok(pdfium) = app
                 .path()
-                .resolve("pdfium.dll", tauri::path::BaseDirectory::Resource)
+                .resolve(pdfium_lib, tauri::path::BaseDirectory::Resource)
             {
                 if let Some(dir) = pdfium.parent() {
                     std::env::set_var("PDFIUM_LIB_PATH", dir);

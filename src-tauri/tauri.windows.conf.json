@@ -1,4 +1,7 @@
 {
+  "bundle": {
+    "resources": ["pdfium.dll"]
+  },
   "app": {
     "windows": [
       {
