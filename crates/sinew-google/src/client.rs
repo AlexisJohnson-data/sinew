@@ -389,6 +389,24 @@ impl GoogleProvider {
                     );
                 }
             }
+            // On a 429 (RESOURCE_EXHAUSTED) dump the wire model id we sent and
+            // the exact server message. A brand-new model that Antigravity
+            // recognizes but hasn't provisioned for this account returns 429
+            // (not 404), so the message distinguishes a rollout/tier gap from a
+            // genuine quota hit — and confirms which wire id was rejected.
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let path = std::env::temp_dir().join("sinew-google-rate-limit.txt");
+                let _ = std::fs::write(
+                    &path,
+                    format!("model wire id: {}\nerror: {err}\n", body.model),
+                );
+                tracing::warn!(
+                    path = %path.display(),
+                    wire_model = %body.model,
+                    error = %err,
+                    "Antigravity 429; dumped rate-limit detail"
+                );
+            }
             if matches!(
                 status,
                 reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
