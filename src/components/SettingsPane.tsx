@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Icon } from "@iconify/react";
 import { Wrench } from "lucide-react";
@@ -249,6 +250,7 @@ export function SettingsPane({ workspacePath }: Props) {
   const [knownToolCounts, setKnownToolCounts] = useState<Record<string, number>>({});
 
   const [probing, setProbing] = useState(false);
+  const [addServerOpen, setAddServerOpen] = useState(false);
 
   const [skills, setSkills] = useState<InstalledSkill[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -1103,6 +1105,74 @@ export function SettingsPane({ workspacePath }: Props) {
     [parseError, saving, settings],
   );
 
+  // Append one or more servers coming from the "Add server" modal (guided
+  // form or pasted config). Merges into the current set, skipping any whose
+  // name already exists, then persists + re-probes exactly like toggle/save
+  // so the freshly-added server lights up immediately. Returns a short human
+  // summary the modal shows before closing.
+  const addServers = useCallback(
+    async (incoming: McpServerConfig[]): Promise<string> => {
+      const existingNames = new Set(
+        settings.servers.map((server) => server.name.trim().toLowerCase()),
+      );
+      const added: McpServerConfig[] = [];
+      const skipped: string[] = [];
+      for (const server of incoming) {
+        const key = server.name.trim().toLowerCase();
+        if (!key) continue;
+        if (existingNames.has(key)) {
+          skipped.push(server.name);
+          continue;
+        }
+        existingNames.add(key);
+        added.push(server);
+      }
+      if (added.length === 0) {
+        throw new Error(
+          skipped.length
+            ? `Already present: ${skipped.join(", ")}`
+            : "Nothing to add",
+        );
+      }
+
+      const next = normalizeSettings({
+        servers: [...settings.servers, ...added],
+      });
+      setSaving(true);
+      setStatus(null);
+      try {
+        const saved = normalizeSettings(await api.saveMcpSettings(next));
+        const nextJson = settingsToJson(saved);
+        setSettings(saved);
+        setSavedJson(nextJson);
+        setJsonText(nextJson);
+        setParseError(null);
+        setSelectedServerId(
+          saved.servers.find((s) => s.name === added[0].name)?.id ??
+            saved.servers[0]?.id ??
+            null,
+        );
+
+        const nextProbes = await api.probeMcpTools();
+        setProbes(nextProbes);
+
+        const parts = [`${added.length} added`];
+        if (skipped.length) parts.push(`${skipped.length} skipped (already present)`);
+        const summary = parts.join(" · ");
+        setStatus(summary);
+        return summary;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setParseError(message);
+        setStatus(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [settings],
+  );
+
   // Re-run the MCP probe (used after an OAuth sign-in completes so the
   // freshly authenticated server lights up with its tool list).
   const reprobeMcp = useCallback(async () => {
@@ -1737,6 +1807,7 @@ export function SettingsPane({ workspacePath }: Props) {
             onToggleEnabled={toggleEnabled}
             onMount={handleEditorMount}
             onImport={() => void importMcpFromFile()}
+            onAdd={() => setAddServerOpen(true)}
             onReprobe={() => void reprobeMcp()}
           />
         ) : section === "skills" ? (
@@ -1787,6 +1858,13 @@ export function SettingsPane({ workspacePath }: Props) {
           />
         )}
       </section>
+      <AddServerModal
+        open={addServerOpen}
+        saving={saving}
+        existingNames={settings.servers.map((server) => server.name)}
+        onCancel={() => setAddServerOpen(false)}
+        onAdd={addServers}
+      />
     </div>
   );
 }
@@ -3300,6 +3378,7 @@ type McpSectionProps = {
   onToggleEnabled: (id: string) => void;
   onMount: OnMount;
   onImport: () => void;
+  onAdd: () => void;
   onReprobe: () => void;
 };
 
@@ -3324,6 +3403,7 @@ function McpSection({
   onToggleEnabled,
   onMount,
   onImport,
+  onAdd,
   onReprobe,
 }: McpSectionProps) {
   const enabledCount = servers.filter((server) => server.enabled).length;
@@ -3348,6 +3428,16 @@ function McpSection({
               {status}
             </span>
           )}
+          <button
+            type="button"
+            className="settings-pane__btn"
+            onClick={onAdd}
+            disabled={loading || saving}
+            title="Add a single MCP server via a guided form or by pasting its config"
+          >
+            <Icon icon="solar:add-square-linear" width={13} height={13} />
+            <span>Add server…</span>
+          </button>
           <button
             type="button"
             className="settings-pane__btn"
@@ -5228,6 +5318,731 @@ function toolSettingsFingerprint(settings: ToolSettings): string {
 
 // ---- JSON parsing helpers (unchanged) ----------------------------------
 
+type AddServerModalProps = {
+  open: boolean;
+  saving: boolean;
+  existingNames: string[];
+  onCancel: () => void;
+  onAdd: (servers: McpServerConfig[]) => Promise<string>;
+};
+
+type AddMode = "form" | "paste";
+type ServerKind = "remote" | "local";
+type AuthScheme = "bearer" | "header" | "none";
+
+/// Split a free-text arguments field into a string[]. Users tend to paste
+/// args either one-per-line or space-separated on a single line; support both.
+function parseArgsText(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const parts = /\r?\n/.test(trimmed) ? trimmed.split(/\r?\n/) : trimmed.split(/\s+/);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/// Tokenize a shell-ish command line into argv, honoring single/double quotes.
+/// Good enough for pasted MCP launch commands like `npx -y foo@latest start`.
+function parseCommandLine(text: string): string[] {
+  const tokens: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const token = match[1] ?? match[2] ?? match[3] ?? "";
+    if (token) tokens.push(token);
+  }
+  return tokens;
+}
+
+/// Guess a server name from a pasted command's argv: skip the runner and flags,
+/// take the first real package/binary, and strip its scope + `@version`.
+/// e.g. `npx -y convex@latest mcp start` -> "convex".
+function deriveServerNameFromArgv(tokens: string[]): string {
+  const runners = new Set([
+    "npx", "uvx", "uv", "bunx", "bun", "pnpm", "dlx", "node", "deno",
+    "python", "python3", "run", "exec",
+  ]);
+  for (const raw of tokens) {
+    if (raw.startsWith("-")) continue;
+    if (runners.has(raw)) continue;
+    let name = raw;
+    const slash = name.lastIndexOf("/");
+    if (slash >= 0) name = name.slice(slash + 1);
+    const at = name.indexOf("@");
+    if (at > 0) name = name.slice(0, at);
+    name = name.replace(/\.(exe|cmd|js|mjs|py)$/i, "");
+    if (name) return name;
+  }
+  return "mcp-server";
+}
+
+/// Derive a server name from a bare URL's host, e.g.
+/// https://mcp.clerk.com/mcp -> "clerk".
+function deriveServerNameFromUrl(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const parts = host.split(".").filter(Boolean);
+    // Prefer the label before a known 2-level TLD-ish tail.
+    const label = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    if (label && label !== "mcp") return label;
+    // "mcp.clerk.com" -> pick the label before "mcp" if present.
+    const mcpIdx = parts.indexOf("mcp");
+    if (mcpIdx >= 0 && parts[mcpIdx + 1]) return parts[mcpIdx + 1];
+    return label || "mcp-server";
+  } catch {
+    return "mcp-server";
+  }
+}
+
+/// Parse a `KEY=value` per-line env block into McpEnvVar pairs. Blank lines and
+/// `#` comments are ignored; everything after the first `=` is the value.
+function parseEnvText(text: string): McpEnvVar[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#") && line.includes("="))
+    .map((line) => {
+      const idx = line.indexOf("=");
+      return { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    })
+    .filter((pair) => pair.key.length > 0);
+}
+
+/// Guided "Add server" dialog. Two modes share one submit path:
+///   - Form: name + transport, then URL + optional Bearer token (remote) or
+///     command + args (stdio). The Bearer becomes an `Authorization` header,
+///     which is exactly what the backend/probe already understand.
+///   - Paste: drop the JSON a third-party tool hands you — a full
+///     `{"mcpServers": {…}}` block, a `{"servers":[…]}` array, or a single
+///     bare server object — and it is merged into the existing servers.
+/// Either way we hand fully-formed McpServerConfig objects to `onAdd`, which
+/// appends, persists, and re-probes.
+function AddServerModal({
+  open,
+  saving,
+  existingNames,
+  onCancel,
+  onAdd,
+}: AddServerModalProps) {
+  const [mode, setMode] = useState<AddMode>("form");
+  // Two connection kinds cover every popular tool's config: a remote URL
+  // (Claude/Cursor/VS Code/Windsurf HTTP or SSE) or a local command (stdio).
+  const [kind, setKind] = useState<ServerKind>("remote");
+  const [name, setName] = useState("");
+  const [advOpen, setAdvOpen] = useState(false);
+
+  // Remote fields
+  const [url, setUrl] = useState("");
+  const [authScheme, setAuthScheme] = useState<AuthScheme>("bearer");
+  const [authValue, setAuthValue] = useState("");
+  const [authHeader, setAuthHeader] = useState("X-API-Key");
+  const [sse, setSse] = useState(false);
+  const [oauthId, setOauthId] = useState("");
+  const [oauthSecret, setOauthSecret] = useState("");
+
+  // Local fields
+  const [command, setCommand] = useState("");
+  const [argsText, setArgsText] = useState("");
+  const [cwd, setCwd] = useState("");
+  const [envText, setEnvText] = useState("");
+
+  // Paste
+  const [pasteText, setPasteText] = useState("");
+  const [pasteName, setPasteName] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode("form");
+    setKind("remote");
+    setName("");
+    setAdvOpen(false);
+    setUrl("");
+    setAuthScheme("bearer");
+    setAuthValue("");
+    setAuthHeader("X-API-Key");
+    setSse(false);
+    setOauthId("");
+    setOauthSecret("");
+    setCommand("");
+    setArgsText("");
+    setCwd("");
+    setEnvText("");
+    setPasteText("");
+    setPasteName("");
+    setError(null);
+    setBusy(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  const disabled = busy || saving;
+  const existingLower = new Set(existingNames.map((n) => n.trim().toLowerCase()));
+  const detected = mode === "paste" ? detectConfigFormat(pasteText) : null;
+
+  const buildFromForm = (): McpServerConfig => {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error("Give the server a name");
+    if (existingLower.has(trimmedName.toLowerCase()))
+      throw new Error(`A server named "${trimmedName}" already exists`);
+
+    if (kind === "remote") {
+      const trimmedUrl = url.trim();
+      if (!trimmedUrl) throw new Error("Enter the server URL");
+      if (!/^https?:\/\//i.test(trimmedUrl))
+        throw new Error("URL must start with http:// or https://");
+      const headers: McpEnvVar[] = [];
+      const token = authValue.trim();
+      if (token && authScheme === "bearer") {
+        headers.push({
+          key: "Authorization",
+          value: /^bearer\s/i.test(token) ? token : `Bearer ${token}`,
+        });
+      } else if (token && authScheme === "header") {
+        const headerName = authHeader.trim() || "X-API-Key";
+        headers.push({ key: headerName, value: token });
+      }
+      const oauth =
+        oauthId.trim() || oauthSecret.trim()
+          ? normalizeOauth({
+              clientId: oauthId.trim() || null,
+              clientSecret: oauthSecret.trim() || null,
+              scope: null,
+              authorizationEndpoint: null,
+              tokenEndpoint: null,
+              resource: null,
+              tokenEndpointAuthMethod: null,
+            })
+          : null;
+      return {
+        id: deterministicId(trimmedName),
+        name: trimmedName,
+        command: "",
+        args: [],
+        env: [],
+        cwd: null,
+        enabled: true,
+        transport: sse ? "sse" : "http",
+        url: trimmedUrl,
+        headers,
+        oauth,
+      };
+    }
+
+    const trimmedCmd = command.trim();
+    if (!trimmedCmd) throw new Error("Enter the command to run");
+    return {
+      id: deterministicId(trimmedName),
+      name: trimmedName,
+      command: trimmedCmd,
+      args: parseArgsText(argsText),
+      env: parseEnvText(envText),
+      cwd: cwd.trim() || null,
+      enabled: true,
+      transport: "stdio",
+      url: null,
+      headers: [],
+      oauth: null,
+    };
+  };
+
+  const buildFromPaste = (): McpServerConfig[] => {
+    const text = pasteText.trim();
+    if (!text) throw new Error("Paste a config, a command, or a URL");
+    const override = pasteName.trim();
+    let servers: McpServerConfig[];
+
+    if (text.startsWith("{") || text.startsWith("[")) {
+      // A JSON config block from any tool.
+      try {
+        servers = parseMcpJson(text).servers;
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : "Invalid config");
+      }
+    } else if (/^https?:\/\//i.test(text)) {
+      // A bare remote URL.
+      const nm = override || deriveServerNameFromUrl(text);
+      servers = [
+        {
+          id: deterministicId(nm),
+          name: nm,
+          command: "",
+          args: [],
+          env: [],
+          cwd: null,
+          enabled: true,
+          transport: "http",
+          url: text,
+          headers: [],
+          oauth: null,
+        },
+      ];
+    } else {
+      // A raw stdio launch command, e.g. `npx -y convex@latest mcp start`.
+      const tokens = parseCommandLine(text);
+      if (tokens.length === 0) throw new Error("Empty command");
+      const nm = override || deriveServerNameFromArgv(tokens);
+      servers = [
+        {
+          id: deterministicId(nm),
+          name: nm,
+          command: tokens[0],
+          args: tokens.slice(1),
+          env: [],
+          cwd: null,
+          enabled: true,
+          transport: "stdio",
+          url: null,
+          headers: [],
+          oauth: null,
+        },
+      ];
+    }
+
+    if (servers.length === 0)
+      throw new Error("No server found in the pasted config");
+    if (override && servers.length === 1) {
+      servers = [
+        { ...servers[0], name: override, id: deterministicId(override) },
+      ];
+    }
+    return servers;
+  };
+
+  const submit = async () => {
+    setError(null);
+    let servers: McpServerConfig[];
+    try {
+      servers = mode === "form" ? [buildFromForm()] : buildFromPaste();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    setBusy(true);
+    try {
+      await onAdd(servers);
+      onCancel();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="addmcp__backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add an MCP server"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !disabled) onCancel();
+      }}
+    >
+      <div className="addmcp">
+        <header className="addmcp__head">
+          <div className="addmcp__head-text">
+            <h2>Add an MCP server</h2>
+            <p>
+              Fill the short form, or paste a config from Claude, Cursor, VS
+              Code, Windsurf or Codex — it's merged with your existing servers.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="addmcp__close"
+            title="Cancel"
+            onClick={onCancel}
+            disabled={disabled}
+          >
+            <Icon icon="solar:close-square-linear" width={14} height={14} />
+          </button>
+        </header>
+
+        <div className="addmcp__tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            className="addmcp__tab"
+            aria-selected={mode === "form"}
+            data-active={mode === "form"}
+            onClick={() => setMode("form")}
+          >
+            <Icon icon="solar:widget-linear" width={13} height={13} />
+            <span>Form</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="addmcp__tab"
+            aria-selected={mode === "paste"}
+            data-active={mode === "paste"}
+            onClick={() => setMode("paste")}
+          >
+            <Icon icon="solar:clipboard-text-linear" width={13} height={13} />
+            <span>Paste config</span>
+          </button>
+        </div>
+
+        <div className="addmcp__body">
+          {mode === "form" ? (
+            <>
+              <div className="addmcp__modes">
+                <button
+                  type="button"
+                  className="addmcp__mode"
+                  data-active={kind === "remote"}
+                  onClick={() => setKind("remote")}
+                >
+                  <Icon icon="solar:server-square-cloud-linear" width={16} height={16} />
+                  <span className="addmcp__mode-title">Remote URL</span>
+                  <span className="addmcp__mode-sub">HTTP / SSE endpoint</span>
+                </button>
+                <button
+                  type="button"
+                  className="addmcp__mode"
+                  data-active={kind === "local"}
+                  onClick={() => setKind("local")}
+                >
+                  <Icon icon="solar:code-square-linear" width={16} height={16} />
+                  <span className="addmcp__mode-title">Local command</span>
+                  <span className="addmcp__mode-sub">stdio (npx, uvx…)</span>
+                </button>
+              </div>
+
+              <div className="addmcp__field">
+                <label htmlFor="addmcp-name">Name</label>
+                <input
+                  id="addmcp-name"
+                  className="addmcp__input"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder={kind === "remote" ? "clerk" : "filesystem"}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </div>
+
+              {kind === "remote" ? (
+                <>
+                  <div className="addmcp__field">
+                    <label htmlFor="addmcp-url">Server URL</label>
+                    <input
+                      id="addmcp-url"
+                      className="addmcp__input"
+                      value={url}
+                      onChange={(event) => setUrl(event.target.value)}
+                      placeholder="https://mcp.clerk.com/mcp"
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="addmcp__field">
+                    <label>
+                      Auth <span className="addmcp__opt">optional</span>
+                    </label>
+                    <div className="addmcp__seg">
+                      {(["bearer", "header", "none"] as AuthScheme[]).map((scheme) => (
+                        <button
+                          key={scheme}
+                          type="button"
+                          className="addmcp__seg-btn"
+                          data-active={authScheme === scheme}
+                          onClick={() => setAuthScheme(scheme)}
+                        >
+                          {scheme === "bearer"
+                            ? "Bearer token"
+                            : scheme === "header"
+                              ? "API key header"
+                              : "None / OAuth"}
+                        </button>
+                      ))}
+                    </div>
+                    {authScheme === "bearer" && (
+                      <input
+                        className="addmcp__input"
+                        value={authValue}
+                        onChange={(event) => setAuthValue(event.target.value)}
+                        placeholder="sk-… (sent as Authorization: Bearer …)"
+                        spellCheck={false}
+                        autoComplete="off"
+                        type="password"
+                      />
+                    )}
+                    {authScheme === "header" && (
+                      <div className="addmcp__pair">
+                        <input
+                          className="addmcp__input addmcp__input--key"
+                          value={authHeader}
+                          onChange={(event) => setAuthHeader(event.target.value)}
+                          placeholder="X-API-Key"
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                        <input
+                          className="addmcp__input"
+                          value={authValue}
+                          onChange={(event) => setAuthValue(event.target.value)}
+                          placeholder="value"
+                          spellCheck={false}
+                          autoComplete="off"
+                          type="password"
+                        />
+                      </div>
+                    )}
+                    {authScheme === "none" && (
+                      <span className="addmcp__hint">
+                        For OAuth servers, add it with no token and sign in from
+                        the server's detail panel — or set client credentials in
+                        Advanced below if the server needs them.
+                      </span>
+                    )}
+                  </div>
+
+                  <AddServerAdvanced open={advOpen} onToggle={() => setAdvOpen((v) => !v)}>
+                    <label className="addmcp__check">
+                      <input
+                        type="checkbox"
+                        checked={sse}
+                        onChange={(event) => setSse(event.target.checked)}
+                      />
+                      <span>Use legacy SSE transport (default is HTTP streamable)</span>
+                    </label>
+                    <div className="addmcp__field">
+                      <label htmlFor="addmcp-oauth-id">OAuth client ID</label>
+                      <input
+                        id="addmcp-oauth-id"
+                        className="addmcp__input"
+                        value={oauthId}
+                        onChange={(event) => setOauthId(event.target.value)}
+                        placeholder="only if the server can't self-register (e.g. Clerk)"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="addmcp__field">
+                      <label htmlFor="addmcp-oauth-secret">OAuth client secret</label>
+                      <input
+                        id="addmcp-oauth-secret"
+                        className="addmcp__input"
+                        value={oauthSecret}
+                        onChange={(event) => setOauthSecret(event.target.value)}
+                        placeholder="optional"
+                        spellCheck={false}
+                        autoComplete="off"
+                        type="password"
+                      />
+                    </div>
+                  </AddServerAdvanced>
+                </>
+              ) : (
+                <>
+                  <div className="addmcp__field">
+                    <label htmlFor="addmcp-command">Command</label>
+                    <input
+                      id="addmcp-command"
+                      className="addmcp__input"
+                      value={command}
+                      onChange={(event) => setCommand(event.target.value)}
+                      placeholder="npx"
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="addmcp__field">
+                    <label htmlFor="addmcp-args">
+                      Arguments <span className="addmcp__opt">optional</span>
+                    </label>
+                    <textarea
+                      id="addmcp-args"
+                      className="addmcp__input addmcp__input--area"
+                      value={argsText}
+                      onChange={(event) => setArgsText(event.target.value)}
+                      placeholder={"-y\n@modelcontextprotocol/server-filesystem"}
+                      spellCheck={false}
+                      rows={3}
+                    />
+                    <span className="addmcp__hint">
+                      One per line, or space-separated on a single line.
+                    </span>
+                  </div>
+
+                  <AddServerAdvanced open={advOpen} onToggle={() => setAdvOpen((v) => !v)}>
+                    <div className="addmcp__field">
+                      <label htmlFor="addmcp-cwd">Working directory (cwd)</label>
+                      <input
+                        id="addmcp-cwd"
+                        className="addmcp__input"
+                        value={cwd}
+                        onChange={(event) => setCwd(event.target.value)}
+                        placeholder="/home/you/projects/app  (or C:\\path)"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <span className="addmcp__hint">
+                        Where the command runs — needed by project-scoped servers
+                        like Convex when you don't pass a --project-dir flag.
+                      </span>
+                    </div>
+                    <div className="addmcp__field">
+                      <label htmlFor="addmcp-env">Environment variables</label>
+                      <textarea
+                        id="addmcp-env"
+                        className="addmcp__input addmcp__input--area addmcp__input--code"
+                        value={envText}
+                        onChange={(event) => setEnvText(event.target.value)}
+                        placeholder={"API_KEY=sk-…\nREGION=eu"}
+                        spellCheck={false}
+                        rows={3}
+                      />
+                      <span className="addmcp__hint">
+                        One <code>KEY=value</code> per line.
+                      </span>
+                    </div>
+                  </AddServerAdvanced>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="addmcp__field">
+                <label htmlFor="addmcp-paste">Config</label>
+                <textarea
+                  id="addmcp-paste"
+                  className="addmcp__input addmcp__input--area addmcp__input--code"
+                  value={pasteText}
+                  onChange={(event) => setPasteText(event.target.value)}
+                  placeholder={
+                    '{\n  "mcpServers": {\n    "clerk": {\n      "url": "https://mcp.clerk.com/mcp",\n      "headers": { "Authorization": "Bearer sk-…" }\n    }\n  }\n}'
+                  }
+                  spellCheck={false}
+                  rows={9}
+                  autoFocus
+                />
+                <span className="addmcp__hint">
+                  {detected ? (
+                    <>
+                      Detected <strong>{detected}</strong> — paste as-is.
+                    </>
+                  ) : (
+                    <>
+                      Paste a JSON config (Claude/Cursor/Windsurf{" "}
+                      <code>mcpServers</code>, VS Code <code>servers</code>, or a
+                      single server), a launch command like{" "}
+                      <code>npx -y convex@latest mcp start</code>, or a bare{" "}
+                      <code>https://…</code> URL.
+                    </>
+                  )}
+                </span>
+              </div>
+              <div className="addmcp__field">
+                <label htmlFor="addmcp-paste-name">
+                  Name override <span className="addmcp__opt">optional</span>
+                </label>
+                <input
+                  id="addmcp-paste-name"
+                  className="addmcp__input"
+                  value={pasteName}
+                  onChange={(event) => setPasteName(event.target.value)}
+                  placeholder="Only used when the pasted config has no name"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </div>
+            </>
+          )}
+
+          {error && (
+            <div className="addmcp__error">
+              <Icon icon="solar:danger-triangle-linear" width={13} height={13} />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+
+        <footer className="addmcp__foot">
+          <button
+            type="button"
+            className="settings-pane__btn"
+            onClick={onCancel}
+            disabled={disabled}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="settings-pane__btn"
+            data-primary="true"
+            onClick={() => void submit()}
+            disabled={disabled}
+          >
+            <Icon
+              icon={disabled ? "solar:refresh-linear" : "solar:add-square-linear"}
+              width={13}
+              height={13}
+            />
+            <span>{disabled ? "Adding…" : "Add server"}</span>
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/// Collapsible "Advanced" disclosure used inside the Add-server form so the
+/// rarely-needed fields (OAuth creds, cwd, env, SSE) stay out of the way.
+function AddServerAdvanced({
+  open,
+  onToggle,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="addmcp__adv">
+      <button type="button" className="addmcp__adv-toggle" onClick={onToggle}>
+        <Icon
+          icon={open ? "solar:alt-arrow-down-linear" : "solar:alt-arrow-right-linear"}
+          width={13}
+          height={13}
+        />
+        <span>Advanced</span>
+      </button>
+      {open && <div className="addmcp__adv-body">{children}</div>}
+    </div>
+  );
+}
+
+/// Cheap label for the "paste" tab so the user sees their config was
+/// recognized before hitting Add. Best-effort — never throws.
+function detectConfigFormat(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (/^\s*\[mcp_servers\b/m.test(trimmed) || /^\s*\[mcp\.servers\b/m.test(trimmed))
+    return "Codex TOML (use Import for .toml files)";
+  if (/^https?:\/\//i.test(trimmed)) return "remote URL";
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("["))
+    return "shell command (stdio)";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) && !Array.isArray(parsed)) return null;
+  if (isRecord(parsed)) {
+    if (isRecord(parsed.mcpServers)) return "mcpServers (Claude / Cursor / Windsurf)";
+    if (isRecord(parsed.servers)) return "servers (VS Code)";
+    if (Array.isArray(parsed.servers)) return "servers array";
+    if (stringValue(parsed.serverUrl)) return "single server (Windsurf serverUrl)";
+    if (stringValue(parsed.url) || stringValue(parsed.command)) return "single server";
+  }
+  return null;
+}
+
 function parseMcpJson(source: string): McpSettings {
   const trimmed = source.trim();
   if (!trimmed) return EMPTY_SETTINGS;
@@ -5253,14 +6068,23 @@ function settingsFromUnknown(value: unknown): McpSettings {
     throw new Error("JSON must be an object or an array");
   }
 
-  if (isRecord(value.mcpServers)) {
+  // Object-of-servers wrapper, keyed by name. Covers Claude Desktop/Code and
+  // Cursor (`mcpServers`), VS Code (`servers`), and Codex-as-JSON
+  // (`mcp_servers`). The first one present wins.
+  const objectWrapper =
+    (isRecord(value.mcpServers) && value.mcpServers) ||
+    (isRecord(value.servers) && value.servers) ||
+    (isRecord(value.mcp_servers) && value.mcp_servers) ||
+    null;
+  if (objectWrapper) {
     return {
-      servers: Object.entries(value.mcpServers).map(([name, config]) =>
+      servers: Object.entries(objectWrapper).map(([name, config]) =>
         serverFromUnknown(config, name),
       ),
     };
   }
 
+  // Array-of-servers wrapper (each entry carries its own `name`).
   if (Array.isArray(value.servers)) {
     return {
       servers: value.servers.map((item, index) =>
@@ -5269,7 +6093,12 @@ function settingsFromUnknown(value: unknown): McpSettings {
     };
   }
 
-  throw new Error('Use {"mcpServers": {...}} or {"servers": [...]}');
+  // A single bare server object, e.g. what a "copy config" button often emits.
+  if (stringValue(value.url) || stringValue(value.serverUrl) || stringValue(value.command)) {
+    return { servers: [serverFromUnknown(value, "mcp-server")] };
+  }
+
+  throw new Error('Use {"mcpServers": {…}}, {"servers": {…}}, or a single server object');
 }
 
 function serverFromUnknown(value: unknown, fallbackName: string): McpServerConfig {
@@ -5278,7 +6107,8 @@ function serverFromUnknown(value: unknown, fallbackName: string): McpServerConfi
   }
 
   const name = stringValue(value.name) || fallbackName;
-  const url = stringValue(value.url);
+  // `url` is universal; Windsurf uses `serverUrl` for the same thing.
+  const url = stringValue(value.url) || stringValue(value.serverUrl);
   const command = stringValue(value.command);
   if (!url && !command) throw new Error(`Missing command or url for ${name}`);
 
@@ -5293,7 +6123,9 @@ function serverFromUnknown(value: unknown, fallbackName: string): McpServerConfi
     transport: transportFromUnknown(value.transport ?? value.type, url),
     url: url || null,
     headers: envFromUnknown(value.headers),
-    oauth: oauthFromUnknown(value.oauth ?? value),
+    // Sinew stores OAuth client creds under `oauth`; Cursor emits the same
+    // idea under `auth` (CLIENT_ID / CLIENT_SECRET / scopes).
+    oauth: oauthFromUnknown(value.oauth ?? value.auth ?? value),
   };
 }
 
@@ -5380,11 +6212,30 @@ function arrayOfStrings(value: unknown): string[] {
 
 function oauthFromUnknown(value: unknown): McpServerConfig["oauth"] {
   if (!isRecord(value)) return null;
-  const source = isRecord(value.oauth) ? value.oauth : value;
+  // Sinew: `oauth`. Cursor: `auth` (uppercase CLIENT_ID / CLIENT_SECRET /
+  // scopes). Otherwise read client creds off the server object itself.
+  const source = isRecord(value.oauth)
+    ? value.oauth
+    : isRecord(value.auth)
+      ? value.auth
+      : value;
+  const scopeValue =
+    stringValue(source.scope) ||
+    (Array.isArray(source.scopes)
+      ? source.scopes.filter((s): s is string => typeof s === "string").join(" ")
+      : "");
   const oauth = {
-    clientId: stringValue(source.clientId) || stringValue(source.client_id) || null,
-    clientSecret: stringValue(source.clientSecret) || stringValue(source.client_secret) || null,
-    scope: stringValue(source.scope) || null,
+    clientId:
+      stringValue(source.clientId) ||
+      stringValue(source.client_id) ||
+      stringValue(source.CLIENT_ID) ||
+      null,
+    clientSecret:
+      stringValue(source.clientSecret) ||
+      stringValue(source.client_secret) ||
+      stringValue(source.CLIENT_SECRET) ||
+      null,
+    scope: scopeValue || null,
     authorizationEndpoint:
       stringValue(source.authorizationEndpoint) ||
       stringValue(source.authorization_endpoint) ||

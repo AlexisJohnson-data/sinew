@@ -7022,6 +7022,297 @@ textarea {
   padding-top: 4px;
 }
 
+/* Add MCP server — guided form / paste-config modal reachable from the
+   MCP settings header. Reuses the migrate modal's visual language. */
+.addmcp__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  background: rgba(8, 9, 11, 0.62);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 9vh;
+}
+.addmcp {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.addmcp__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.addmcp__head-text {
+  flex: 1 1 auto;
+}
+.addmcp__head h2 {
+  margin: 0 0 4px;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.addmcp__head p {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.addmcp__close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.addmcp__close:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border-color: var(--line-strong);
+}
+.addmcp__tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-med);
+  align-self: flex-start;
+}
+.addmcp__tab {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: calc(var(--r-med) - 2px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.addmcp__tab:hover {
+  color: var(--text-0);
+}
+.addmcp__tab[data-active="true"] {
+  background: var(--bg-0);
+  border-color: var(--line-strong);
+  color: var(--text-0);
+}
+.addmcp__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.addmcp__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.addmcp__field label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.addmcp__opt {
+  margin-left: 6px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.addmcp__input {
+  appearance: none;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-med);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+  width: 100%;
+}
+.addmcp__input:focus {
+  border-color: var(--accent-dim);
+  background: var(--bg-3);
+}
+.addmcp__input--area {
+  resize: vertical;
+  line-height: 1.5;
+}
+.addmcp__input--code {
+  font-size: 11.5px;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+.addmcp__hint {
+  margin: 2px 0 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+.addmcp__hint code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.addmcp__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--danger, #ef4444);
+}
+.addmcp__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+.addmcp__modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.addmcp__mode {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-med);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.addmcp__mode:hover {
+  border-color: var(--line-strong);
+  color: var(--text-0);
+}
+.addmcp__mode[data-active="true"] {
+  border-color: var(--accent-dim);
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.addmcp__mode-title {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.addmcp__mode-sub {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.addmcp__seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-med);
+}
+.addmcp__seg-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: calc(var(--r-med) - 2px);
+  cursor: pointer;
+}
+.addmcp__seg-btn:hover {
+  color: var(--text-0);
+}
+.addmcp__seg-btn[data-active="true"] {
+  background: var(--bg-0);
+  border-color: var(--line-strong);
+  color: var(--text-0);
+}
+.addmcp__pair {
+  display: grid;
+  grid-template-columns: minmax(0, 0.5fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.addmcp__input--key {
+  font-size: 11.5px;
+}
+.addmcp__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.addmcp__check input {
+  accent-color: var(--accent, #7c9);
+}
+.addmcp__adv {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.addmcp__adv-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.addmcp__adv-toggle:hover {
+  color: var(--text-0);
+}
+.addmcp__adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* Quick Open (Ctrl+P) — a focused modal palette to jump to any file in
    the workspace via fuzzy search. Mirrors the Cursor / VS Code "Go to
    file" UX so the muscle memory transfers immediately. */

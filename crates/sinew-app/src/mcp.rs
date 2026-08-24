@@ -828,39 +828,12 @@ impl McpStdioClient {
             bail!("missing MCP command for {}", config.name);
         }
 
-        let search_paths = mcp_search_paths(config);
-        let program = resolve_mcp_command(command_name, &search_paths)
-            .unwrap_or_else(|| PathBuf::from(command_name));
-        let path_env = env::join_paths(&search_paths).ok();
-        let mut command = Command::new(program);
+        let mut command = build_stdio_command(config);
         command
-            .args(config.args.iter().filter(|arg| !arg.is_empty()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-
-        if let Some(path_env) = path_env {
-            command.env("PATH", path_env);
-        }
-
-        if let Some(cwd) = config
-            .cwd
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            command.current_dir(cwd);
-        }
-        for env in &config.env {
-            let key = env.key.trim();
-            if !key.is_empty() {
-                if is_path_env_key(key) {
-                    continue;
-                }
-                command.env(key, &env.value);
-            }
-        }
 
         #[cfg(windows)]
         command.creation_flags(CREATE_NO_WINDOW);
@@ -1543,6 +1516,145 @@ fn extract_jsonrpc_result(value: &Value) -> Result<Value> {
 }
 
 static DEFAULT_MCP_SEARCH_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+/// Build the base process command for a stdio MCP server.
+///
+/// On Windows with the WSL shell active we run the command *inside* WSL
+/// (mirroring the bash tool via `wsl.exe -- bash -lc "…"`) so it uses the same
+/// node/npx toolchain and filesystem the agent uses. This is why an `npx …`
+/// server can be green for the agent yet fail to spawn as a bare Windows
+/// process. Otherwise we resolve the program against an augmented PATH and run
+/// it natively — routing a resolved `.cmd`/`.bat` shim through `cmd /C`, since
+/// CreateProcess cannot launch those directly.
+fn build_stdio_command(config: &McpServerConfig) -> Command {
+    #[cfg(windows)]
+    if crate::bash::is_wsl_shell_active() {
+        return build_wsl_stdio_command(config);
+    }
+
+    let search_paths = mcp_search_paths(config);
+    let command_name = config.command.trim();
+    let program = resolve_mcp_command(command_name, &search_paths)
+        .unwrap_or_else(|| PathBuf::from(command_name));
+
+    #[cfg(windows)]
+    let mut command = new_native_windows_command(&program, config);
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new(&program);
+        command.args(config.args.iter().filter(|arg| !arg.is_empty()));
+        command
+    };
+
+    if let Ok(path_env) = env::join_paths(&search_paths) {
+        command.env("PATH", path_env);
+    }
+    if let Some(cwd) = config
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        command.current_dir(cwd);
+    }
+    for env in &config.env {
+        let key = env.key.trim();
+        if !key.is_empty() && !is_path_env_key(key) {
+            command.env(key, &env.value);
+        }
+    }
+
+    command
+}
+
+/// On Windows, `.cmd`/`.bat` shims (npx.cmd, pnpm.cmd, …) are scripts rather
+/// than PE images, so `CreateProcess` refuses to launch them directly — drive
+/// those through `cmd /C`. Real executables spawn as-is.
+#[cfg(windows)]
+fn new_native_windows_command(program: &Path, config: &McpServerConfig) -> Command {
+    let is_shim = program
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+        .unwrap_or(false);
+    let mut command = if is_shim {
+        let mut command = Command::new("cmd.exe");
+        command.arg("/C").arg(program);
+        command
+    } else {
+        Command::new(program)
+    };
+    command.args(config.args.iter().filter(|arg| !arg.is_empty()));
+    command
+}
+
+/// Compose the `wsl.exe -- bash -lc "…"` invocation for a stdio MCP server so
+/// it runs with the WSL toolchain. The command, args, an optional working
+/// directory, and non-PATH env vars are POSIX-quoted into a single login-shell
+/// line; `-l` mirrors the bash tool so profile-managed toolchains (nvm, etc.)
+/// land on PATH.
+#[cfg(windows)]
+fn build_wsl_stdio_command(config: &McpServerConfig) -> Command {
+    let mut line = String::new();
+
+    if let Some(cwd) = config
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        line.push_str("cd ");
+        line.push_str(&posix_single_quote(&windows_cwd_to_wsl(cwd)));
+        line.push_str(" && ");
+    }
+
+    for env in &config.env {
+        let key = env.key.trim();
+        if key.is_empty() || is_path_env_key(key) {
+            continue;
+        }
+        line.push_str("export ");
+        line.push_str(key);
+        line.push('=');
+        line.push_str(&posix_single_quote(&env.value));
+        line.push_str("; ");
+    }
+
+    line.push_str("exec ");
+    line.push_str(&posix_single_quote(config.command.trim()));
+    for arg in config.args.iter().filter(|arg| !arg.is_empty()) {
+        line.push(' ');
+        line.push_str(&posix_single_quote(arg));
+    }
+
+    let mut command = Command::new("wsl.exe");
+    command.arg("--").arg("bash").arg("-lc").arg(line);
+    command
+}
+
+/// Single-quote a string for POSIX `bash -lc`, escaping embedded quotes.
+#[cfg(windows)]
+fn posix_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Best-effort translation of a configured working directory into a path WSL
+/// understands: pass through Linux paths, map `C:\foo` → `/mnt/c/foo`, and
+/// leave anything else untouched.
+#[cfg(windows)]
+fn windows_cwd_to_wsl(cwd: &str) -> String {
+    if cwd.starts_with('/') {
+        return cwd.to_string();
+    }
+    let bytes = cwd.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        let drive = (bytes[0] as char).to_ascii_lowercase();
+        let rest = cwd[2..].replace('\\', "/");
+        let rest = rest.strip_prefix('/').unwrap_or(&rest);
+        return format!("/mnt/{drive}/{rest}");
+    }
+    cwd.to_string()
+}
 
 fn mcp_search_paths(config: &McpServerConfig) -> Vec<PathBuf> {
     let mut paths = Vec::new();
