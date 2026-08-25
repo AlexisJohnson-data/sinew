@@ -422,19 +422,94 @@ export function sanitizeOpenRouterName(name: string | null | undefined): string 
 
 export function modelsWithOpenRouter(
   openRouterModels: readonly OpenRouterModel[] = [],
+  opencodeGoModels: readonly string[] = [],
 ): ModelEntry[] {
-  return [...MODELS, ...openRouterModelEntries(openRouterModels)];
+  const useDynamicGo = opencodeGoModels.length > 0;
+  return [
+    ...MODELS.filter((model) => !(useDynamicGo && model.provider === "opencode-go")),
+    ...(useDynamicGo ? opencodeGoModelEntries(opencodeGoModels) : []),
+    ...openRouterModelEntries(openRouterModels),
+  ];
 }
 
 export function availableModelsForProviders(
   configuredProviders: readonly string[],
   openRouterModels: readonly OpenRouterModel[] = [],
+  opencodeGoModels: readonly string[] = [],
 ): ModelEntry[] {
   const configured = new Set(configuredProviders);
+  // When we have a live OpenCode Go model list, it replaces the static entries
+  // (fresh ids + correct windows) instead of stacking duplicates.
+  const useDynamicGo = opencodeGoModels.length > 0;
   return [
-    ...MODELS.filter((model) => configured.has(model.provider)),
+    ...MODELS.filter(
+      (model) =>
+        configured.has(model.provider) &&
+        !(useDynamicGo && model.provider === "opencode-go"),
+    ),
+    ...(configured.has("opencode-go") && useDynamicGo
+      ? opencodeGoModelEntries(opencodeGoModels)
+      : []),
     ...(configured.has("openrouter") ? openRouterModelEntries(openRouterModels) : []),
   ];
+}
+
+// Per-family reasoning levels for OpenCode Go, from vendor docs + Artificial
+// Analysis (2026-08). We only expose levels a model actually accepts — an
+// unsupported / redundant `reasoning_effort` is misleading (and DeepSeek, for
+// one, aliases medium/xhigh to high, so we don't offer them there). Unknown ids
+// get a safe standard set.
+const GO_DEEPSEEK: readonly ThinkingLevel[] = ["off", "low", "high", "max"];
+const GO_KIMI: readonly ThinkingLevel[] = ["off", "low", "high", "max"];
+const GO_GLM: readonly ThinkingLevel[] = ["off", "high", "max"];
+const GO_QWEN_MAX: readonly ThinkingLevel[] = ["low", "medium", "xhigh"];
+const GO_GROK: readonly ThinkingLevel[] = ["high"]; // cannot be disabled
+const GO_GPT: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh", "max"];
+const GO_ONOFF: readonly ThinkingLevel[] = ["off", "high"]; // minimax / mimo / hunyuan
+const GO_DEFAULT: readonly ThinkingLevel[] = ["off", "low", "medium", "high"];
+
+function opencodeGoThinking(id: string): {
+  thinking: readonly ThinkingLevel[];
+  defaultThinking: ThinkingLevel;
+} {
+  if (id.startsWith("deepseek")) return { thinking: GO_DEEPSEEK, defaultThinking: "high" };
+  if (id.startsWith("kimi")) return { thinking: GO_KIMI, defaultThinking: "high" };
+  if (id.startsWith("glm")) return { thinking: GO_GLM, defaultThinking: "high" };
+  if (id.startsWith("qwen") && id.includes("-max"))
+    return { thinking: GO_QWEN_MAX, defaultThinking: "xhigh" };
+  if (id.startsWith("grok")) return { thinking: GO_GROK, defaultThinking: "high" };
+  if (id.startsWith("gpt")) return { thinking: GO_GPT, defaultThinking: "high" };
+  if (id.startsWith("minimax") || id.startsWith("mimo") || id.startsWith("hy"))
+    return { thinking: GO_ONOFF, defaultThinking: "high" };
+  // qwen (non-max plus tiers), longcat, and anything unknown.
+  return { thinking: GO_DEFAULT, defaultThinking: "medium" };
+}
+
+/// Human label for an OpenCode Go id: reuse a curated static label when the id
+/// is one we know, else title-case the id (e.g. "deepseek-v4-pro" -> "Deepseek
+/// V4 Pro").
+function opencodeGoLabel(id: string): string {
+  const known = MODELS.find((m) => m.value === modelId("opencode-go", id));
+  if (known) return known.label;
+  return id
+    .split("-")
+    .map((seg) =>
+      /\d/.test(seg) ? seg.toUpperCase() : seg.charAt(0).toUpperCase() + seg.slice(1),
+    )
+    .join(" ");
+}
+
+function opencodeGoModelEntries(ids: readonly string[]): ModelEntry[] {
+  return ids.map((id) => {
+    const { thinking, defaultThinking } = opencodeGoThinking(id);
+    return {
+      value: modelId("opencode-go", id),
+      provider: "opencode-go",
+      label: opencodeGoLabel(id),
+      thinking,
+      defaultThinking,
+    };
+  });
 }
 
 function openRouterModelEntries(

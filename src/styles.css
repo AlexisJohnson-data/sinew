@@ -10065,12 +10065,48 @@ textarea {
   bottom: calc(100% + 8px);
   left: 0;
   min-width: 180px;
+  max-height: 340px;
+  overflow-y: auto;
   background: var(--bg-3);
   border-radius: var(--r-card);
   padding: 4px;
   z-index: 30;
   display: flex;
   flex-direction: column;
+}
+/* Scope toggle (Standard / OpenCode) — a discreet segmented control pinned to
+   the top of the model popover so OpenCode Go's long list stays separated. */
+.composer__popover-scope {
+  position: sticky;
+  top: -4px;
+  display: flex;
+  gap: 3px;
+  margin: -4px -4px 4px;
+  padding: 5px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--line);
+  z-index: 1;
+}
+.composer__popover-scope-btn {
+  flex: 1 1 0;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--r-med);
+  cursor: pointer;
+}
+.composer__popover-scope-btn:hover {
+  color: var(--text-0);
+}
+.composer__popover-scope-btn[data-active="true"] {
+  background: var(--bg-1);
+  border-color: var(--line-strong);
+  color: var(--text-0);
 }
 .composer__popover-row {
   display: flex;

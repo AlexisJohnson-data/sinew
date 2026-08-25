@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
 use sinew_core::{
-    AppError, ChatMessage, ModelCapabilities, ModelRef, Part, Provider, ProviderRequest,
+    AppError, ChatMessage, Effort, ModelCapabilities, ModelRef, Part, Provider, ProviderRequest,
     ProviderStream, Result, Role, TokenEstimate, ToolDescriptor,
 };
 
@@ -114,8 +114,10 @@ impl Provider for OpenCodeGoProvider {
         }
 
         let caps = model_info::capabilities(&request.model);
-        // OpenCode Go V4 reasons on its own and streams `reasoning_content`; we send
-        // a plain OpenAI-compatible request and let the stream surface thinking.
+        // OpenCode Go models reason and stream `reasoning_content`. We forward
+        // the chosen effort as the OpenAI-standard `reasoning_effort` so the
+        // picker's per-model levels actually take effect; the UI only offers
+        // levels each family accepts, so this never sends an unsupported value.
         let body = wire::ChatCompletionsRequest {
             model: &request.model.name,
             messages: to_wire_messages(&request, caps.supports_images)?,
@@ -126,7 +128,7 @@ impl Provider for OpenCodeGoProvider {
             // `prompt_cache_key` param; sending an unknown field risks a 400,
             // so omit it (unlike Kimi/OpenAI which accept it).
             prompt_cache_key: None,
-            reasoning_effort: None,
+            reasoning_effort: reasoning_effort_flag(request.effective_effort()),
             thinking: None,
             stream: true,
             stream_options: Some(wire::StreamOptions {
@@ -141,6 +143,62 @@ impl Provider for OpenCodeGoProvider {
 
         Ok(map_stream(response.bytes_stream(), request.model.name))
     }
+}
+
+/// Map the selected effort to OpenCode Go's OpenAI-standard `reasoning_effort`
+/// string. `None`/`Effort::None` omit the field (model self-decides, or the
+/// user turned thinking off). The picker restricts which levels each family
+/// exposes, so we never emit a value a model would reject.
+fn reasoning_effort_flag(effort: Option<Effort>) -> Option<&'static str> {
+    match effort {
+        Some(Effort::Low) => Some("low"),
+        Some(Effort::Medium) => Some("medium"),
+        Some(Effort::High) => Some("high"),
+        Some(Effort::Xhigh) => Some("xhigh"),
+        Some(Effort::Max) => Some("max"),
+        Some(Effort::None) | None => None,
+    }
+}
+
+/// Fetch the live model ids from OpenCode Go's OpenAI-compatible `/models`
+/// listing. The response is `{ "data": [ { "id": ... }, ... ] }`; we return the
+/// ids so the app can offer every model the subscription currently exposes
+/// without shipping a new build for each addition.
+pub async fn list_models(api_key: &str) -> Result<Vec<String>> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err(AppError::Auth("OpenCode Go API key cannot be empty".into()));
+    }
+    let http = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    let response = http
+        .get(format!("{}/models", BASE_URL.trim_end_matches('/')))
+        .bearer_auth(api_key)
+        .header("accept", "application/json")
+        .send()
+        .await
+        .map_err(|err| AppError::Network(format!("OpenCode Go model listing failed: {err}")))?;
+    if !response.status().is_success() {
+        return Err(read_http_error(response).await);
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|err| AppError::Network(format!("OpenCode Go model listing parse: {err}")))?;
+    let ids = body
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(ids)
 }
 
 /// Validate a OpenCode Go API key by listing models (OpenAI-compatible `/models`).

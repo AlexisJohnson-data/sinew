@@ -534,6 +534,11 @@ export const api = {
   disconnectOpenCodeGoProvider() {
     return invoke<OpenCodeGoProviderStatus>("disconnect_opencode_go_provider");
   },
+  /// Live OpenCode Go model ids from the subscription's `/models` endpoint
+  /// (falls back to the curated static list on the backend when offline).
+  listOpencodeGoModels() {
+    return invoke<string[]>("list_opencode_go_models");
+  },
   listOpenRouterModels() {
     return invoke<OpenRouterModel[]>("list_openrouter_models");
   },

@@ -288,6 +288,7 @@ export function SettingsPane({ workspacePath }: Props) {
     useState<OpenCodeGoProviderStatus | null>(null);
   const [openRouterStatus, setOpenRouterStatus] = useState<OpenRouterProviderStatus | null>(null);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providersBusy, setProvidersBusy] = useState(false);
   const [providersMessage, setProvidersMessage] = useState<string | null>(null);
@@ -549,9 +550,16 @@ export function SettingsPane({ workspacePath }: Props) {
       ]);
       setConfiguredProviders(providers);
       setOpenRouterModels(models);
+      if (providers.includes("opencode-go")) {
+        const goModels = await api.listOpencodeGoModels().catch(() => []);
+        setOpencodeGoModels(goModels);
+      } else {
+        setOpencodeGoModels([]);
+      }
     } catch {
       setConfiguredProviders([]);
       setOpenRouterModels([]);
+      setOpencodeGoModels([]);
     }
   }, []);
 
@@ -560,8 +568,13 @@ export function SettingsPane({ workspacePath }: Props) {
   }, [loadConfiguredProviders]);
 
   const availableModels = useMemo(
-    () => availableModelsForProviders(configuredProviders, openRouterModels),
-    [configuredProviders, openRouterModels],
+    () =>
+      availableModelsForProviders(
+        configuredProviders,
+        openRouterModels,
+        opencodeGoModels,
+      ),
+    [configuredProviders, openRouterModels, opencodeGoModels],
   );
 
   const loadOpenAiStatus = useCallback(async () => {

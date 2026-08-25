@@ -1647,6 +1647,27 @@ pub(super) async fn get_opencode_go_provider_status(
     }
 }
 
+/// Live OpenCode Go model ids from the subscription's `/models` endpoint, so
+/// the picker reflects new models without a rebuild. Falls back to the curated
+/// static list when there is no key or the request fails, so the UI is never
+/// empty offline.
+#[tauri::command]
+pub(super) async fn list_opencode_go_models() -> std::result::Result<Vec<String>, String> {
+    let fallback = || {
+        sinew_opencode_go::MODELS
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+    };
+    let Some(api_key) = load_default_opencode_go_api_key().map_err(error_to_string)? else {
+        return Ok(fallback());
+    };
+    match list_opencode_go_models_remote(&api_key).await {
+        Ok(ids) if !ids.is_empty() => Ok(ids),
+        _ => Ok(fallback()),
+    }
+}
+
 #[tauri::command]
 pub(super) async fn validate_opencode_go_api_key(
     state: State<'_, DesktopState>,

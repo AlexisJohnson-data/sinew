@@ -554,6 +554,9 @@ export function ChatPane({
     [history, rewriteState],
   );
   const [modelOpen, setModelOpen] = useState(false);
+  // OpenCode Go adds ~30 models; this scopes the picker so they don't drown the
+  // rest. Only shown when OpenCode Go models are present.
+  const [modelScope, setModelScope] = useState<"standard" | "opencode">("standard");
   const [thinkingOpen, setThinkingOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [fastServiceTierEnabled, setFastServiceTierEnabled] = useState(
@@ -561,6 +564,7 @@ export function ChatPane({
   );
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
   const [agentTeamsEnabled, setAgentTeamsEnabled] = useState(false);
   const modelRef = useRef<HTMLDivElement | null>(null);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -707,9 +711,16 @@ export function ChatPane({
       ]);
       setConfiguredProviders(providers);
       setOpenRouterModels(models);
+      if (providers.includes("opencode-go")) {
+        const goModels = await api.listOpencodeGoModels().catch(() => []);
+        setOpencodeGoModels(goModels);
+      } else {
+        setOpencodeGoModels([]);
+      }
     } catch {
       setConfiguredProviders([]);
       setOpenRouterModels([]);
+      setOpencodeGoModels([]);
     }
   }, []);
 
@@ -756,13 +767,32 @@ export function ChatPane({
   }, [loadAgentTeamsEnabled]);
 
   const allModels = useMemo(
-    () => modelsWithOpenRouter(openRouterModels),
-    [openRouterModels],
+    () => modelsWithOpenRouter(openRouterModels, opencodeGoModels),
+    [openRouterModels, opencodeGoModels],
   );
   const availableModels = useMemo(
-    () => availableModelsForProviders(configuredProviders, openRouterModels),
-    [configuredProviders, openRouterModels],
+    () =>
+      availableModelsForProviders(
+        configuredProviders,
+        openRouterModels,
+        opencodeGoModels,
+      ),
+    [configuredProviders, openRouterModels, opencodeGoModels],
   );
+  const hasOpencodeModels = useMemo(
+    () => availableModels.some((m) => m.provider === "opencode-go"),
+    [availableModels],
+  );
+  // The list actually rendered in the picker: when OpenCode Go is present, the
+  // scope toggle splits its long list off from the rest.
+  const visibleModels = useMemo(() => {
+    if (!hasOpencodeModels) return availableModels;
+    return availableModels.filter((m) =>
+      modelScope === "opencode"
+        ? m.provider === "opencode-go"
+        : m.provider !== "opencode-go",
+    );
+  }, [availableModels, hasOpencodeModels, modelScope]);
 
   const baseModeSelections = useMemo(
     () => selectionsFromSettings(modeModelSettings, activeModel),
@@ -4166,6 +4196,12 @@ export function ChatPane({
                   disabled={availableModels.length === 0}
                   onClick={() => {
                     if (selectorLocked) return;
+                    if (!modelOpen)
+                      setModelScope(
+                        modelEntry?.provider === "opencode-go"
+                          ? "opencode"
+                          : "standard",
+                      );
                     setModelOpen((o) => !o);
                     setThinkingOpen(false);
                     setModeOpen(false);
@@ -4187,7 +4223,31 @@ export function ChatPane({
                     role="menu"
                     aria-label="Model"
                   >
-                    {availableModels.map((m) => {
+                    {hasOpencodeModels && (
+                      <div className="composer__popover-scope" role="tablist">
+                        <button
+                          type="button"
+                          role="tab"
+                          className="composer__popover-scope-btn"
+                          data-active={modelScope === "standard"}
+                          aria-selected={modelScope === "standard"}
+                          onClick={() => setModelScope("standard")}
+                        >
+                          Standard
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          className="composer__popover-scope-btn"
+                          data-active={modelScope === "opencode"}
+                          aria-selected={modelScope === "opencode"}
+                          onClick={() => setModelScope("opencode")}
+                        >
+                          OpenCode
+                        </button>
+                      </div>
+                    )}
+                    {visibleModels.map((m) => {
                       const selected = m.value === model;
                       const providerIcon =
                         PROVIDERS.find((p) => p.value === m.provider)?.icon;

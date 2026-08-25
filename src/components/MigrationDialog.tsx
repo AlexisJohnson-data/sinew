@@ -81,6 +81,7 @@ export function MigrationDialog({
   const [selectedModelId, setSelectedModelId] = useState<ModelId | "">("");
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
+  const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
   const sourceRef = useRef<HTMLInputElement>(null);
 
   // Reset every time the dialog (re)opens.
@@ -111,12 +112,16 @@ export function MigrationDialog({
       api.listDefaultModeModelSettings().catch(() => null),
       api.listConfiguredModelProviders().catch(() => [] as string[]),
       api.listOpenRouterModels().catch(() => [] as OpenRouterModel[]),
-    ]).then(([modeSettings, providers, openRouter]) => {
+    ]).then(async ([modeSettings, providers, openRouter]) => {
       if (cancelled) return;
       const goal = modeSettings?.goal ?? modeSettings?.act ?? null;
       setDefaultGoalModel(goal);
       setConfiguredProviders(providers);
       setOpenRouterModels(openRouter);
+      if (providers.includes("opencode-go")) {
+        const goModels = await api.listOpencodeGoModels().catch(() => [] as string[]);
+        if (!cancelled) setOpencodeGoModels(goModels);
+      }
       setSelectedModelId(goal ? modelIdFromRef(goal) : "");
     });
     return () => {
@@ -147,8 +152,13 @@ export function MigrationDialog({
   }, [open, initialSourcePath]);
 
   const availableModels: ModelEntry[] = useMemo(
-    () => availableModelsForProviders(configuredProviders, openRouterModels),
-    [configuredProviders, openRouterModels],
+    () =>
+      availableModelsForProviders(
+        configuredProviders,
+        openRouterModels,
+        opencodeGoModels,
+      ),
+    [configuredProviders, openRouterModels, opencodeGoModels],
   );
 
   const selectedEntry = useMemo(

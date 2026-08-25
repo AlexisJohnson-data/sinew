@@ -111,7 +111,7 @@ pub struct WireToolFunction<'a> {
 pub struct ChatChunk {
     #[serde(default)]
     pub model: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_seq_as_default")]
     pub choices: Vec<ChatChoice>,
     #[serde(default)]
     pub usage: Option<UsageBody>,
@@ -133,8 +133,21 @@ pub struct ChatDelta {
     pub content: Option<String>,
     #[serde(default)]
     pub reasoning_content: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_seq_as_default")]
     pub tool_calls: Vec<ToolCallDelta>,
+}
+
+/// Deserialize a sequence that some OpenCode Go models send as an explicit
+/// `null` instead of omitting it (e.g. DeepSeek V4 Flash streams
+/// `"tool_calls": null`). Plain `#[serde(default)]` handles a *missing* field
+/// but errors on an explicit null ("invalid type: null, expected a sequence"),
+/// so treat null the same as absent.
+fn null_seq_as_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]
