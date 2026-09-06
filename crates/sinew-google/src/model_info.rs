@@ -21,6 +21,13 @@ const MODELS: &[GoogleModelInfo] = &[
         supports_images: true,
     },
     GoogleModelInfo {
+        id: "gemini-3.8-flash",
+        context_window: GEMINI_WINDOW,
+        preferred_window: 950_000,
+        max_output_tokens: GEMINI_MAX_OUTPUT,
+        supports_images: true,
+    },
+    GoogleModelInfo {
         id: "gemini-3.7-flash",
         context_window: GEMINI_WINDOW,
         preferred_window: 950_000,

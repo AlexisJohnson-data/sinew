@@ -12,6 +12,11 @@ use crate::{auth::Credential, model_info, stream::map_stream, wire};
 // for key validation) hang off this base.
 const BASE_URL: &str = "https://opencode.ai/zen/go/v1";
 const USER_AGENT: &str = "Sinew/0.1";
+/// OpenCode Go requires every request to carry a stable per-conversation id so
+/// it can route/optimize (and, as of their 2026-09 notice, rejects requests
+/// missing it). We source it from the request's cache key, which is the
+/// conversation id.
+const SESSION_HEADER: &str = "x-opencode-session";
 const RECONNECT_MESSAGE: &str =
     "OpenCode Go API key was rejected. Re-enter your key in Settings > Providers.";
 
@@ -62,6 +67,7 @@ impl OpenCodeGoProvider {
         &self,
         route: &str,
         body: &T,
+        session: &str,
     ) -> Result<reqwest::Response> {
         self.http
             .post(format!(
@@ -72,11 +78,25 @@ impl OpenCodeGoProvider {
             .bearer_auth(self.config.credential.api_key())
             .header("content-type", "application/json")
             .header("accept", "application/json")
+            .header(SESSION_HEADER, session)
             .json(body)
             .send()
             .await
             .map_err(|err| AppError::Network(err.to_string()))
     }
+}
+
+/// Resolve the `x-opencode-session` value. Prefer the request's cache key (the
+/// conversation id — stable across a conversation's turns, which is exactly
+/// what OpenCode Go wants for session-aware optimization). Fall back to a fresh
+/// id for one-off calls (key validation, model listing) that have no
+/// conversation context, so the header is never absent.
+fn session_id(cache_key: Option<&str>) -> String {
+    cache_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
 
 #[async_trait]
@@ -136,7 +156,10 @@ impl Provider for OpenCodeGoProvider {
             }),
         };
 
-        let response = self.send_json("/chat/completions", &body).await?;
+        let session = session_id(request.cache_key.as_deref());
+        let response = self
+            .send_json("/chat/completions", &body, &session)
+            .await?;
         if !response.status().is_success() {
             return Err(read_http_error(response).await);
         }
@@ -177,6 +200,7 @@ pub async fn list_models(api_key: &str) -> Result<Vec<String>> {
         .get(format!("{}/models", BASE_URL.trim_end_matches('/')))
         .bearer_auth(api_key)
         .header("accept", "application/json")
+        .header(SESSION_HEADER, session_id(None))
         .send()
         .await
         .map_err(|err| AppError::Network(format!("OpenCode Go model listing failed: {err}")))?;
@@ -215,6 +239,7 @@ pub async fn validate_api_key(api_key: &str) -> Result<()> {
         .get(format!("{}/models", BASE_URL.trim_end_matches('/')))
         .bearer_auth(api_key)
         .header("accept", "application/json")
+        .header(SESSION_HEADER, session_id(None))
         .send()
         .await
         .map_err(|err| AppError::Network(format!("OpenCode Go key validation failed: {err}")))?;
