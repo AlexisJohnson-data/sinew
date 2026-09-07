@@ -314,6 +314,346 @@ impl EventParser {
     }
 }
 
+/// Parse the OpenAI **Responses** API SSE stream (`/responses`, used by the
+/// Grok / GPT-Luna / Muse families) into the same `StreamEvent` model the
+/// chat-completions path emits. Events are decoded generically as JSON because
+/// the Responses envelope carries many event types we can ignore (`ping`,
+/// `response.created`, per-item lifecycle) and only a few we act on.
+pub fn map_responses_stream<S, E>(body: S, model: String) -> ProviderStream
+where
+    S: Stream<Item = std::result::Result<bytes::Bytes, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let source = Box::pin(body.eventsource());
+    let parser = ResponsesParser::new(model);
+
+    futures::stream::unfold(
+        (source, parser, Vec::<StreamEvent>::new(), false, false),
+        |(mut source, mut parser, mut pending, done, mut saw_any_event)| async move {
+            loop {
+                if let Some(next) = pending.pop() {
+                    return Some((Ok(next), (source, parser, pending, done, saw_any_event)));
+                }
+                if done {
+                    return None;
+                }
+
+                match source.next().await {
+                    Some(Ok(event)) => {
+                        saw_any_event = true;
+                        let data = event.data.trim();
+                        if data.is_empty() || data == "[DONE]" {
+                            continue;
+                        }
+                        let value: Value = match serde_json::from_str(data) {
+                            Ok(value) => value,
+                            // Ignore keep-alive comments / non-JSON frames.
+                            Err(_) => continue,
+                        };
+                        match parser.push(&value) {
+                            Ok(mut produced) => {
+                                produced.reverse();
+                                pending = produced;
+                            }
+                            Err(err) => {
+                                return Some((
+                                    Err(err),
+                                    (source, parser, pending, true, saw_any_event),
+                                ));
+                            }
+                        }
+                    }
+                    Some(Err(err)) => {
+                        return Some((
+                            Err(AppError::Stream(err.to_string())),
+                            (source, parser, pending, true, saw_any_event),
+                        ));
+                    }
+                    None => {
+                        if !saw_any_event {
+                            return Some((
+                                Err(AppError::Stream(
+                                    "OpenCode Go /responses closed before any event; \
+                                     the server likely dropped the connection"
+                                        .into(),
+                                )),
+                                (source, parser, pending, true, saw_any_event),
+                            ));
+                        }
+                        let mut produced = parser.finish();
+                        produced.reverse();
+                        pending = produced;
+                        if pending.is_empty() {
+                            return None;
+                        }
+                    }
+                }
+            }
+        },
+    )
+    .boxed()
+}
+
+struct ResponsesParser {
+    model: String,
+    started: bool,
+    next_index: usize,
+    open_part: Option<(usize, PartKind)>,
+    saw_tool_call: bool,
+    stop_reason: Option<StopReason>,
+    usage: Usage,
+    done: bool,
+}
+
+impl ResponsesParser {
+    fn new(model: String) -> Self {
+        Self {
+            model,
+            started: false,
+            next_index: 0,
+            open_part: None,
+            saw_tool_call: false,
+            stop_reason: None,
+            usage: Usage::default(),
+            done: false,
+        }
+    }
+
+    fn push(&mut self, value: &Value) -> std::result::Result<Vec<StreamEvent>, AppError> {
+        if self.done {
+            return Ok(Vec::new());
+        }
+        let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+        let mut out = Vec::new();
+        match kind {
+            "response.created" | "response.in_progress" => {
+                if let Some(model) = value
+                    .pointer("/response/model")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                {
+                    self.model = model.to_string();
+                }
+            }
+            "response.output_text.delta" => {
+                if let Some(delta) = value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                {
+                    self.ensure_started(&mut out);
+                    let index = self.ensure_open(PartKind::Text, &mut out);
+                    out.push(StreamEvent::TextDelta {
+                        index,
+                        delta: delta.to_string(),
+                    });
+                }
+            }
+            // Some Responses providers stream visible reasoning; forward it as
+            // thinking. (Grok keeps it internal, so this is often silent.)
+            "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+                if let Some(delta) = value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                {
+                    self.ensure_started(&mut out);
+                    let index = self.ensure_open(PartKind::Thinking, &mut out);
+                    out.push(StreamEvent::ThinkingDelta {
+                        index,
+                        delta: delta.to_string(),
+                    });
+                }
+            }
+            // A finalized output item. The `done` event carries the complete
+            // function_call (name + call_id + full arguments) for both Grok
+            // (whole) and GPT (streamed then finalized), so we emit the tool
+            // call here rather than tracking argument deltas.
+            "response.output_item.done" => {
+                let item = &value["item"];
+                if item.get("type").and_then(Value::as_str) == Some("function_call") {
+                    self.emit_function_call(item, &mut out);
+                }
+            }
+            "response.completed" | "response.incomplete" => {
+                let response = &value["response"];
+                self.usage = usage_from_responses(response);
+                let status = response.get("status").and_then(Value::as_str).unwrap_or("");
+                let incomplete = status == "incomplete"
+                    || response.pointer("/incomplete_details/reason").and_then(Value::as_str)
+                        == Some("max_output_tokens");
+                self.stop_reason = Some(if incomplete {
+                    StopReason::MaxTokens
+                } else if self.saw_tool_call {
+                    StopReason::ToolUse
+                } else {
+                    StopReason::EndTurn
+                });
+                out.extend(self.finish());
+            }
+            "response.failed" => {
+                let message = value
+                    .pointer("/response/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("OpenCode Go /responses request failed")
+                    .to_string();
+                return Err(AppError::Provider(message));
+            }
+            "error" => {
+                let message = value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .or_else(|| value.pointer("/error/message").and_then(Value::as_str))
+                    .unwrap_or("OpenCode Go /responses stream error")
+                    .to_string();
+                return Err(AppError::Provider(message));
+            }
+            _ => {}
+        }
+        Ok(out)
+    }
+
+    fn emit_function_call(&mut self, item: &Value, out: &mut Vec<StreamEvent>) {
+        self.ensure_started(out);
+        self.close_open(out);
+        self.saw_tool_call = true;
+        let call_id = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .or_else(|| item.get("id").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_string();
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let arguments = item
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let index = self.next_index();
+        let id = if call_id.is_empty() {
+            format!("call_opencodego_{index}")
+        } else {
+            call_id
+        };
+        out.push(StreamEvent::PartStart {
+            index,
+            kind: PartKind::ToolCall,
+            tool: Some(ToolCallIntro {
+                id: id.clone(),
+                name: name.clone(),
+            }),
+        });
+        if !arguments.is_empty() {
+            out.push(StreamEvent::ToolJsonDelta {
+                index,
+                chunk: arguments,
+            });
+        }
+        out.push(StreamEvent::PartMeta {
+            index,
+            meta: json!({ "provider": "opencode-go", "id": id, "name": name }),
+        });
+        out.push(StreamEvent::PartStop { index });
+    }
+
+    fn ensure_started(&mut self, out: &mut Vec<StreamEvent>) {
+        if self.started {
+            return;
+        }
+        self.started = true;
+        out.push(StreamEvent::MessageStart {
+            model: self.model.clone(),
+        });
+    }
+
+    fn ensure_open(&mut self, kind: PartKind, out: &mut Vec<StreamEvent>) -> usize {
+        if self.open_part.map(|(_, current)| current) == Some(kind) {
+            return self.open_part.map(|(index, _)| index).unwrap_or(0);
+        }
+        self.close_open(out);
+        let index = self.next_index();
+        self.open_part = Some((index, kind));
+        out.push(StreamEvent::PartStart {
+            index,
+            kind,
+            tool: None,
+        });
+        index
+    }
+
+    fn close_open(&mut self, out: &mut Vec<StreamEvent>) {
+        if let Some((index, _)) = self.open_part.take() {
+            out.push(StreamEvent::PartStop { index });
+        }
+    }
+
+    fn next_index(&mut self) -> usize {
+        let index = self.next_index;
+        self.next_index += 1;
+        index
+    }
+
+    fn finish(&mut self) -> Vec<StreamEvent> {
+        if self.done {
+            return Vec::new();
+        }
+        self.done = true;
+        let mut out = Vec::new();
+        if !self.started {
+            self.ensure_started(&mut out);
+        }
+        self.close_open(&mut out);
+        out.push(StreamEvent::MessageStop {
+            stop_reason: self.stop_reason.unwrap_or({
+                if self.saw_tool_call {
+                    StopReason::ToolUse
+                } else {
+                    StopReason::EndTurn
+                }
+            }),
+            usage: self.usage,
+        });
+        out
+    }
+}
+
+fn usage_from_responses(response: &Value) -> Usage {
+    let usage = &response["usage"];
+    let input_tokens = usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let reasoning_tokens = usage
+        .pointer("/output_tokens_details/reasoning_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let cache_read_tokens = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    Usage {
+        input_tokens,
+        output_tokens,
+        total_tokens: if total_tokens > 0 {
+            total_tokens
+        } else {
+            input_tokens.saturating_add(output_tokens)
+        },
+        reasoning_tokens,
+        cache_read_tokens,
+        cache_creation_tokens: 0,
+    }
+}
+
 fn usage_from_body(body: wire::UsageBody) -> Usage {
     let cache_read_tokens = body
         .cached_tokens

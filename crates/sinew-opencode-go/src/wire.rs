@@ -107,6 +107,75 @@ pub struct WireToolFunction<'a> {
     pub parameters: &'a Value,
 }
 
+// ===== Responses API (US model families: Grok / GPT-Luna / Muse) =====
+//
+// OpenCode Go serves these through the OpenAI *Responses* API (`/responses`),
+// NOT `/chat/completions` (which 503s "Endpoint is unavailable" for them). The
+// request shape differs: `input` items instead of `messages`, flat function
+// tools, `max_output_tokens`, and `reasoning: { effort }`. The SSE response is
+// parsed generically in `stream::map_responses_stream`.
+
+#[derive(Debug, Serialize)]
+pub struct ResponsesRequest<'a> {
+    pub model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<&'a str>,
+    pub input: Vec<ResponsesInput>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ResponsesTool<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ResponsesReasoning>,
+    pub stream: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResponsesReasoning {
+    pub effort: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ResponsesInput {
+    Message {
+        role: &'static str,
+        content: Vec<ResponsesContent>,
+    },
+    FunctionCall {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        call_id: String,
+        output: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ResponsesContent {
+    InputText { text: String },
+    OutputText { text: String },
+    InputImage { image_url: String },
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResponsesTool<'a> {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub parameters: &'a Value,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ChatChunk {
     #[serde(default)]

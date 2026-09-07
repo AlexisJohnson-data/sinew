@@ -134,6 +134,22 @@ impl Provider for OpenCodeGoProvider {
         }
 
         let caps = model_info::capabilities(&request.model);
+
+        // US model families (Grok / GPT-Luna / Muse) are only served on the
+        // Responses API — /chat/completions 503s for them. Route them there.
+        if model_info::uses_responses_api(&request.model.name) {
+            let body = build_responses_request(&request, &caps);
+            let session = session_id(request.cache_key.as_deref());
+            let response = self.send_json("/responses", &body, &session).await?;
+            if !response.status().is_success() {
+                return Err(read_http_error(response).await);
+            }
+            return Ok(crate::stream::map_responses_stream(
+                response.bytes_stream(),
+                request.model.name,
+            ));
+        }
+
         // OpenCode Go models reason and stream `reasoning_content`. We forward
         // the chosen effort as the OpenAI-standard `reasoning_effort` so the
         // picker's per-model levels actually take effect; the UI only offers
@@ -248,6 +264,163 @@ pub async fn validate_api_key(api_key: &str) -> Result<()> {
     } else {
         Err(read_http_error(response).await)
     }
+}
+
+// ===== Responses API request building (Grok / GPT-Luna / Muse) =====
+
+fn build_responses_request<'a>(
+    request: &'a ProviderRequest,
+    caps: &ModelCapabilities,
+) -> wire::ResponsesRequest<'a> {
+    let instructions = request
+        .system_prompt
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    wire::ResponsesRequest {
+        model: &request.model.name,
+        instructions,
+        input: to_responses_input(request, caps.supports_images),
+        tools: request.tools.iter().map(to_responses_tool).collect(),
+        max_output_tokens: Some(request.output_token_budget(caps)),
+        temperature: request.temperature,
+        reasoning: responses_reasoning(request.effective_effort()),
+        stream: true,
+    }
+}
+
+fn to_responses_tool(tool: &ToolDescriptor) -> wire::ResponsesTool<'_> {
+    wire::ResponsesTool {
+        kind: "function",
+        name: &tool.name,
+        description: &tool.description,
+        parameters: &tool.input_schema,
+    }
+}
+
+/// Map effort to the Responses API `reasoning.effort` (only low/medium/high are
+/// valid there; xhigh/max clamp to high, and None/off omits reasoning).
+fn responses_reasoning(effort: Option<Effort>) -> Option<wire::ResponsesReasoning> {
+    let effort = match effort {
+        Some(Effort::Low) => "low",
+        Some(Effort::Medium) => "medium",
+        Some(Effort::High) | Some(Effort::Xhigh) | Some(Effort::Max) => "high",
+        Some(Effort::None) | None => return None,
+    };
+    Some(wire::ResponsesReasoning { effort })
+}
+
+fn to_responses_input(request: &ProviderRequest, supports_images: bool) -> Vec<wire::ResponsesInput> {
+    let mut input = Vec::new();
+    for message in &request.transcript {
+        match message.role {
+            Role::User => push_responses_user(message, &mut input, supports_images),
+            Role::Assistant => push_responses_assistant(message, &mut input),
+        }
+    }
+    input
+}
+
+fn push_responses_user(
+    message: &ChatMessage,
+    input: &mut Vec<wire::ResponsesInput>,
+    supports_images: bool,
+) {
+    let mut content: Vec<wire::ResponsesContent> = Vec::new();
+    for part in &message.parts {
+        if part_is_ui_only(part) {
+            continue;
+        }
+        match part {
+            Part::Text { text, .. } => {
+                if !text.is_empty() {
+                    content.push(wire::ResponsesContent::InputText { text: text.clone() });
+                }
+            }
+            Part::Image {
+                media_type, data, ..
+            } => {
+                if data.trim().is_empty() {
+                    continue;
+                }
+                if supports_images {
+                    content.push(wire::ResponsesContent::InputImage {
+                        image_url: format!("data:{media_type};base64,{data}"),
+                    });
+                } else {
+                    content.push(wire::ResponsesContent::InputText {
+                        text: format!("\n[Image omitted: {media_type}]\n"),
+                    });
+                }
+            }
+            Part::ToolResult {
+                tool_call_id,
+                content: result,
+                images,
+                ..
+            } => {
+                if !content.is_empty() {
+                    input.push(wire::ResponsesInput::Message {
+                        role: "user",
+                        content: std::mem::take(&mut content),
+                    });
+                }
+                // `function_call_output.output` is text-only; note any images.
+                let mut output = result.clone();
+                for image in images {
+                    if !image.data.trim().is_empty() {
+                        output.push_str(&format!("\n[Image omitted: {}]\n", image.media_type));
+                    }
+                }
+                input.push(wire::ResponsesInput::FunctionCallOutput {
+                    kind: "function_call_output",
+                    call_id: tool_call_id.clone(),
+                    output,
+                });
+            }
+            Part::Thinking { .. } | Part::ToolCall { .. } => {}
+        }
+    }
+    if !content.is_empty() {
+        input.push(wire::ResponsesInput::Message {
+            role: "user",
+            content,
+        });
+    }
+}
+
+fn push_responses_assistant(message: &ChatMessage, input: &mut Vec<wire::ResponsesInput>) {
+    let mut content: Vec<wire::ResponsesContent> = Vec::new();
+    let mut calls: Vec<wire::ResponsesInput> = Vec::new();
+    for part in &message.parts {
+        if part_is_ui_only(part) {
+            continue;
+        }
+        match part {
+            Part::Text { text, .. } => {
+                if !text.is_empty() {
+                    content.push(wire::ResponsesContent::OutputText { text: text.clone() });
+                }
+            }
+            Part::ToolCall {
+                id, name, input: args, ..
+            } => calls.push(wire::ResponsesInput::FunctionCall {
+                kind: "function_call",
+                call_id: id.clone(),
+                name: name.clone(),
+                arguments: args.to_string(),
+            }),
+            // Reasoning can't be replayed as Responses input; images/tool
+            // results never originate from the assistant here.
+            Part::Thinking { .. } | Part::Image { .. } | Part::ToolResult { .. } => {}
+        }
+    }
+    if !content.is_empty() {
+        input.push(wire::ResponsesInput::Message {
+            role: "assistant",
+            content,
+        });
+    }
+    input.extend(calls);
 }
 
 fn to_wire_tool(tool: &ToolDescriptor) -> wire::WireTool<'_> {

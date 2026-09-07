@@ -139,6 +139,16 @@ fn family_fallback(id: &str) -> (u32, bool) {
     (K_256, false)
 }
 
+/// OpenCode Go serves the "US" model families (Grok, GPT/Luna, Muse) through
+/// the OpenAI **Responses** API (`/responses`); `/chat/completions` returns a
+/// 5xx "Endpoint is unavailable" for them. Everything else (the Chinese open
+/// models — DeepSeek, Kimi, GLM, Qwen, MiniMax, MiMo, …) uses
+/// `/chat/completions`. Verified 2026-09-07 by probing the gateway.
+pub fn uses_responses_api(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    id.starts_with("grok") || id.starts_with("gpt") || id.starts_with("muse")
+}
+
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let (window, supports_images) = context_window_for(&model.name);
     ModelCapabilities {
