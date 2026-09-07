@@ -239,16 +239,36 @@ jobs:
     name: Finalize release
     needs: [create-release, build-tauri]
     runs-on: ubuntu-latest
+    # Publish even if a platform build failed (e.g. the macOS runner flaking),
+    # as long as the draft was created. A single platform's failure must not
+    # block shipping the others + the updater manifest. We still guard below on
+    # `latest.json` existing so we never publish a genuinely empty release.
+    if: ${{ always() && needs.create-release.result == 'success' }}
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
+            const release_id = ${{ needs.create-release.outputs.release_id }};
+            // Require at least one platform to have uploaded updater artifacts
+            // (tauri-action writes `latest.json` once a bundle is signed). If
+            // every build failed there's nothing to ship — leave it a draft.
+            const assets = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              { owner: context.repo.owner, repo: context.repo.repo, release_id, per_page: 100 },
+            );
+            const names = assets.map((a) => a.name);
+            if (!names.includes("latest.json")) {
+              throw new Error(
+                `No latest.json among release assets (${names.join(", ") || "none"}); ` +
+                  "no platform produced updater artifacts — leaving the release as a draft.",
+              );
+            }
             // Flip the release from draft → published so end-users can fetch
             // it via `releases/latest/download/latest.json`.
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ needs.create-release.outputs.release_id }},
+              release_id,
               draft: false,
               make_latest: "true",
             });

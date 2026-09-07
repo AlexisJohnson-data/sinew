@@ -109,19 +109,6 @@ pub fn antigravity_model_and_thinking(
     if base == "gemini-3.5-flash" {
         return ("gemini-3.5-flash-low".into(), Some(thinking_level));
     }
-    // UNVERIFIED: the plain `gemini-3.6-flash` id 404s against Antigravity
-    // (`NOT_FOUND`), mirroring the 3.5-flash situation above — Antigravity
-    // wants a different wire id than the public Gemini API name. Press
-    // coverage of the pre-launch leak spotted the model inside the
-    // Antigravity IDE under the internal label `gemini-3.6-flash-tiered`;
-    // this is our best guess at the real wire id, not a confirmed mapping.
-    // If this still 404s, Antigravity likely hasn't rolled out routing for
-    // this model to this client cohort yet (same class of issue as the GPT
-    // Luna rollout gap) rather than a wrong id — test in dev before relying
-    // on it.
-    if base == "gemini-3.6-flash" {
-        return ("gemini-3.6-flash-tiered".into(), Some(thinking_level));
-    }
     // Gemini 3.1 Pro on Antigravity is always routed to the agentic variant
     // (`gemini-pro-agent`), which is the fine-tuned artefact for tool use and
     // long thinking. The `thinkingLevel` is still variable.
@@ -129,10 +116,14 @@ pub fn antigravity_model_and_thinking(
         return ("gemini-pro-agent".into(), Some(thinking_level));
     }
     if is_pro {
-        (format!("{base}-{thinking_level}"), Some(thinking_level))
-    } else {
-        (base, Some(thinking_level))
+        return (format!("{base}-{thinking_level}"), Some(thinking_level));
     }
+    // Flash family: Antigravity serves these under a `-tiered` wire id, not the
+    // public Gemini API name (the plain id 404s / never routes — this was the
+    // `gemini-3.6-flash` situation, and 3.7-flash failed the same way). Apply
+    // `-tiered` uniformly to the flash line (3.6, 3.7, 3.8, 3-flash,
+    // flash-lite, …) so new flash models route without another patch.
+    (format!("{base}-tiered"), Some(thinking_level))
 }
 
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
