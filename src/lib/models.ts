@@ -461,34 +461,41 @@ export function availableModelsForProviders(
   ];
 }
 
-// Per-family reasoning levels for OpenCode Go, from vendor docs + Artificial
-// Analysis (2026-08). We only expose levels a model actually accepts — an
-// unsupported / redundant `reasoning_effort` is misleading (and DeepSeek, for
-// one, aliases medium/xhigh to high, so we don't offer them there). Unknown ids
-// get a safe standard set.
-const GO_DEEPSEEK: readonly ThinkingLevel[] = ["off", "low", "high", "max"];
-const GO_KIMI: readonly ThinkingLevel[] = ["off", "low", "high", "max"];
-const GO_GLM: readonly ThinkingLevel[] = ["off", "high", "max"];
-const GO_QWEN_MAX: readonly ThinkingLevel[] = ["low", "medium", "xhigh"];
-const GO_GROK: readonly ThinkingLevel[] = ["high"]; // cannot be disabled
+// Per-family reasoning levels for OpenCode Go. Determined empirically by
+// probing the gateway (2026-09-08): each candidate `reasoning_effort` /
+// `reasoning.effort` was sent per model and we kept the ones it accepts (200)
+// vs rejects (400). `minimal` is dropped — the backend clamps it to `low` for
+// this provider, so it's never distinct. A couple of families ignore effort
+// entirely (a bogus value still returns 200), so they only get on/off.
+const GO_FULL: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh", "max"];
+const GO_NO_MAX: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh"];
+const GO_ONOFF: readonly ThinkingLevel[] = ["off", "high"]; // minimax / longcat: effort ignored
+const GO_GROK: readonly ThinkingLevel[] = ["low", "medium", "high", "xhigh", "max"]; // always reasons
 const GO_GPT: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh", "max"];
-const GO_ONOFF: readonly ThinkingLevel[] = ["off", "high"]; // minimax / mimo / hunyuan
+const GO_MUSE: readonly ThinkingLevel[] = ["off", "low", "medium", "high", "xhigh"]; // no max
 const GO_DEFAULT: readonly ThinkingLevel[] = ["off", "low", "medium", "high"];
 
 function opencodeGoThinking(id: string): {
   thinking: readonly ThinkingLevel[];
   defaultThinking: ThinkingLevel;
 } {
-  if (id.startsWith("deepseek")) return { thinking: GO_DEEPSEEK, defaultThinking: "high" };
-  if (id.startsWith("kimi")) return { thinking: GO_KIMI, defaultThinking: "high" };
-  if (id.startsWith("glm")) return { thinking: GO_GLM, defaultThinking: "high" };
-  if (id.startsWith("qwen") && id.includes("-max"))
-    return { thinking: GO_QWEN_MAX, defaultThinking: "xhigh" };
+  // /responses families first (Grok / GPT-Luna / Muse).
   if (id.startsWith("grok")) return { thinking: GO_GROK, defaultThinking: "high" };
   if (id.startsWith("gpt")) return { thinking: GO_GPT, defaultThinking: "high" };
-  if (id.startsWith("minimax") || id.startsWith("mimo") || id.startsWith("hy"))
+  if (id.startsWith("muse")) return { thinking: GO_MUSE, defaultThinking: "high" };
+  // Effort has no graded effect on these — only on/off.
+  if (id.startsWith("minimax") || id.startsWith("longcat"))
     return { thinking: GO_ONOFF, defaultThinking: "high" };
-  // qwen (non-max plus tiers), longcat, and anything unknown.
+  // Graded reasoning families (all accept low→max).
+  if (id.startsWith("deepseek")) return { thinking: GO_FULL, defaultThinking: "high" };
+  if (id.startsWith("kimi")) return { thinking: GO_FULL, defaultThinking: "high" };
+  if (id.startsWith("glm")) return { thinking: GO_FULL, defaultThinking: "high" };
+  if (id.startsWith("qwen") && id.includes("-max"))
+    return { thinking: GO_FULL, defaultThinking: "xhigh" };
+  if (id.startsWith("qwen")) return { thinking: GO_NO_MAX, defaultThinking: "high" }; // plus tiers: no max
+  if (id.startsWith("mimo")) return { thinking: GO_FULL, defaultThinking: "high" };
+  if (id.startsWith("hy")) return { thinking: GO_FULL, defaultThinking: "high" }; // hunyuan
+  // Anything unknown/new gets a safe standard set.
   return { thinking: GO_DEFAULT, defaultThinking: "medium" };
 }
 

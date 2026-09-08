@@ -297,13 +297,17 @@ fn to_responses_tool(tool: &ToolDescriptor) -> wire::ResponsesTool<'_> {
     }
 }
 
-/// Map effort to the Responses API `reasoning.effort` (only low/medium/high are
-/// valid there; xhigh/max clamp to high, and None/off omits reasoning).
+/// Map effort to the Responses API `reasoning.effort`. The OpenCode Go gateway
+/// accepts low/medium/high/xhigh/max for these families (verified by probing);
+/// the picker only offers the subset each model accepts, so we forward the
+/// value as-is. None/off omits reasoning.
 fn responses_reasoning(effort: Option<Effort>) -> Option<wire::ResponsesReasoning> {
     let effort = match effort {
         Some(Effort::Low) => "low",
         Some(Effort::Medium) => "medium",
-        Some(Effort::High) | Some(Effort::Xhigh) | Some(Effort::Max) => "high",
+        Some(Effort::High) => "high",
+        Some(Effort::Xhigh) => "xhigh",
+        Some(Effort::Max) => "max",
         Some(Effort::None) | None => return None,
     };
     Some(wire::ResponsesReasoning { effort })
