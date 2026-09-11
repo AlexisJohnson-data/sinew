@@ -20,6 +20,15 @@ const MODELS: &[OpenAiModelInfo] = &[
         max_output_tokens: 128_000,
         supports_images: true,
     },
+    // GPT-6 Astra — flagship (1.05M ctx, 128k out, text+image in, reasoning
+    // low→max). Per the OpenAI API model card (2026-09).
+    OpenAiModelInfo {
+        id: "gpt-6-astra",
+        context_window: 1_050_000,
+        preferred_window: 950_000,
+        max_output_tokens: 128_000,
+        supports_images: true,
+    },
     OpenAiModelInfo {
         id: "gpt-5.6-sol",
         context_window: 1_050_000,

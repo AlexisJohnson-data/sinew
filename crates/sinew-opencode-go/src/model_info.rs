@@ -28,6 +28,7 @@ pub const MODELS: &[&str] = &[
     "kimi-k2.5",
     "deepseek-v4-pro",
     "deepseek-v4-flash",
+    "deepseek-flash",
     "deepseek-v4-flash-vision-exp",
     "qwen3.8-max",
     "qwen3.7-max",
@@ -68,6 +69,7 @@ fn context_window_for(id: &str) -> (u32, bool) {
         "minimax-m3"
         | "deepseek-v4-pro"
         | "deepseek-v4-flash"
+        | "deepseek-flash" // DeepSeek V4.1 Flash
         | "qwen3.7-max"
         | "qwen3.8-max"
         | "glm-5.2"
@@ -95,7 +97,9 @@ fn context_window_for(id: &str) -> (u32, bool) {
 /// lines are matched explicitly before the older-family default.
 fn family_fallback(id: &str) -> (u32, bool) {
     let vision = id.contains("vision") || id.contains("omni");
-    if id.starts_with("deepseek-v4") {
+    // All DeepSeek lines on the gateway (v4-pro/flash, v4.1 `deepseek-flash`,
+    // and future ids) are 1M-context.
+    if id.starts_with("deepseek") {
         return (K_1M, vision);
     }
     if id.starts_with("minimax-m3") {

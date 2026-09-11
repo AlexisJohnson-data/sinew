@@ -137,6 +137,14 @@ export const MODELS: ModelEntry[] = [
     defaultThinking: "medium",
   },
   {
+    value: "openai:gpt-6-astra",
+    provider: "openai",
+    label: "GPT-6 Astra",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
+  },
+  {
     value: "openai:gpt-5.6-sol",
     provider: "openai",
     label: "GPT-5.6 Sol",
@@ -318,6 +326,15 @@ export const MODELS: ModelEntry[] = [
     provider: "opencode-go",
     label: "DeepSeek V4 Flash",
     thinking: ["high"],
+    defaultThinking: "high",
+  },
+  {
+    // OpenCode Go's `deepseek-flash` id maps to DeepSeek V4.1 Flash (per their
+    // Go docs); the bare id would otherwise title-case to "Deepseek Flash".
+    value: "opencode-go:deepseek-flash",
+    provider: "opencode-go",
+    label: "DeepSeek V4.1 Flash",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
     defaultThinking: "high",
   },
   {
