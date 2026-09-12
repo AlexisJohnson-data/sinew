@@ -720,6 +720,56 @@ pub fn write_workspace_file(
     read_document(root, &path)
 }
 
+/// Write pasted image bytes into `dir_relative` (a directory within the
+/// workspace, or the workspace root when `None`), choosing a non-colliding file
+/// name from `stem`/`extension`. Returns the file name written (not the full
+/// path), so the caller can insert a markdown link relative to a file that
+/// lives in that same directory.
+pub fn write_workspace_image(
+    root: &Path,
+    dir_relative: Option<&str>,
+    stem: &str,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<String> {
+    let dir = resolve_workspace_directory(root, dir_relative)?;
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("unable to create directory {}", dir.display()))?;
+    let safe_stem = safe_image_stem(stem);
+    let mut file_name = format!("{safe_stem}.{extension}");
+    let mut counter = 1;
+    while dir.join(&file_name).exists() {
+        file_name = format!("{safe_stem}-{counter}.{extension}");
+        counter += 1;
+    }
+    let path = dir.join(&file_name);
+    ensure_path_stays_in_root(root, &path)?;
+    fs::write(&path, bytes)
+        .with_context(|| format!("unable to write image {}", path.display()))?;
+    Ok(file_name)
+}
+
+fn safe_image_stem(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if out.len() >= 72 {
+            break;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+            out.push(ch);
+        } else if ch.is_whitespace() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("image");
+    }
+    out
+}
+
 pub fn create_workspace_file(
     root: &Path,
     target_relative: Option<&str>,

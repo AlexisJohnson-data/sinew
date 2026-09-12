@@ -93,7 +93,7 @@ pub use workspace::{
     delete_workspace_entry, import_workspace_paths, list_workspace_entries, list_workspace_files,
     normalize_workspace_root, read_external_file, read_workspace_file, rename_workspace_entry,
     resolve_terminal_path, restore_workspace_deleted_entries, search_workspace_files,
-    trash_workspace_entry, write_workspace_file, FileDocument, ImportedEntry,
+    trash_workspace_entry, write_workspace_file, write_workspace_image, FileDocument, ImportedEntry,
     TerminalPathResolution, WorkspaceCopyOperation, WorkspaceDeletedEntry, WorkspaceEntry,
     WorkspaceEntryKind, WorkspaceFileChangeEvent, WorkspaceInfo, WorkspaceSearchFile,
     WorkspaceSearchMatch, WorkspaceSearchResult,

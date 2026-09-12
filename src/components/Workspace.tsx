@@ -2330,6 +2330,7 @@ export function Workspace({
             data-hidden={terminalVisible && terminalFullHeight ? "true" : "false"}
           >
             <EditorPane
+              workspacePath={workspacePath}
               tabs={tabs}
               activeIndex={activeTabIndex}
               onActivate={activateFileTab}

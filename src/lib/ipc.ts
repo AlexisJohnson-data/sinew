@@ -217,6 +217,19 @@ export const api = {
       input: { workspacePath, relativePath, content },
     });
   },
+  // Save a pasted image into the workspace (same dir as the edited file) and
+  // return the written file name, for inserting a `![](name)` markdown link.
+  saveWorkspaceImage(
+    workspacePath: string,
+    dirRelativePath: string | null,
+    mediaType: string,
+    data: string,
+    name?: string,
+  ) {
+    return invoke<string>("save_workspace_image_command", {
+      input: { workspacePath, dirRelativePath, mediaType, data, name: name ?? null },
+    });
+  },
   createFile(workspacePath: string, targetRelativePath: string | null, name: string) {
     return invoke<WorkspaceEntry>("create_workspace_file_command", {
       input: { workspacePath, targetRelativePath, name },

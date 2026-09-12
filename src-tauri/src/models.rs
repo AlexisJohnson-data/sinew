@@ -295,6 +295,18 @@ pub(super) struct ClipboardImageAttachment {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct SaveWorkspaceImageInput {
+    pub(super) workspace_path: String,
+    /// Directory (relative to the workspace root) to drop the image into;
+    /// `None`/empty means the workspace root.
+    pub(super) dir_relative_path: Option<String>,
+    pub(super) name: Option<String>,
+    pub(super) media_type: String,
+    pub(super) data: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct SendMessageInput {
     pub(super) workspace_path: String,
     pub(super) conversation_id: String,

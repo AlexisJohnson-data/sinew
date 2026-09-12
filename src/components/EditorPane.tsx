@@ -9,6 +9,7 @@ import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@iconify/react";
+import { api } from "../lib/ipc";
 import { dropSlotToMoveIndex } from "../lib/editorTabs";
 import { languageForPath } from "../lib/language";
 import { fileIcon } from "../lib/fileIcon";
@@ -43,6 +44,7 @@ if (!(globalThis as typeof globalThis & { MonacoEnvironment?: unknown }).MonacoE
 loader.config({ monaco: monacoNs });
 
 type Props = {
+  workspacePath: string;
   tabs: EditorTab[];
   activeIndex: number;
   onActivate: (index: number) => void;
@@ -65,6 +67,7 @@ type Props = {
 };
 
 export function EditorPane({
+  workspacePath,
   tabs,
   activeIndex,
   onActivate,
@@ -160,6 +163,16 @@ export function EditorPane({
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     setEditorReadySeq((value) => value + 1);
+
+    // Intercept image pastes (capture phase, before Monaco's own paste on its
+    // inner textarea) to save the image + insert a markdown link instead.
+    const pasteTarget = editor.getDomNode();
+    if (pasteTarget) {
+      pasteTarget.addEventListener("paste", handleEditorPaste, true);
+      editor.onDidDispose(() =>
+        pasteTarget.removeEventListener("paste", handleEditorPaste, true),
+      );
+    }
     monaco.editor.defineTheme("sinew-cool", {
       base: "vs-dark",
       inherit: true,
@@ -219,9 +232,53 @@ export function EditorPane({
 
   const currentPathRef = useRef<string | null>(null);
   const tabsRef = useRef<EditorTab[]>(tabs);
+  const workspacePathRef = useRef(workspacePath);
+  const readOnlyRef = useRef(readOnlyEditor);
   tabsRef.current = tabs;
   onSaveRef.current = onSave;
   currentPathRef.current = activeTab?.relativePath ?? null;
+  workspacePathRef.current = workspacePath;
+  readOnlyRef.current = readOnlyEditor;
+
+  // Paste an image into a text file (VS Code-style): save it next to the file
+  // and insert a `![](name)` link at the cursor. Non-image pastes fall through
+  // to Monaco's normal text handling.
+  const handleEditorPaste = useCallback((event: ClipboardEvent) => {
+    if (readOnlyRef.current) return;
+    const images = clipboardImageItems(event.clipboardData);
+    if (images.length === 0) return;
+    const editor = editorRef.current;
+    const workspace = workspacePathRef.current;
+    const path = currentPathRef.current;
+    if (!editor || !workspace || !path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dir = dirnameOf(path);
+    void (async () => {
+      for (const file of images) {
+        try {
+          const dataUrl = await fileToDataUrl(file);
+          const fileName = await api.saveWorkspaceImage(
+            workspace,
+            dir || null,
+            file.type,
+            dataUrl,
+            file.name || undefined,
+          );
+          const link = `![](${encodeURI(fileName)})`;
+          const selection = editor.getSelection();
+          if (selection) {
+            editor.executeEdits("paste-image", [
+              { range: selection, text: link, forceMoveMarkers: true },
+            ]);
+          }
+        } catch (err) {
+          console.error("Failed to paste image into editor", err);
+        }
+      }
+      editor.focus();
+    })();
+  }, []);
 
   useEffect(() => {
     if (!showTextEditor || activePreview) return;
@@ -662,6 +719,40 @@ function formatBytes(bytes: number): string {
 
 function isPreviewableImagePath(relativePath: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic|heif)$/i.test(relativePath);
+}
+
+/// Image files on the clipboard, from either `items` (screenshots) or `files`
+/// (copied image files). Non-image content yields an empty list.
+function clipboardImageItems(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const out: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind === "file" && item.type.toLowerCase().startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) out.push(file);
+    }
+  }
+  if (out.length === 0) {
+    for (const file of Array.from(data.files ?? [])) {
+      if (file.type.toLowerCase().startsWith("image/")) out.push(file);
+    }
+  }
+  return out;
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/// Directory portion of a workspace-relative path ("" when at the root).
+function dirnameOf(relativePath: string): string {
+  const idx = relativePath.lastIndexOf("/");
+  return idx <= 0 ? "" : relativePath.slice(0, idx);
 }
 
 function imagePreviewSrc(doc: EditorTab["doc"]): string {

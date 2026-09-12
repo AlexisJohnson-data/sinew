@@ -544,6 +544,57 @@ pub(super) async fn save_clipboard_image_attachment_command(
     })
 }
 
+/// Save a pasted image into the workspace (same directory as the file being
+/// edited) and return the written file name, so the editor can insert a
+/// `![](name)` link — the VS Code "paste image into markdown" behavior.
+#[tauri::command]
+pub(super) async fn save_workspace_image_command(
+    app: AppHandle,
+    input: SaveWorkspaceImageInput,
+) -> std::result::Result<String, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let (_, extension) = clipboard_image_type(&input.media_type, input.name.as_deref())
+        .ok_or_else(|| "unsupported pasted image type".to_string())?;
+    let raw_data = input
+        .data
+        .split_once(',')
+        .map(|(_, data)| data)
+        .unwrap_or(input.data.as_str())
+        .trim();
+    let bytes = BASE64_STANDARD.decode(raw_data).map_err(error_to_string)?;
+    if bytes.is_empty() {
+        return Err("pasted image is empty".into());
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("pasted image is too large".into());
+    }
+    let stem = input
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| {
+            Path::new(value)
+                .file_stem()
+                .and_then(|value| value.to_str())
+        })
+        .unwrap_or("image");
+    let dir = input
+        .dir_relative_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let file_name = write_workspace_image(&workspace_root, dir, stem, extension, &bytes)
+        .map_err(error_to_string)?;
+    let relative = match dir {
+        Some(dir) => format!("{dir}/{file_name}"),
+        None => file_name.clone(),
+    };
+    emit_workspace_file_change(&app, &workspace_root, &relative);
+    Ok(file_name)
+}
+
 #[tauri::command]
 pub(super) async fn rename_workspace_entry_command(
     app: AppHandle,
