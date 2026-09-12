@@ -163,16 +163,6 @@ export function EditorPane({
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     setEditorReadySeq((value) => value + 1);
-
-    // Intercept image pastes (capture phase, before Monaco's own paste on its
-    // inner textarea) to save the image + insert a markdown link instead.
-    const pasteTarget = editor.getDomNode();
-    if (pasteTarget) {
-      pasteTarget.addEventListener("paste", handleEditorPaste, true);
-      editor.onDidDispose(() =>
-        pasteTarget.removeEventListener("paste", handleEditorPaste, true),
-      );
-    }
     monaco.editor.defineTheme("sinew-cool", {
       base: "vs-dark",
       inherit: true,
@@ -244,13 +234,16 @@ export function EditorPane({
   // and insert a `![](name)` link at the cursor. Non-image pastes fall through
   // to Monaco's normal text handling.
   const handleEditorPaste = useCallback((event: ClipboardEvent) => {
+    const editor = editorRef.current;
+    // Only handle when the code editor itself is focused — otherwise let the
+    // chat composer (and everything else) keep their own paste behavior.
+    if (!editor || !editor.hasTextFocus()) return;
     if (readOnlyRef.current) return;
     const images = clipboardImageItems(event.clipboardData);
     if (images.length === 0) return;
-    const editor = editorRef.current;
     const workspace = workspacePathRef.current;
     const path = currentPathRef.current;
-    if (!editor || !workspace || !path) return;
+    if (!workspace || !path) return;
     event.preventDefault();
     event.stopPropagation();
     const dir = dirnameOf(path);
@@ -279,6 +272,15 @@ export function EditorPane({
       editor.focus();
     })();
   }, []);
+
+  // A document-level capture listener reliably catches Ctrl+V while the editor
+  // is focused (attaching to the editor node directly proved flaky). The gate
+  // in handleEditorPaste keeps this from touching pastes elsewhere.
+  useEffect(() => {
+    const listener = (event: ClipboardEvent) => handleEditorPaste(event);
+    document.addEventListener("paste", listener, true);
+    return () => document.removeEventListener("paste", listener, true);
+  }, [handleEditorPaste]);
 
   useEffect(() => {
     if (!showTextEditor || activePreview) return;
