@@ -60,16 +60,18 @@ const K_1M: u32 = 1_048_576;
 /// finally a conservative 256k default so an unknown/new id still works.
 fn context_window_for(id: &str) -> (u32, bool) {
     match id {
-        // Multimodal (vision) models.
+        // Multimodal (vision) models. The whole DeepSeek V4 line accepts images
+        // on the gateway (verified 2026-09-14 — v4-pro, v4-flash, v4.1
+        // `deepseek-flash`, and the vision-exp variant all process images).
         "kimi-k3" => (K_1M, true),
+        "deepseek-v4-pro" => (K_1M, true),
+        "deepseek-v4-flash" => (K_1M, true),
+        "deepseek-flash" => (K_1M, true), // DeepSeek V4.1 Flash
         "deepseek-v4-flash-vision-exp" => (K_1M, true),
         "mimo-v2-omni" => (K_256, true),
 
         // 1M-context, text.
         "minimax-m3"
-        | "deepseek-v4-pro"
-        | "deepseek-v4-flash"
-        | "deepseek-flash" // DeepSeek V4.1 Flash
         | "qwen3.7-max"
         | "qwen3.8-max"
         | "glm-5.2"
@@ -98,9 +100,9 @@ fn context_window_for(id: &str) -> (u32, bool) {
 fn family_fallback(id: &str) -> (u32, bool) {
     let vision = id.contains("vision") || id.contains("omni");
     // All DeepSeek lines on the gateway (v4-pro/flash, v4.1 `deepseek-flash`,
-    // and future ids) are 1M-context.
+    // and future ids) are 1M-context and multimodal.
     if id.starts_with("deepseek") {
-        return (K_1M, vision);
+        return (K_1M, true);
     }
     if id.starts_with("minimax-m3") {
         return (K_1M, false);
