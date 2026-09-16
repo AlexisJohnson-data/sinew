@@ -1527,8 +1527,14 @@ static DEFAULT_MCP_SEARCH_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 /// it natively — routing a resolved `.cmd`/`.bat` shim through `cmd /C`, since
 /// CreateProcess cannot launch those directly.
 fn build_stdio_command(config: &McpServerConfig) -> Command {
+    // In WSL shell mode we normally run stdio servers *inside* WSL (matching the
+    // bash tool's toolchain/filesystem). But a native Windows executable — a
+    // `.exe`, or an absolute Windows path — is a PE binary that must run on
+    // Windows, e.g. Pencil's pen.dev bridge that talks to the Windows desktop
+    // app. Route those natively even in WSL mode; `npx`/node/`.cmd` shims still
+    // go through WSL.
     #[cfg(windows)]
-    if crate::bash::is_wsl_shell_active() {
+    if crate::bash::is_wsl_shell_active() && !is_native_windows_program(&config.command) {
         return build_wsl_stdio_command(config);
     }
 
@@ -1565,6 +1571,32 @@ fn build_stdio_command(config: &McpServerConfig) -> Command {
     }
 
     command
+}
+
+/// Whether a stdio command should spawn as a native Windows process even when
+/// the WSL shell is active. `.exe`/`.com` are PE binaries that must run on
+/// Windows; `.cmd`/`.bat` are npm-style shims we deliberately keep in the WSL
+/// toolchain; anything else is native only when it's an absolute Windows path
+/// (`C:\…`, `D:/…`), otherwise it (a bare name or POSIX path) belongs to WSL.
+#[cfg(windows)]
+fn is_native_windows_program(command: &str) -> bool {
+    let trimmed = command.trim();
+    match Path::new(trimmed)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("exe") | Some("com") => true,
+        Some("cmd") | Some("bat") => false,
+        _ => {
+            let bytes = trimmed.as_bytes();
+            bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && matches!(bytes[2], b'\\' | b'/')
+        }
+    }
 }
 
 /// On Windows, `.cmd`/`.bat` shims (npx.cmd, pnpm.cmd, …) are scripts rather
