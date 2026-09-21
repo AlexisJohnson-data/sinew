@@ -299,7 +299,11 @@ fn push_assistant_message<'a>(message: &'a ChatMessage, messages: &mut Vec<wire:
         }
     }
 
-    if text.is_empty() && reasoning.is_empty() && tool_calls.is_empty() {
+    // An assistant message must have content or tool_calls set; reasoning
+    // alone is rejected ("content or tool_calls must be set"). Skip a turn that
+    // produced only reasoning (interrupted, or thinking ate the whole budget),
+    // otherwise it poisons every following request.
+    if text.is_empty() && tool_calls.is_empty() {
         return;
     }
 

@@ -543,7 +543,13 @@ fn push_assistant_message<'a>(message: &'a ChatMessage, messages: &mut Vec<wire:
         }
     }
 
-    if text.is_empty() && reasoning.is_empty() && tool_calls.is_empty() {
+    // The gateway rejects an assistant message with neither content nor
+    // tool_calls set ("Invalid assistant message: content or tool_calls must be
+    // set") — reasoning_content alone does NOT count. A turn that produced only
+    // reasoning (interrupted mid-think, or the output budget consumed entirely
+    // by thinking) would otherwise be replayed as content:null + tool_calls:[]
+    // and poison every following request. Drop such degenerate turns.
+    if text.is_empty() && tool_calls.is_empty() {
         return;
     }
 
