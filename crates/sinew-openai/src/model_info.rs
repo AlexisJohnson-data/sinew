@@ -29,6 +29,25 @@ const MODELS: &[OpenAiModelInfo] = &[
         max_output_tokens: 128_000,
         supports_images: true,
     },
+    // GPT-6 Sol & Luna — GPT-6-generation of the Sol/Luna line (released
+    // 2026-09-22, ~50% cheaper than the 5.6 versions). Same 1.05M ctx / 128k
+    // out / text+image in as their 5.6 predecessors, per the OpenAI API model
+    // cards. reasoning low→max (covered by supports_max_reasoning_effort's
+    // `gpt-6-` prefix branch).
+    OpenAiModelInfo {
+        id: "gpt-6-sol",
+        context_window: 1_050_000,
+        preferred_window: 950_000,
+        max_output_tokens: 128_000,
+        supports_images: true,
+    },
+    OpenAiModelInfo {
+        id: "gpt-6-luna",
+        context_window: 1_050_000,
+        preferred_window: 950_000,
+        max_output_tokens: 128_000,
+        supports_images: true,
+    },
     OpenAiModelInfo {
         id: "gpt-5.6-sol",
         context_window: 1_050_000,
