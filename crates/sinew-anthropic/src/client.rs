@@ -15,7 +15,11 @@ use crate::{
 
 const BASE_URL: &str = "https://api.anthropic.com";
 const API_VERSION: &str = "2023-06-01";
-const USER_AGENT: &str = "claude-cli/2.1.75";
+// Anthropic gates newer models behind a minimum Claude Code client version,
+// read from this User-Agent (e.g. Opus 5.5 requires >= 2.1.280 — an older UA
+// gets "Claude Code X does not support this model"). Bump this to a current
+// claude-code release when a new model 400s on the version check.
+const USER_AGENT: &str = "claude-cli/2.1.280";
 const CODE_SYSTEM_PREFIX: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 // Note: we intentionally do NOT advertise `context-1m-2025-08-07` here.
 // All models currently shipped in the app (Opus 4.6/4.7/4.8/5, Sonnet 4.6/5) already
