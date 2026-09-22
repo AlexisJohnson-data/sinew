@@ -554,7 +554,22 @@ fn push_assistant_message<'a>(message: &'a ChatMessage, messages: &mut Vec<wire:
     }
 
     let content = (!text.is_empty()).then_some(wire::WireContent::Text(text));
-    let reasoning_content = (!reasoning.is_empty()).then_some(reasoning);
+    // DeepSeek's thinking mode additionally demands that any assistant turn
+    // carrying tool_calls ALSO carry reasoning_content ("The reasoning_content
+    // in the thinking mode must be passed back to the API"). A tool call the
+    // model emitted with no visible reasoning (mixed thinking mode), or one
+    // whose reasoning was dropped by history compaction on a long run, would
+    // otherwise be replayed with reasoning_content omitted and rejected —
+    // poisoning the rest of the conversation. Keep a minimal placeholder so the
+    // field is always present on tool-call turns; models that don't require it
+    // ignore it (they already accept reasoning_content on normal thinking turns).
+    let reasoning_content = if !reasoning.is_empty() {
+        Some(reasoning)
+    } else if !tool_calls.is_empty() {
+        Some(REASONING_PLACEHOLDER.to_string())
+    } else {
+        None
+    };
     messages.push(wire::WireMessage::Assistant {
         role: "assistant",
         content,
@@ -562,6 +577,12 @@ fn push_assistant_message<'a>(message: &'a ChatMessage, messages: &mut Vec<wire:
         tool_calls,
     });
 }
+
+/// Minimal non-empty stand-in for a tool-call turn whose reasoning is missing.
+/// DeepSeek requires reasoning_content be present on such turns but does not
+/// verify its contents (unlike Anthropic's signed thinking blocks), so a neutral
+/// placeholder satisfies the gateway without misleading the model.
+const REASONING_PLACEHOLDER: &str = "...";
 
 #[derive(Default)]
 struct ContentBuilder {
