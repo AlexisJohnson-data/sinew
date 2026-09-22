@@ -209,6 +209,37 @@ jobs:
             echo "No MSI installer produced - skipping MSI alias."
           fi
 
+      # Publish the release the moment the Windows bundle is up, so the Windows
+      # auto-updater sees the new version without waiting on the slower (and
+      # occasionally flaky) macOS/Linux runners. tauri-action just uploaded a
+      # latest.json carrying the windows entry; the macOS/Linux entries merge
+      # into that same manifest as those legs finish and re-upload it, so no
+      # platform's updater is left broken. The finalize-release job below still
+      # runs (always) to re-assert this and to cover the case where the Windows
+      # leg failed but another platform succeeded.
+      - name: Publish early once Windows is ready
+        if: runner.os == 'Windows'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const release_id = ${{ needs.create-release.outputs.release_id }};
+            const assets = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              { owner: context.repo.owner, repo: context.repo.repo, release_id, per_page: 100 },
+            );
+            if (!assets.map((a) => a.name).includes("latest.json")) {
+              core.info("latest.json not present yet; leaving publish to finalize-release.");
+              return;
+            }
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id,
+              draft: false,
+              make_latest: "true",
+            });
+            core.info("Release published early from the Windows job.");
+
       # Same trick on Linux: expose version-less AppImage + .deb so the
       # landing page can hard-link to
       # `releases/latest/download/Sinew_amd64.AppImage` (and `.deb`).
