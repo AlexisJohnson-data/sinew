@@ -39,6 +39,14 @@ const ANTHROPIC_MAX_IMAGE_BASE64_BYTES: usize = 5 * 1024 * 1024;
 // whole conversation: it sits in history and every later request 400s. We drop
 // it here so the conversation keeps working.
 const ANTHROPIC_MAX_IMAGE_DIMENSION: u32 = 8000;
+// Anthropic rejects any image over 2000 px on a side in a **multi-image**
+// request ("image dimensions exceed max allowed size for many-image requests:
+// 2000 pixels"). Single-image requests allow up to 8000, but the server
+// downscales to ~1568 px on the long edge internally regardless — so capping
+// every image at 2000 is lossless in practice and satisfies both cases. We
+// resize oversized images to fit this box (rather than dropping them) so pasted
+// screenshots keep working.
+const ANTHROPIC_MANY_IMAGE_MAX_DIMENSION: u32 = 2000;
 const ANTHROPIC_SKIPPED_IMAGE_TOO_LARGE: &str =
     "[Skipped: image too large for Anthropic (over 5 MiB or 8000 px on a side). Capture a smaller screenshot — e.g. without full_page.]";
 
@@ -187,13 +195,14 @@ impl Provider for AnthropicProvider {
         Some(model_info::capabilities(model))
     }
 
-    async fn estimate_tokens(&self, request: ProviderRequest) -> Result<TokenEstimate> {
+    async fn estimate_tokens(&self, mut request: ProviderRequest) -> Result<TokenEstimate> {
         if request.model.provider != "anthropic" {
             return Err(AppError::Unsupported(format!(
                 "anthropic provider cannot count model provider {}",
                 request.model.provider
             )));
         }
+        downscale_oversized_images(&mut request.transcript);
 
         let is_oauth = self.config.credential.is_oauth();
         let body = wire::CountTokensRequest {
@@ -227,7 +236,8 @@ impl Provider for AnthropicProvider {
         })
     }
 
-    async fn stream(&self, request: ProviderRequest) -> Result<ProviderStream> {
+    async fn stream(&self, mut request: ProviderRequest) -> Result<ProviderStream> {
+        downscale_oversized_images(&mut request.transcript);
         let caps = model_info::capabilities(&request.model);
         let is_oauth = self.config.credential.is_oauth();
         let (thinking, output_config) = effort_to_output(request.effective_effort());
@@ -565,6 +575,73 @@ fn image_dimensions_within_limit(data: &str) -> bool {
     }
 }
 
+/// Resize any transcript image that exceeds Anthropic's 2000 px many-image cap
+/// so it is kept (downscaled) instead of rejected. Operates in place on the
+/// request's owned transcript copy (the stored conversation is untouched);
+/// covers both direct image parts and images inside tool results.
+fn downscale_oversized_images(transcript: &mut [ChatMessage]) {
+    for message in transcript.iter_mut() {
+        for part in message.parts.iter_mut() {
+            match part {
+                Part::Image {
+                    media_type, data, ..
+                } => {
+                    if let Some((resized, new_type)) = resize_within_many_image_limit(data) {
+                        *data = resized;
+                        *media_type = new_type.to_string();
+                    }
+                }
+                Part::ToolResult { images, .. } => {
+                    for image in images.iter_mut() {
+                        if let Some((resized, new_type)) =
+                            resize_within_many_image_limit(&image.data)
+                        {
+                            image.data = resized;
+                            image.media_type = new_type.to_string();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// If the base64 image is larger than 2000 px on a side, decode it, downscale to
+/// fit within a 2000×2000 box (aspect ratio preserved) and re-encode as PNG.
+/// Returns the new base64 + media type, or None when the image is already within
+/// the cap or can't be decoded (fail open — the existing size guard then handles
+/// it). PNG/JPEG decode via the crate's enabled features; other formats
+/// (webp/gif) fail to decode and fall through unchanged.
+fn resize_within_many_image_limit(data: &str) -> Option<(String, &'static str)> {
+    let bytes = BASE64_STANDARD.decode(data).ok()?;
+    // Cheap header-only dimension read first, so images already within the cap
+    // never pay for a full decode.
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if width <= ANTHROPIC_MANY_IMAGE_MAX_DIMENSION && height <= ANTHROPIC_MANY_IMAGE_MAX_DIMENSION {
+        return None;
+    }
+    let decoded = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    let resized = decoded.resize(
+        ANTHROPIC_MANY_IMAGE_MAX_DIMENSION,
+        ANTHROPIC_MANY_IMAGE_MAX_DIMENSION,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut out = Vec::new();
+    resized
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .ok()?;
+    Some((BASE64_STANDARD.encode(&out), "image/png"))
+}
+
 fn part_is_ui_only(part: &Part) -> bool {
     part_meta(part)
         .and_then(|meta| meta.get("ui_only"))
@@ -741,6 +818,39 @@ mod tests {
         };
 
         assert_eq!(*media_type, "image/png");
+    }
+
+    #[test]
+    fn oversized_images_are_downscaled_to_the_many_image_cap() {
+        // 3000×1000 exceeds the 2000 px many-image cap.
+        let mut buf = Vec::new();
+        image::DynamicImage::new_rgb8(3000, 1000)
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        let data = BASE64_STANDARD.encode(&buf);
+
+        let (resized, media_type) =
+            resize_within_many_image_limit(&data).expect("oversized image should be resized");
+        assert_eq!(media_type, "image/png");
+
+        let out = BASE64_STANDARD.decode(&resized).unwrap();
+        let (width, height) = image::ImageReader::new(std::io::Cursor::new(&out))
+            .with_guessed_format()
+            .unwrap()
+            .into_dimensions()
+            .unwrap();
+        // Fits the 2000 box with aspect ratio preserved (3:1 → 2000×667).
+        assert_eq!((width, height), (2000, 667));
+    }
+
+    #[test]
+    fn images_within_the_cap_are_left_untouched() {
+        let mut buf = Vec::new();
+        image::DynamicImage::new_rgb8(1500, 1000)
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        let data = BASE64_STANDARD.encode(&buf);
+        assert!(resize_within_many_image_limit(&data).is_none());
     }
 
     #[test]
