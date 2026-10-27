@@ -1,6 +1,7 @@
 mod auth;
 mod cli_version;
 mod client;
+mod discovery;
 mod model_info;
 mod stream;
 mod wire;
@@ -10,4 +11,5 @@ pub use auth::{
     load_default_auth_status, oauth_authorize_url, AnthropicAuthStatus, Credential, PkceCodes,
 };
 pub use client::{AnthropicConfig, AnthropicProvider};
+pub use discovery::list_models;
 pub use model_info::{MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW};

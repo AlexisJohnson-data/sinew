@@ -486,6 +486,7 @@ pub fn run() {
             providers::disconnect_deepseek_provider,
             providers::get_opencode_go_provider_status,
             providers::list_opencode_go_models,
+            providers::list_discovered_models,
             providers::validate_opencode_go_api_key,
             providers::disconnect_opencode_go_provider,
             providers::get_openrouter_provider_status,

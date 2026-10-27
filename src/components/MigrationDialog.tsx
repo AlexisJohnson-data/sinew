@@ -11,7 +11,7 @@ import {
   type ModelEntry,
   type ModelId,
 } from "../lib/models";
-import type { ModelRef, OpenRouterModel, ThinkingLevel } from "../types";
+import type { DiscoveredModels, ModelRef, OpenRouterModel, ThinkingLevel } from "../types";
 
 type Props = {
   open: boolean;
@@ -82,6 +82,7 @@ export function MigrationDialog({
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModels>({});
   const sourceRef = useRef<HTMLInputElement>(null);
 
   // Reset every time the dialog (re)opens.
@@ -118,6 +119,12 @@ export function MigrationDialog({
       setDefaultGoalModel(goal);
       setConfiguredProviders(providers);
       setOpenRouterModels(openRouter);
+      void api
+        .listDiscoveredModels()
+        .then((models) => {
+          if (!cancelled) setDiscoveredModels(models);
+        })
+        .catch(() => {});
       if (providers.includes("opencode-go")) {
         const goModels = await api.listOpencodeGoModels().catch(() => [] as string[]);
         if (!cancelled) setOpencodeGoModels(goModels);
@@ -157,8 +164,9 @@ export function MigrationDialog({
         configuredProviders,
         openRouterModels,
         opencodeGoModels,
+        discoveredModels,
       ),
-    [configuredProviders, openRouterModels, opencodeGoModels],
+    [configuredProviders, openRouterModels, opencodeGoModels, discoveredModels],
   );
 
   const selectedEntry = useMemo(

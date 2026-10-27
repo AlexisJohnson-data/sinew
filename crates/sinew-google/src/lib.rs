@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod client;
+pub mod discovery;
 pub mod model_info;
 pub mod stream;
 pub mod wire;
@@ -10,4 +11,5 @@ pub use auth::{
     GoogleUserData, PkceCodes,
 };
 pub use client::{GoogleConfig, GoogleProvider};
+pub use discovery::list_models;
 pub use model_info::MODEL_ID;

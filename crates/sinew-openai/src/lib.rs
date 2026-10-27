@@ -1,5 +1,6 @@
 mod auth;
 mod client;
+mod discovery;
 mod model_info;
 mod responses_stream;
 mod stream;
@@ -12,4 +13,5 @@ pub use auth::{
     PkceCodes,
 };
 pub use client::{OpenAiConfig, OpenAiProvider};
+pub use discovery::list_models;
 pub use model_info::{MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW};

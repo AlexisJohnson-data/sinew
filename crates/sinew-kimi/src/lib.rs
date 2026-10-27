@@ -1,5 +1,6 @@
 mod auth;
 mod client;
+mod discovery;
 mod model_info;
 mod stream;
 mod wire;
@@ -9,4 +10,5 @@ pub use auth::{
     wait_for_device_token, DeviceAuthorization, KimiAuthStatus,
 };
 pub use client::{KimiConfig, KimiProvider};
+pub use discovery::list_models;
 pub use model_info::{MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW};

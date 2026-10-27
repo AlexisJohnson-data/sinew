@@ -1668,6 +1668,87 @@ pub(super) async fn list_opencode_go_models() -> std::result::Result<Vec<String>
     }
 }
 
+/// How long a successful live model listing is reused before asking the
+/// providers again.
+const DISCOVERED_MODELS_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+const DISCOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+type DiscoveredModels = HashMap<String, Vec<sinew_core::DiscoveredModel>>;
+
+fn discovered_models_cache() -> &'static StdMutex<Option<(std::time::Instant, DiscoveredModels)>> {
+    static CACHE: std::sync::OnceLock<StdMutex<Option<(std::time::Instant, DiscoveredModels)>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| StdMutex::new(None))
+}
+
+/// Models each connected provider reports live for the signed-in account
+/// (Anthropic, OpenAI, Google, Kimi, DeepSeek), keyed by provider id. The
+/// result also feeds `sinew_core::discovered`, so turns use the real context
+/// windows. A provider that is not connected, times out or errors is simply
+/// absent and the UI keeps its static catalog for it; a previous good listing
+/// is kept across transient failures.
+#[tauri::command]
+pub(super) async fn list_discovered_models(
+    force: Option<bool>,
+) -> std::result::Result<DiscoveredModels, String> {
+    if !force.unwrap_or(false) {
+        if let Ok(cache) = discovered_models_cache().lock() {
+            if let Some((fetched_at, models)) = cache.as_ref() {
+                if fetched_at.elapsed() < DISCOVERED_MODELS_TTL {
+                    return Ok(models.clone());
+                }
+            }
+        }
+    }
+
+    async fn bounded<F>(
+        provider: &'static str,
+        listing: F,
+    ) -> (&'static str, Option<Vec<sinew_core::DiscoveredModel>>)
+    where
+        F: std::future::Future<Output = sinew_core::Result<Vec<sinew_core::DiscoveredModel>>>,
+    {
+        match tokio::time::timeout(DISCOVERY_TIMEOUT, listing).await {
+            Ok(Ok(models)) if !models.is_empty() => (provider, Some(models)),
+            Ok(Ok(_)) => (provider, None),
+            Ok(Err(err)) => {
+                tracing::warn!(provider, error = %err, "live model listing failed");
+                (provider, None)
+            }
+            Err(_) => {
+                tracing::warn!(provider, "live model listing timed out");
+                (provider, None)
+            }
+        }
+    }
+
+    let results = tokio::join!(
+        bounded("anthropic", sinew_anthropic::list_models()),
+        bounded("openai", sinew_openai::list_models()),
+        bounded("google", sinew_google::list_models()),
+        bounded("kimi", sinew_kimi::list_models()),
+        bounded(DEEPSEEK_PROVIDER_ID, sinew_deepseek::list_models()),
+    );
+
+    let previous = discovered_models_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.as_ref().map(|(_, models)| models.clone()))
+        .unwrap_or_default();
+    let mut merged = DiscoveredModels::new();
+    for (provider, models) in [results.0, results.1, results.2, results.3, results.4] {
+        let models = models.or_else(|| previous.get(provider).cloned());
+        if let Some(models) = models {
+            sinew_core::discovered::record(provider, &models);
+            merged.insert(provider.to_string(), models);
+        }
+    }
+    if let Ok(mut cache) = discovered_models_cache().lock() {
+        *cache = Some((std::time::Instant::now(), merged.clone()));
+    }
+    Ok(merged)
+}
+
 #[tauri::command]
 pub(super) async fn validate_opencode_go_api_key(
     state: State<'_, DesktopState>,

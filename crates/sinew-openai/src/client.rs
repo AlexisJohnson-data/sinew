@@ -363,8 +363,8 @@ fn effort_to_reasoning(model_id: &str, effort: Option<Effort>) -> Option<wire::R
 fn supports_max_reasoning_effort(model_id: &str) -> bool {
     model_id == "gpt-5.6"
         || model_id.starts_with("gpt-5.6-")
-        // GPT-6 Astra's API card lists `max` as a supported reasoning effort.
-        || model_id == "gpt-6" || model_id.starts_with("gpt-6-")
+        // The whole GPT-6 generation (Astra, 6.1 Sol/Terra, Luna) accepts `max`.
+        || model_id == "gpt-6" || model_id.starts_with("gpt-6-") || model_id.starts_with("gpt-6.")
 }
 
 fn service_tier_param(service_tier: Option<ServiceTier>) -> Option<&'static str> {

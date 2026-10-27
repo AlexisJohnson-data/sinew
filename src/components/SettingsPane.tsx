@@ -36,6 +36,7 @@ import type {
   McpServerProbe,
   McpSettings,
   OpenAiProviderStatus,
+  DiscoveredModels,
   OpenRouterModel,
   OpenRouterModelSearchResult,
   OpenRouterProviderStatus,
@@ -289,6 +290,7 @@ export function SettingsPane({ workspacePath }: Props) {
   const [openRouterStatus, setOpenRouterStatus] = useState<OpenRouterProviderStatus | null>(null);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModels>({});
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providersBusy, setProvidersBusy] = useState(false);
   const [providersMessage, setProvidersMessage] = useState<string | null>(null);
@@ -550,6 +552,8 @@ export function SettingsPane({ workspacePath }: Props) {
       ]);
       setConfiguredProviders(providers);
       setOpenRouterModels(models);
+      // Live per-account listings; slow providers must not block the picker.
+      void api.listDiscoveredModels().then(setDiscoveredModels).catch(() => {});
       if (providers.includes("opencode-go")) {
         const goModels = await api.listOpencodeGoModels().catch(() => []);
         setOpencodeGoModels(goModels);
@@ -573,8 +577,9 @@ export function SettingsPane({ workspacePath }: Props) {
         configuredProviders,
         openRouterModels,
         opencodeGoModels,
+        discoveredModels,
       ),
-    [configuredProviders, openRouterModels, opencodeGoModels],
+    [configuredProviders, openRouterModels, opencodeGoModels, discoveredModels],
   );
 
   const loadOpenAiStatus = useCallback(async () => {

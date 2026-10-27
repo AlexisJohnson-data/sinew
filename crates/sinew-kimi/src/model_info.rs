@@ -20,6 +20,37 @@ const MODELS: &[KimiModelInfo] = &[
         max_output_tokens: MODEL_MAX_OUTPUT,
         thinking_only: true,
     },
+    // Kimi K3 / K3.1 line + K2.7 Code Highspeed (Kimi model list, 2026-10).
+    // K3.x are 1M-context flagships; the Highspeed variants share their
+    // sibling's limits.
+    KimiModelInfo {
+        id: "kimi-k3.1-pro",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: MODEL_MAX_OUTPUT,
+        thinking_only: false,
+    },
+    KimiModelInfo {
+        id: "kimi-k3.1-pro-highspeed",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: MODEL_MAX_OUTPUT,
+        thinking_only: false,
+    },
+    KimiModelInfo {
+        id: "kimi-k3",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: MODEL_MAX_OUTPUT,
+        thinking_only: false,
+    },
+    KimiModelInfo {
+        id: "kimi-k2.7-code-highspeed",
+        context_window: MODEL_WINDOW,
+        preferred_window: 230_000,
+        max_output_tokens: MODEL_MAX_OUTPUT,
+        thinking_only: true,
+    },
     KimiModelInfo {
         id: "kimi-for-coding",
         context_window: MODEL_WINDOW,
@@ -46,7 +77,7 @@ pub fn is_thinking_only(model_id: &str) -> bool {
 
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let info = model_info(&model.name);
-    ModelCapabilities {
+    let mut capabilities = ModelCapabilities {
         model: model.clone(),
         context_window: info.context_window,
         preferred_window: info.preferred_window,
@@ -56,5 +87,7 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         supports_tools: true,
         supports_images: true,
         effort_mode: EffortMode::Flag,
-    }
+    };
+    sinew_core::discovered::apply(&mut capabilities);
+    capabilities
 }

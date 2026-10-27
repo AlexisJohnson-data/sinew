@@ -18,7 +18,7 @@ use crate::{
 };
 
 const BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com/v1internal";
-const PROD_BASE_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal";
+pub(crate) const PROD_BASE_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal";
 const SANDBOX_BASE_URL: &str = "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal";
 const AUTOPUSH_BASE_URL: &str = "https://autopush-cloudcode-pa.sandbox.googleapis.com/v1internal";
 const USER_AGENT: &str = "sinew/0.1";
@@ -904,7 +904,7 @@ fn method_url(base_url: &str, method: &str) -> String {
     format!("{}:{method}", base_url.trim_end_matches('/'))
 }
 
-fn antigravity_user_agent() -> String {
+pub(crate) fn antigravity_user_agent() -> String {
     format!("antigravity/{} darwin/arm64", antigravity_version())
 }
 

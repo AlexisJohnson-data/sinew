@@ -64,6 +64,7 @@ import type {
   MessageVisibility,
   ModeModelSettings,
   ModelRef,
+  DiscoveredModels,
   OpenRouterModel,
   Part,
   PlanArtifact,
@@ -565,6 +566,7 @@ export function ChatPane({
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModel[]>([]);
   const [opencodeGoModels, setOpencodeGoModels] = useState<string[]>([]);
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModels>({});
   const [agentTeamsEnabled, setAgentTeamsEnabled] = useState(false);
   const modelRef = useRef<HTMLDivElement | null>(null);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -711,6 +713,8 @@ export function ChatPane({
       ]);
       setConfiguredProviders(providers);
       setOpenRouterModels(models);
+      // Live per-account listings; slow providers must not block the picker.
+      void api.listDiscoveredModels().then(setDiscoveredModels).catch(() => {});
       if (providers.includes("opencode-go")) {
         const goModels = await api.listOpencodeGoModels().catch(() => []);
         setOpencodeGoModels(goModels);
@@ -767,8 +771,8 @@ export function ChatPane({
   }, [loadAgentTeamsEnabled]);
 
   const allModels = useMemo(
-    () => modelsWithOpenRouter(openRouterModels, opencodeGoModels),
-    [openRouterModels, opencodeGoModels],
+    () => modelsWithOpenRouter(openRouterModels, opencodeGoModels, discoveredModels),
+    [openRouterModels, opencodeGoModels, discoveredModels],
   );
   const availableModels = useMemo(
     () =>
@@ -776,8 +780,9 @@ export function ChatPane({
         configuredProviders,
         openRouterModels,
         opencodeGoModels,
+        discoveredModels,
       ),
-    [configuredProviders, openRouterModels, opencodeGoModels],
+    [configuredProviders, openRouterModels, opencodeGoModels, discoveredModels],
   );
   const hasOpencodeModels = useMemo(
     () => availableModels.some((m) => m.provider === "opencode-go"),

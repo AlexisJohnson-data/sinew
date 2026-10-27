@@ -1,6 +1,6 @@
 use sinew_core::{EffortMode, ModelCapabilities, ModelRef};
 
-pub const MODEL_ID: &str = "gpt-5.5";
+pub const MODEL_ID: &str = "gpt-6-luna";
 pub const MODEL_WINDOW: u32 = 272_000;
 pub const MODEL_MAX_OUTPUT: u32 = 128_000;
 
@@ -34,6 +34,24 @@ const MODELS: &[OpenAiModelInfo] = &[
     // out / text+image in as their 5.6 predecessors, per the OpenAI API model
     // cards. reasoning low→max (covered by supports_max_reasoning_effort's
     // `gpt-6-` prefix branch).
+    // GPT-6.1 Sol & Terra (Codex models page, 2026-10): `gpt-6.1-sol` replaces
+    // GPT-5.5 on Plus/Pro/Business, `gpt-6.1-terra` (2026-10-26) is the fast
+    // tier. Same family limits as GPT-6; the live Codex listing overrides the
+    // window when the account reports a smaller one.
+    OpenAiModelInfo {
+        id: "gpt-6.1-sol",
+        context_window: 1_050_000,
+        preferred_window: 950_000,
+        max_output_tokens: 128_000,
+        supports_images: true,
+    },
+    OpenAiModelInfo {
+        id: "gpt-6.1-terra",
+        context_window: 1_050_000,
+        preferred_window: 950_000,
+        max_output_tokens: 128_000,
+        supports_images: true,
+    },
     OpenAiModelInfo {
         id: "gpt-6-sol",
         context_window: 1_050_000,
@@ -115,7 +133,7 @@ fn model_info(model_id: &str) -> &'static OpenAiModelInfo {
 
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let info = model_info(&model.name);
-    ModelCapabilities {
+    let mut capabilities = ModelCapabilities {
         model: model.clone(),
         context_window: info.context_window,
         preferred_window: info.preferred_window,
@@ -125,7 +143,9 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         supports_tools: true,
         supports_images: info.supports_images,
         effort_mode: EffortMode::Tier,
-    }
+    };
+    sinew_core::discovered::apply(&mut capabilities);
+    capabilities
 }
 
 #[cfg(test)]

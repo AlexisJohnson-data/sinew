@@ -59,6 +59,7 @@ d'une utilisation quotidienne.
 - [Fichier → contexte de chat : glisser-déposer, clic droit, collage](#fichier--contexte-de-chat-glisser-déposer-clic-droit-collage)
 - [Citer une réponse dans le rédacteur](#citer-une-réponse-dans-le-rédacteur)
 - [Correctif de fiabilité Gemini / Antigravity](#correctif-de-fiabilité-gemini--antigravity)
+- [Suivi automatique des modèles par compte](#suivi-automatique-des-modèles-par-compte)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -213,6 +214,31 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Suivi automatique des modèles par compte
+
+Le sélecteur de modèles n'est plus seulement une liste figée dans le code :
+Sinew demande à chaque provider connecté quels modèles **votre compte** peut
+réellement utiliser, et avec quelles limites.
+
+- Anthropic → `GET /v1/models`, OpenAI (ChatGPT) → endpoint Codex `/models`
+  (clé API → `/v1/models` filtré), Google → Antigravity
+  `fetchAvailableModels`, Kimi Code → `/models`, DeepSeek → `/models`.
+- Un provider qui répond **remplace** ses entrées statiques : les modèles
+  connus gardent leur libellé et leurs niveaux de réflexion, les nouveaux
+  apparaissent automatiquement (libellé et niveaux déduits de la liste). Un
+  provider hors ligne ou non connecté garde le catalogue statique.
+- Les fenêtres de contexte réelles remplacent les valeurs codées en dur
+  (ex. GPT-6 Luna via ChatGPT : 272k et non 1,05M), et Antigravity fournit
+  l'id exact à envoyer (`gemini-3.8-flash-tiered`).
+- Résultat mis en cache 6 h côté Rust ; un échec ponctuel garde la dernière
+  liste valide. La version client Codex annoncée suit la dernière release
+  npm de `@openai/codex`, comme pour Claude Code.
+
+Code : `crates/sinew-core/src/discovered.rs` (registre + surcharge des
+capacités), `crates/sinew-*/src/discovery.rs` (une liste par provider),
+commande `list_discovered_models` dans `src-tauri/src/providers.rs`, fusion
+dans `src/lib/models.ts` (`catalogWithDiscovered`).
 
 ### Prise en charge du shell WSL / Ubuntu
 

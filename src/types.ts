@@ -299,6 +299,24 @@ export type OpenCodeGoProviderStatus = {
   error?: string | null;
 };
 
+/// A model a provider reported live for the signed-in account (mirrors
+/// `sinew_core::DiscoveredModel`).
+export type DiscoveredModel = {
+  id: string;
+  label?: string | null;
+  contextWindow?: number | null;
+  maxOutputTokens?: number | null;
+  /// Provider-native effort names, e.g. `low`, `xhigh`, `max`, `ultra`.
+  reasoningLevels: string[];
+  defaultReasoning?: string | null;
+  supportsImages?: boolean | null;
+  wireId?: string | null;
+};
+
+/// Live listings keyed by provider id; a provider is absent when it is not
+/// connected or its listing failed.
+export type DiscoveredModels = Record<string, DiscoveredModel[]>;
+
 export type OpenRouterModel = {
   id: string;
   name: string;

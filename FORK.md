@@ -52,6 +52,7 @@ daily use.
 - [File → chat context: drag, right-click, clipboard paste](#file--chat-context-drag-right-click-clipboard-paste)
 - [Quote a reply into the composer](#quote-a-reply-into-the-composer)
 - [Gemini / Antigravity reliability fix](#gemini--antigravity-reliability-fix)
+- [Per-account model auto-discovery](#per-account-model-auto-discovery)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -188,6 +189,31 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Per-account model auto-discovery
+
+The model picker is no longer just a list baked into the code: Sinew asks
+each connected provider which models **your account** can actually use, and
+with which limits.
+
+- Anthropic → `GET /v1/models`, OpenAI (ChatGPT) → Codex `/models`
+  (API key → filtered `/v1/models`), Google → Antigravity
+  `fetchAvailableModels`, Kimi Code → `/models`, DeepSeek → `/models`.
+- A provider that answers **replaces** its static entries: known models keep
+  their curated label and thinking levels, new ones show up automatically
+  (label and levels derived from the listing). A provider that is offline or
+  not connected keeps the static catalog.
+- Real context windows override the hard-coded ones (e.g. GPT-6 Luna through
+  ChatGPT: 272k, not 1.05M), and Antigravity supplies the exact wire id
+  (`gemini-3.8-flash-tiered`).
+- Cached for 6 h on the Rust side; a transient failure keeps the last good
+  listing. The advertised Codex client version tracks the latest
+  `@openai/codex` npm release, like Claude Code.
+
+Code: `crates/sinew-core/src/discovered.rs` (registry + capability
+override), `crates/sinew-*/src/discovery.rs` (one listing per provider),
+`list_discovered_models` command in `src-tauri/src/providers.rs`, merge in
+`src/lib/models.ts` (`catalogWithDiscovered`).
 
 ### WSL / Ubuntu shell support
 

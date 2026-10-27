@@ -1,3 +1,4 @@
+pub mod discovered;
 pub mod error;
 pub mod message;
 pub mod model;
@@ -5,6 +6,7 @@ pub mod provider;
 pub mod stream;
 pub mod tool;
 
+pub use discovered::DiscoveredModel;
 pub use error::{AppError, Result};
 pub use message::{ChatMessage, Part, Role, StopReason, ToolResultImage, Usage};
 pub use model::{Effort, EffortMode, ModelCapabilities, ModelRef};

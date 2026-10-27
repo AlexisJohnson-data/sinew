@@ -50,7 +50,9 @@ Code map:
 │   │   ├── Cargo.toml
 │   │   └── src
 │   │       ├── auth.rs
+│   │       ├── cli_version.rs
 │   │       ├── client.rs
+│   │       ├── discovery.rs
 │   │       ├── lib.rs
 │   │       ├── model_info.rs
 │   │       ├── stream.rs
@@ -112,6 +114,7 @@ Code map:
 │   ├── sinew-core
 │   │   ├── Cargo.toml
 │   │   └── src
+│   │       ├── discovered.rs
 │   │       ├── error.rs
 │   │       ├── lib.rs
 │   │       ├── message.rs
@@ -119,11 +122,22 @@ Code map:
 │   │       ├── provider.rs
 │   │       ├── stream.rs
 │   │       └── tool.rs
+│   ├── sinew-deepseek
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       ├── auth.rs
+│   │       ├── client.rs
+│   │       ├── discovery.rs
+│   │       ├── lib.rs
+│   │       ├── model_info.rs
+│   │       ├── stream.rs
+│   │       └── wire.rs
 │   ├── sinew-google
 │   │   ├── Cargo.toml
 │   │   └── src
 │   │       ├── auth.rs
 │   │       ├── client.rs
+│   │       ├── discovery.rs
 │   │       ├── lib.rs
 │   │       ├── model_info.rs
 │   │       ├── stream.rs
@@ -133,6 +147,7 @@ Code map:
 │   │   └── src
 │   │       ├── auth.rs
 │   │       ├── client.rs
+│   │       ├── discovery.rs
 │   │       ├── lib.rs
 │   │       ├── model_info.rs
 │   │       ├── stream.rs
@@ -142,6 +157,7 @@ Code map:
 │   │   └── src
 │   │       ├── auth.rs
 │   │       ├── client.rs
+│   │       ├── discovery.rs
 │   │       ├── lib.rs
 │   │       ├── model_info.rs
 │   │       ├── responses_stream.rs

@@ -1,7 +1,7 @@
 use sinew_core::{EffortMode, ModelCapabilities, ModelRef};
 
 pub const PROVIDER_ID: &str = "deepseek";
-pub const MODEL_ID: &str = "deepseek-v4-flash";
+pub const MODEL_ID: &str = "deepseek-flash";
 pub const MODEL_WINDOW: u32 = 1_000_000;
 pub const MODEL_MAX_OUTPUT: u32 = 65_536;
 
@@ -17,6 +17,14 @@ struct DeepSeekModelInfo {
 // hosted V4 models share the same window. The call name stays `deepseek-v4-*`
 // even as DeepSeek ships dated checkpoints (e.g. -0731) behind it.
 const MODELS: &[DeepSeekModelInfo] = &[
+    // `deepseek-flash` is the current Flash name (DeepSeek-V4.1-Flash-1017);
+    // `deepseek-v4-flash` is retired but still accepted and routed to it.
+    DeepSeekModelInfo {
+        id: "deepseek-flash",
+        context_window: MODEL_WINDOW,
+        preferred_window: 950_000,
+        max_output_tokens: MODEL_MAX_OUTPUT,
+    },
     DeepSeekModelInfo {
         id: "deepseek-v4-flash",
         context_window: MODEL_WINDOW,
@@ -40,7 +48,7 @@ fn model_info(model_id: &str) -> &'static DeepSeekModelInfo {
 
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let info = model_info(&model.name);
-    ModelCapabilities {
+    let mut capabilities = ModelCapabilities {
         model: model.clone(),
         context_window: info.context_window,
         preferred_window: info.preferred_window,
@@ -54,5 +62,7 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         // text placeholder by the client instead of being sent.
         supports_images: false,
         effort_mode: EffortMode::Flag,
-    }
+    };
+    sinew_core::discovered::apply(&mut capabilities);
+    capabilities
 }

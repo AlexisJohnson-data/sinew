@@ -1,5 +1,6 @@
 mod auth;
 mod client;
+mod discovery;
 mod model_info;
 mod stream;
 mod wire;
@@ -9,4 +10,5 @@ pub use auth::{
     touch_default_auth_validation, Credential, DeepSeekAuthStatus,
 };
 pub use client::{validate_api_key, DeepSeekConfig, DeepSeekProvider};
+pub use discovery::list_models;
 pub use model_info::{capabilities, MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW, PROVIDER_ID};

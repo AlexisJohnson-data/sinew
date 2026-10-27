@@ -1,5 +1,7 @@
 import type {
   AgentMode,
+  DiscoveredModel,
+  DiscoveredModels,
   ModeModelSettings,
   ModelRef,
   OpenRouterModel,
@@ -81,6 +83,27 @@ export const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
 
 export const MODELS: ModelEntry[] = [
   {
+    value: "anthropic:claude-fable-5-1",
+    provider: "anthropic",
+    label: "Fable 5.1",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "high",
+  },
+  {
+    value: "anthropic:claude-sonnet-5-5",
+    provider: "anthropic",
+    label: "Sonnet 5.5",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "high",
+  },
+  {
+    value: "anthropic:claude-haiku-5-5",
+    provider: "anthropic",
+    label: "Haiku 5.5",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+  },
+  {
     value: "anthropic:claude-fable-5",
     provider: "anthropic",
     label: "Fable 5",
@@ -147,6 +170,22 @@ export const MODELS: ModelEntry[] = [
     value: "openai:gpt-6-astra",
     provider: "openai",
     label: "GPT-6 Astra",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
+  },
+  {
+    value: "openai:gpt-6.1-sol",
+    provider: "openai",
+    label: "GPT-6.1 Sol",
+    thinking: ["off", "low", "medium", "high", "xhigh", "max"],
+    defaultThinking: "medium",
+    supportsFast: true,
+  },
+  {
+    value: "openai:gpt-6.1-terra",
+    provider: "openai",
+    label: "GPT-6.1 Terra",
     thinking: ["off", "low", "medium", "high", "xhigh", "max"],
     defaultThinking: "medium",
     supportsFast: true,
@@ -240,6 +279,20 @@ export const MODELS: ModelEntry[] = [
     supportsFast: true,
   },
   {
+    value: "google:gemini-4-argon",
+    provider: "google",
+    label: "Gemini 4 Argon",
+    thinking: ["low", "medium", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "google:gemini-3.5-flash-lite",
+    provider: "google",
+    label: "Gemini 3.5 Flash-Lite",
+    thinking: ["minimal", "low", "medium", "high"],
+    defaultThinking: "medium",
+  },
+  {
     value: "google:gemini-3.8-flash",
     provider: "google",
     label: "Gemini 3.8 Flash",
@@ -282,6 +335,34 @@ export const MODELS: ModelEntry[] = [
     defaultThinking: "high",
   },
   {
+    value: "kimi:kimi-k3.1-pro",
+    provider: "kimi",
+    label: "Kimi K3.1 Pro",
+    thinking: ["off", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "kimi:kimi-k3.1-pro-highspeed",
+    provider: "kimi",
+    label: "Kimi K3.1 Pro Highspeed",
+    thinking: ["off", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "kimi:kimi-k3",
+    provider: "kimi",
+    label: "Kimi K3",
+    thinking: ["off", "high"],
+    defaultThinking: "high",
+  },
+  {
+    value: "kimi:kimi-k2.7-code-highspeed",
+    provider: "kimi",
+    label: "Kimi K2.7 Code Highspeed",
+    thinking: ["high"],
+    defaultThinking: "high",
+  },
+  {
     value: "kimi:kimi-k2.7-code",
     provider: "kimi",
     label: "Kimi K2.7 Code",
@@ -296,9 +377,16 @@ export const MODELS: ModelEntry[] = [
     defaultThinking: "high",
   },
   {
+    value: "deepseek:deepseek-flash",
+    provider: "deepseek",
+    label: "DeepSeek V4.1 Flash",
+    thinking: ["high"],
+    defaultThinking: "high",
+  },
+  {
     value: "deepseek:deepseek-v4-flash",
     provider: "deepseek",
-    label: "DeepSeek V4 Flash",
+    label: "DeepSeek V4 Flash (legacy)",
     thinking: ["high"],
     defaultThinking: "high",
   },
@@ -470,10 +558,13 @@ export function sanitizeOpenRouterName(name: string | null | undefined): string 
 export function modelsWithOpenRouter(
   openRouterModels: readonly OpenRouterModel[] = [],
   opencodeGoModels: readonly string[] = [],
+  discoveredModels: DiscoveredModels = {},
 ): ModelEntry[] {
   const useDynamicGo = opencodeGoModels.length > 0;
   return [
-    ...MODELS.filter((model) => !(useDynamicGo && model.provider === "opencode-go")),
+    ...catalogWithDiscovered(discoveredModels).filter(
+      (model) => !(useDynamicGo && model.provider === "opencode-go"),
+    ),
     ...(useDynamicGo ? opencodeGoModelEntries(opencodeGoModels) : []),
     ...openRouterModelEntries(openRouterModels),
   ];
@@ -483,13 +574,14 @@ export function availableModelsForProviders(
   configuredProviders: readonly string[],
   openRouterModels: readonly OpenRouterModel[] = [],
   opencodeGoModels: readonly string[] = [],
+  discoveredModels: DiscoveredModels = {},
 ): ModelEntry[] {
   const configured = new Set(configuredProviders);
   // When we have a live OpenCode Go model list, it replaces the static entries
   // (fresh ids + correct windows) instead of stacking duplicates.
   const useDynamicGo = opencodeGoModels.length > 0;
   return [
-    ...MODELS.filter(
+    ...catalogWithDiscovered(discoveredModels).filter(
       (model) =>
         configured.has(model.provider) &&
         !(useDynamicGo && model.provider === "opencode-go"),
@@ -499,6 +591,95 @@ export function availableModelsForProviders(
       : []),
     ...(configured.has("openrouter") ? openRouterModelEntries(openRouterModels) : []),
   ];
+}
+
+const THINKING_ORDER: readonly ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/// Thinking levels for a model we only know from a live listing. Providers
+/// that report their effort names (Codex, DeepSeek) are mapped onto Sinew's
+/// levels (`ultra` has no equivalent and is dropped); otherwise each provider
+/// gets the set its static entries use.
+function discoveredThinking(
+  provider: ProviderId,
+  model: DiscoveredModel,
+): { thinking: readonly ThinkingLevel[]; defaultThinking: ThinkingLevel } {
+  if (provider === "kimi") return { thinking: ["off", "high"], defaultThinking: "high" };
+  // DeepSeek and Kimi are on/off on the wire (EffortMode::Flag).
+  if (provider === "deepseek") return { thinking: ["high"], defaultThinking: "high" };
+  if (provider === "google") {
+    return model.id.includes("flash")
+      ? { thinking: ["minimal", "low", "medium", "high"], defaultThinking: "high" }
+      : { thinking: ["low", "medium", "high"], defaultThinking: "high" };
+  }
+  const reported = new Set<string>(model.reasoningLevels);
+  const levels: ThinkingLevel[] =
+    reported.size > 0
+      ? THINKING_ORDER.filter((level) => level === "off" || reported.has(level))
+      : ["off", "low", "medium", "high", "xhigh", "max"];
+  const reportedDefault = levels.find((level) => level === model.defaultReasoning);
+  return {
+    thinking: levels,
+    defaultThinking: reportedDefault ?? (levels.includes("medium") ? "medium" : levels[levels.length - 1]),
+  };
+}
+
+/// Readable label for a listed model the static catalog does not know:
+/// "GPT-6.1-Sol" → "GPT-6.1 Sol", "gemini-4-argon" → "Gemini 4 Argon".
+function discoveredLabel(model: DiscoveredModel): string {
+  const raw = model.label?.trim();
+  if (raw) return raw.replace(/-(?=[A-Za-z])/g, " ");
+  return model.id
+    .split("-")
+    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ")
+    .replace(/^Gpt /, "GPT-");
+}
+
+/// The static catalog with every provider that answered a live listing
+/// replaced by what the account can actually use: known models keep their
+/// curated label/levels, new ones are derived from the listing. Providers
+/// without a listing (offline, not connected) keep the static entries.
+function catalogWithDiscovered(discoveredModels: DiscoveredModels): ModelEntry[] {
+  const replaced = new Set(
+    Object.entries(discoveredModels)
+      .filter(([, models]) => models.length > 0)
+      .map(([provider]) => provider),
+  );
+  if (replaced.size === 0) return MODELS;
+  const entries: ModelEntry[] = [];
+  for (const provider of PROVIDERS.map((p) => p.value)) {
+    const statics = MODELS.filter((model) => model.provider === provider);
+    if (!replaced.has(provider)) {
+      entries.push(...statics);
+      continue;
+    }
+    const listed = discoveredModels[provider];
+    const listedIds = new Set(listed.map((model) => modelId(provider, model.id)));
+    const unknown = listed.filter(
+      (model) => !statics.some((entry) => entry.value === modelId(provider, model.id)),
+    );
+    // New models first (they are usually the newest), then the known ones in
+    // their curated order.
+    for (const model of unknown) {
+      entries.push({
+        value: modelId(provider, model.id),
+        provider,
+        label: discoveredLabel(model),
+        ...discoveredThinking(provider, model),
+        supportsFast: provider === "openai" ? true : undefined,
+      });
+    }
+    entries.push(...statics.filter((entry) => listedIds.has(entry.value)));
+  }
+  return entries;
 }
 
 // Per-family reasoning levels for OpenCode Go. Determined empirically by
@@ -723,7 +904,15 @@ function modelId(provider: string, name: string): ModelId {
 }
 
 function supportsOpenAiMaxEffort(modelName: string): boolean {
-  return modelName === "gpt-5.6" || modelName.startsWith("gpt-5.6-");
+  // Mirrors `supports_max_reasoning_effort` in the OpenAI crate: GPT-5.6 and
+  // the whole GPT-6 generation (6-*, 6.1-*) accept `max`.
+  return (
+    modelName === "gpt-5.6" ||
+    modelName.startsWith("gpt-5.6-") ||
+    modelName === "gpt-6" ||
+    modelName.startsWith("gpt-6-") ||
+    modelName.startsWith("gpt-6.")
+  );
 }
 
 function normalizedModelName(provider: string, name: string): string {

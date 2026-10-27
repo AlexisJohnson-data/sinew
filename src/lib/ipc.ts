@@ -31,6 +31,7 @@ import type {
   OpenCodeGoProviderStatus,
   ModelRef,
   OpenAiProviderStatus,
+  DiscoveredModels,
   OpenRouterModel,
   OpenRouterModelSearchResult,
   OpenRouterProviderStatus,
@@ -551,6 +552,11 @@ export const api = {
   /// (falls back to the curated static list on the backend when offline).
   listOpencodeGoModels() {
     return invoke<string[]>("list_opencode_go_models");
+  },
+  /// Models each connected provider reports for the signed-in account
+  /// (cached 6 h on the backend; `force` asks the providers again).
+  listDiscoveredModels(force = false) {
+    return invoke<DiscoveredModels>("list_discovered_models", { force });
   },
   listOpenRouterModels() {
     return invoke<OpenRouterModel[]>("list_openrouter_models");

@@ -1,6 +1,6 @@
 use sinew_core::{EffortMode, ModelCapabilities, ModelRef};
 
-pub const MODEL_ID: &str = "claude-opus-4-7";
+pub const MODEL_ID: &str = "claude-opus-5-5";
 pub const MODEL_WINDOW: u32 = 1_000_000;
 pub const MODEL_MAX_OUTPUT: u32 = 128_000;
 
@@ -14,6 +14,26 @@ struct AnthropicModelInfo {
 const MODELS: &[AnthropicModelInfo] = &[
     AnthropicModelInfo {
         id: "claude-opus-5-5",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: 128_000,
+    },
+    // Claude 5.5 line-up + Fable 5.1 (models overview, 2026-10): 1M context,
+    // 128k output, adaptive thinking.
+    AnthropicModelInfo {
+        id: "claude-fable-5-1",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: 128_000,
+    },
+    AnthropicModelInfo {
+        id: "claude-sonnet-5-5",
+        context_window: 1_000_000,
+        preferred_window: 900_000,
+        max_output_tokens: 128_000,
+    },
+    AnthropicModelInfo {
+        id: "claude-haiku-5-5",
         context_window: 1_000_000,
         preferred_window: 900_000,
         max_output_tokens: 128_000,
@@ -77,7 +97,7 @@ fn model_info(model_id: &str) -> &'static AnthropicModelInfo {
 
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let info = model_info(&model.name);
-    ModelCapabilities {
+    let mut capabilities = ModelCapabilities {
         model: model.clone(),
         context_window: info.context_window,
         preferred_window: info.preferred_window,
@@ -87,5 +107,7 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         supports_tools: true,
         supports_images: true,
         effort_mode: EffortMode::Tier,
-    }
+    };
+    sinew_core::discovered::apply(&mut capabilities);
+    capabilities
 }

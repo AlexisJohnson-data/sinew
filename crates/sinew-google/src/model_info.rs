@@ -62,6 +62,23 @@ const MODELS: &[GoogleModelInfo] = &[
         max_output_tokens: GEMINI_MAX_OUTPUT,
         supports_images: true,
     },
+    // Gemini 4 Argon (stable, 1M unified context) and 3.5 Flash-Lite, per the
+    // Gemini API models page (2026-10). Antigravity only serves Argon on some
+    // accounts; the live listing decides whether it shows up in the picker.
+    GoogleModelInfo {
+        id: "gemini-4-argon",
+        context_window: GEMINI_WINDOW,
+        preferred_window: 950_000,
+        max_output_tokens: GEMINI_MAX_OUTPUT,
+        supports_images: true,
+    },
+    GoogleModelInfo {
+        id: "gemini-3.5-flash-lite",
+        context_window: GEMINI_WINDOW,
+        preferred_window: 950_000,
+        max_output_tokens: GEMINI_MAX_OUTPUT,
+        supports_images: true,
+    },
 ];
 
 fn model_info(model_id: &str) -> &'static GoogleModelInfo {
@@ -73,6 +90,7 @@ fn model_info(model_id: &str) -> &'static GoogleModelInfo {
 
 fn is_known_model(model_id: &str) -> bool {
     MODELS.iter().any(|info| info.id == model_id)
+        || sinew_core::discovered::lookup("google", model_id).is_some()
 }
 
 pub fn canonical_model(model: &ModelRef) -> ModelRef {
@@ -104,6 +122,17 @@ pub fn antigravity_model_and_thinking(
         Effort::High | Effort::Xhigh | Effort::Max => "high",
     };
 
+    // The live Antigravity listing knows the exact wire id (e.g.
+    // `gemini-3.8-flash-tiered`); trust it over the guesses below.
+    if let Some(wire_id) =
+        sinew_core::discovered::lookup("google", &base).and_then(|found| found.wire_id)
+    {
+        return (wire_id, Some(thinking_level));
+    }
+    // Lite and next-gen models are served under their plain id.
+    if base.contains("flash-lite") || base.starts_with("gemini-4") {
+        return (base, Some(thinking_level));
+    }
     // Antigravity exposes 3.5-flash uniquement sous l'ID `gemini-3.5-flash-low`.
     // Le thinkingLevel reste libre, mais l'ID modèle est figé.
     if base == "gemini-3.5-flash" {
@@ -129,7 +158,7 @@ pub fn antigravity_model_and_thinking(
 pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
     let model = canonical_model(model);
     let info = model_info(&model.name);
-    ModelCapabilities {
+    let mut capabilities = ModelCapabilities {
         model,
         context_window: info.context_window,
         preferred_window: info.preferred_window,
@@ -139,7 +168,9 @@ pub fn capabilities(model: &ModelRef) -> ModelCapabilities {
         supports_tools: true,
         supports_images: info.supports_images,
         effort_mode: EffortMode::Tier,
-    }
+    };
+    sinew_core::discovered::apply(&mut capabilities);
+    capabilities
 }
 
 pub fn is_gemini3_model(model_id: &str) -> bool {
