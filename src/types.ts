@@ -174,6 +174,19 @@ export type ImageProvider = "gptImage2" | "nanoBanana2";
 export type WebSearchProvider = "linkup" | "classic";
 export type ShellPreference = "auto" | "powershell" | "wsl";
 
+/// How much the agent may run without asking (mirrors
+/// `sinew_app::permissions::PermissionMode`).
+export type PermissionMode = "auto" | "ask_shell" | "ask_all";
+
+/// `<kind>: <pattern>` rules, kind = bash | edit | mcp, `*` = wildcard.
+export type PermissionRules = {
+  allow: string[];
+  ask: string[];
+  deny: string[];
+};
+
+export type ApprovalDecision = "allow_once" | "allow_always" | "deny";
+
 export type ToolSettings = {
   tools: ToolConfig[];
   planModePrompt: string;
@@ -190,6 +203,8 @@ export type ToolSettings = {
   ponytailPrompt: string;
   defaultPonytailPrompt: string;
   rtkEnabled: boolean;
+  permissionMode: PermissionMode;
+  permissionRules: PermissionRules;
 };
 
 export type ProviderConnectionState =
@@ -701,6 +716,19 @@ export type AgentEvent =
       preferred_window: number;
       max_output_tokens: number;
       usage: StreamTokenUsage;
+    }
+  | {
+      type: "approval_requested";
+      id: string;
+      tool_name: string;
+      subject: string;
+      reason: string;
+      suggested_rule: string;
+    }
+  | {
+      type: "approval_resolved";
+      id: string;
+      outcome: "allowed" | "allowed_always" | "denied";
     }
   | { type: "interrupted" }
   | { type: "error"; message: string }

@@ -792,6 +792,24 @@ pub(super) async fn answer_question(
         .unwrap_or(false))
 }
 
+/// Answer a permission prompt raised by `sinew_app::permissions`.
+#[tauri::command]
+pub(super) async fn answer_approval(
+    state: State<'_, DesktopState>,
+    input: AnswerApprovalInput,
+) -> std::result::Result<bool, String> {
+    let reply = input.reply()?;
+    let sender = state
+        .active_turns
+        .lock()
+        .await
+        .get(&input.conversation_id)
+        .cloned();
+    Ok(sender
+        .map(|sender| sender.answer_approval(&input.tool_call_id, reply))
+        .unwrap_or(false))
+}
+
 #[tauri::command]
 pub(super) async fn reject_question(
     state: State<'_, DesktopState>,

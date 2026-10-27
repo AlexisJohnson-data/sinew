@@ -361,6 +361,18 @@ function blocksFromHistory(history = []) {
   return blocks;
 }
 
+// Permission prompts still waiting for an answer (approval_requested without
+// a matching approval_resolved, in the current turn).
+function pendingApprovalsFromEvents(liveEvents = []) {
+  const pending = new Map();
+  for (const event of liveEvents) {
+    if (event.type === "approval_requested") pending.set(event.id, event);
+    else if (event.type === "approval_resolved") pending.delete(event.id);
+    else if (event.type === "turn_finished" || event.type === "interrupted") pending.clear();
+  }
+  return [...pending.values()];
+}
+
 function blocksFromLiveEvents(liveEvents = []) {
   const blocks = [];
   let currentText = null;
@@ -953,7 +965,10 @@ function App() {
     if (!conv) return [];
     return [...blocksFromHistory(conv.history || []), ...blocksFromLiveEvents(events)];
   }, [conv, events]);
-  const hasPendingQuestion = blocks.some((block) => block.kind === "tool" && block.name === "question" && block.status === "running");
+  const pendingApprovals = useMemo(() => pendingApprovalsFromEvents(events), [events]);
+  const hasPendingQuestion =
+    pendingApprovals.length > 0 ||
+    blocks.some((block) => block.kind === "tool" && block.name === "question" && block.status === "running");
   const isStreaming = Boolean(conv && activeTurns.some((turn) => turn.conversationId === conv.id));
   const showInstallHint = Boolean(session && !installHintDismissed && !isStandaloneDisplay());
   const currentModel = conv ? conv.modeModelSettings?.[mode] || conv.model : null;
@@ -1180,6 +1195,15 @@ function App() {
       setError(String(err.message || err));
     } finally {
       setSendPending(false);
+    }
+  }
+
+  async function answerApproval(approval, decision) {
+    if (!conv || !canReachPc || !features.includes("approvals")) return;
+    try {
+      await cmd({ type: "answer_approval", conversation_id: conv.id, tool_call_id: approval.id, decision });
+    } catch (err) {
+      setError(String(err.message || err));
     }
   }
 
@@ -1528,6 +1552,15 @@ function App() {
         }),
         isStreaming && events.length === 0 && h("div", { className: "status-line shimmer" }, "Working…"),
       ),
+      features.includes("approvals") && pendingApprovals.map((approval) => h("div", { key: approval.id, className: "plan-approval approval" },
+        h("div", { className: "plan-approval__text" }, "Approval needed — " + approval.reason),
+        h("pre", { className: "approval__subject" }, approval.subject),
+        h("div", { className: "plan-approval__actions" },
+          h("button", { type: "button", className: "plan-approval__implement", disabled: !canReachPc, onClick: () => void answerApproval(approval, "allow_once") }, "Allow once"),
+          h("button", { type: "button", disabled: !canReachPc, onClick: () => void answerApproval(approval, "allow_always") }, "Always (project)"),
+          h("button", { type: "button", disabled: !canReachPc, onClick: () => void answerApproval(approval, "deny") }, "Deny"),
+        ),
+      )),
       conv.planWorkflow?.status === "planReady" && !isStreaming && features.includes("plan_control") && h("div", { className: "plan-approval" },
         h("div", { className: "plan-approval__text" }, "Plan ready. What would you like to do?"),
         h("div", { className: "plan-approval__actions" },

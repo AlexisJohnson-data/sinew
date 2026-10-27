@@ -461,7 +461,7 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                                             summary,
                                             args_pretty: pretty_json(&args),
                                         });
-                                        if should_run_eager_write_file(&name, mode, &tool_settings)
+                                        if should_run_eager_write_file(&name, mode, &tool_settings, bash.workspace_root(), &args)
                                             && tool_preflights.failed(index).is_none()
                                             && finalized_tool_calls == 0
                                             && loops < max_tool_rounds
@@ -981,8 +981,25 @@ fn should_run_eager_write_file(
     name: &str,
     mode: AgentMode,
     tool_settings: &crate::ToolSettings,
+    workspace_root: &std::path::Path,
+    args: &serde_json::Value,
 ) -> bool {
-    name == "write_file" && mode != AgentMode::Plan && tool_settings.is_enabled(name)
+    // Writing ahead of the dispatch would skip the permission prompt, so only
+    // calls the rules let through without asking run eagerly.
+    let allowed_without_prompt = || {
+        let rules = crate::permissions::load_rules(&tool_settings.permission_rules, workspace_root);
+        crate::permissions::evaluate(
+            tool_settings.permission_mode,
+            &rules,
+            workspace_root,
+            name,
+            args,
+        ) == crate::permissions::Decision::Allow
+    };
+    name == "write_file"
+        && mode != AgentMode::Plan
+        && tool_settings.is_enabled(name)
+        && allowed_without_prompt()
 }
 
 fn abort_eager_tool_results(handles: &mut BTreeMap<String, JoinHandle<ToolRunResult>>) {

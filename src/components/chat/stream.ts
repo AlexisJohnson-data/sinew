@@ -118,12 +118,23 @@ export type StreamPhase =
   | "responding"
   | "tooling";
 
+/// A tool call parked on a permission prompt (see `approval_requested`).
+export type PendingApproval = {
+  id: string;
+  toolName: string;
+  subject: string;
+  reason: string;
+  suggestedRule: string;
+};
+
 export type ChatViewState = {
   blocks: ChatBlock[];
   status: StreamStatus;
   streamPhase: StreamPhase;
   lastError: string | null;
   turnStartedAtMs: number | null;
+  /// Optional so the many places that rebuild a view can leave it out.
+  pendingApprovals?: PendingApproval[];
 };
 
 export function initialStateFromHistory(history: ChatMessage[]): ChatViewState {
@@ -1574,6 +1585,7 @@ export function applyEvent(
       return withStreamPhase(state, "idle", {
         status: "stopped",
         blocks,
+        pendingApprovals: [],
       });
     }
 
@@ -1585,6 +1597,27 @@ export function applyEvent(
 
     case "peer_message_received":
       return state;
+
+    case "approval_requested":
+      return {
+        ...state,
+        pendingApprovals: [
+          ...(state.pendingApprovals ?? []).filter((a) => a.id !== event.id),
+          {
+            id: event.id,
+            toolName: event.tool_name,
+            subject: event.subject,
+            reason: event.reason,
+            suggestedRule: event.suggested_rule,
+          },
+        ],
+      };
+
+    case "approval_resolved":
+      return {
+        ...state,
+        pendingApprovals: (state.pendingApprovals ?? []).filter((a) => a.id !== event.id),
+      };
 
     case "sub_agent_event":
       return state;
@@ -1612,6 +1645,7 @@ export function applyEvent(
         blocks,
         status: state.status === "stopped" ? "stopped" : "idle",
         turnStartedAtMs: null,
+        pendingApprovals: [],
       });
     }
   }

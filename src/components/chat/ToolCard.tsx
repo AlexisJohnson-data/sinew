@@ -1147,6 +1147,11 @@ export function ToolCard({
     const rewritten = (rtk as Record<string, unknown>).rewritten;
     return typeof rewritten === "string" ? rewritten : null;
   })();
+  // Set by the permission gate (sinew_app::permissions) when a call never ran.
+  const permissionOutcome =
+    meta?.permission === "blocked" || meta?.permission === "denied"
+      ? (meta.permission as "blocked" | "denied")
+      : null;
   const isBash = canonicalName === "bash" || canonicalName === "bash_input";
   const isGlob = canonicalName === "glob";
   const isGrep = canonicalName === "grep";
@@ -1397,6 +1402,18 @@ export function ToolCard({
           </span>
         ) : (
           <span className="tool-card__title">{title}</span>
+        )}
+        {permissionOutcome && (
+          <span
+            className="tool-card__rtk-badge tool-card__permission-badge"
+            title={
+              permissionOutcome === "blocked"
+                ? "Blocked by Sinew's safety rules — never executed"
+                : "You denied this call — never executed"
+            }
+          >
+            {permissionOutcome === "blocked" ? "BLOCKED" : "DENIED"}
+          </span>
         )}
         {isBash && status !== "running" && rtkRewritten && (
           <span className="tool-card__rtk-badge" title={`RTK: ${rtkRewritten}`}>

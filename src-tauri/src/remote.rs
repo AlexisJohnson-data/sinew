@@ -726,7 +726,7 @@ impl RemoteRuntime {
                     "workspaces": workspaces,
                     "bootstrap": bootstrap,
                     "activeTurns": active_turns,
-                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control"],
+                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control", "approvals"],
                 }));
             }
             _ => {}
@@ -774,7 +774,7 @@ impl RemoteRuntime {
                     "workspaces": workspaces,
                     "bootstrap": bootstrap,
                     "activeTurns": active_turns,
-                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control"],
+                    "features": ["cancel_turn", "open_workspace", "question_push", "plan_control", "approvals"],
                 }))
             }
             RemotePhoneCommand::ListConversations => {
@@ -950,6 +950,25 @@ impl RemoteRuntime {
                         tool_call_id,
                         answers,
                         stop_questions,
+                    },
+                )
+                .await
+                .map_err(|err| anyhow::anyhow!(err))?;
+                Ok(json!({ "accepted": ok }))
+            }
+            RemotePhoneCommand::AnswerApproval {
+                conversation_id,
+                tool_call_id,
+                decision,
+                message,
+            } => {
+                let ok = turns::answer_approval(
+                    state,
+                    AnswerApprovalInput {
+                        conversation_id,
+                        tool_call_id,
+                        decision,
+                        message,
                     },
                 )
                 .await
@@ -1170,6 +1189,11 @@ impl RemoteRuntime {
     }
 
     async fn notify_question_asked(&self, conversation_id: &str) {
+        self.notify_waiting(conversation_id, "Question awaiting answer")
+            .await;
+    }
+
+    async fn notify_waiting(&self, conversation_id: &str, body: &str) {
         let subscriptions = {
             let inner = self.inner.lock().await;
             inner
@@ -1186,7 +1210,7 @@ impl RemoteRuntime {
                     subscription,
                     payload: RemotePushPayload {
                         title: "Sinew".to_string(),
-                        body: "Question awaiting answer".to_string(),
+                        body: body.to_string(),
                         conversation_id: conversation_id.to_string(),
                     },
                 })
@@ -1466,6 +1490,11 @@ pub(super) fn forward_agent_event(
                 runtime.notify_question_asked(&conversation_id).await;
             }
         }
+        if matches!(event, AgentEvent::ApprovalRequested { .. }) {
+            runtime
+                .notify_waiting(&conversation_id, "Command awaiting approval")
+                .await;
+        }
     });
 }
 
@@ -1679,6 +1708,13 @@ enum RemotePhoneCommand {
     RejectQuestion {
         conversation_id: String,
         tool_call_id: String,
+    },
+    AnswerApproval {
+        conversation_id: String,
+        tool_call_id: String,
+        decision: String,
+        #[serde(default)]
+        message: Option<String>,
     },
     CancelTurn {
         conversation_id: String,

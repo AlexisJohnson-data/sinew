@@ -31,6 +31,7 @@ import type {
   OpenCodeGoProviderStatus,
   ModelRef,
   OpenAiProviderStatus,
+  ApprovalDecision,
   DiscoveredModels,
   OpenRouterModel,
   OpenRouterModelSearchResult,
@@ -729,6 +730,17 @@ export const api = {
         answers,
         stopQuestions,
       },
+    });
+  },
+  /// Answer a permission prompt. `message` (deny only) is relayed to the agent.
+  answerApproval(
+    conversationId: string,
+    toolCallId: string,
+    decision: ApprovalDecision,
+    message?: string,
+  ) {
+    return invoke<boolean>("answer_approval", {
+      input: { conversationId, toolCallId, decision, message: message ?? null },
     });
   },
   rejectQuestion(

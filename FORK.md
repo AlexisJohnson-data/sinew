@@ -53,6 +53,7 @@ daily use.
 - [Quote a reply into the composer](#quote-a-reply-into-the-composer)
 - [Gemini / Antigravity reliability fix](#gemini--antigravity-reliability-fix)
 - [Per-account model auto-discovery](#per-account-model-auto-discovery)
+- [Agent permissions](#agent-permissions)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -189,6 +190,38 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Agent permissions
+
+The agent no longer runs everything unchecked. Every tool call goes through
+`crates/sinew-app/src/permissions.rs` first, in this order:
+
+1. **Always-on blocklist**: commands that can wipe the machine (`rm -rf /`,
+   `~`, `/mnt/c`, `Remove-Item -Recurse C:\`, `format C:`, `mkfs`,
+   `dd of=/dev/sda`, fork bomb…) are refused, even through `sudo`, `bash -c`,
+   `wsl --`, `cmd /c`, `$(…)` or a `; && |` chain. No rule or mode lifts them.
+2. `deny`, then `ask`, then `allow` rules (global in Settings → Tools →
+   Permissions, plus per-project `.sinew/permissions.json`). Format:
+   `bash: npm run *`, `edit: src/**`, `mcp: mcp__github__*`.
+3. **Risky commands, always asked**: `git push --force`, `git reset --hard`,
+   `git clean -f`, `rm -rf` outside the project, `curl … | sh`, `npm publish`,
+   `DROP TABLE/DATABASE`.
+4. **Mode**: *Auto* (default), *Ask for shell*, *Ask for everything* (shell +
+   edits + MCP). The shield button in the composer cycles modes.
+
+A prompt shows a card in the chat: *Allow once*, *Always allow in this
+project* (saves the rule to `.sinew/permissions.json`), *Deny* or *Deny with
+a message* (relayed to the agent). Desktop notification when unfocused, push
+and buttons on the phone through Remote. Subagent prompts surface in the main
+chat; Stop denies a waiting prompt. Tool cards show `BLOCKED` / `DENIED` when
+a call never ran.
+
+A guard rail against accidents, not a sandbox: a deliberately obfuscated
+command can still get through.
+
+Code: `permissions.rs` (rules + tests), `agent/tool_dispatch.rs`
+(`permission_gate`), `agent/cancel.rs` (`ApprovalReply`), `answer_approval`
+command in `src-tauri/src/turns.rs`, `src/components/chat/ApprovalCard.tsx`.
 
 ### Per-account model auto-discovery
 

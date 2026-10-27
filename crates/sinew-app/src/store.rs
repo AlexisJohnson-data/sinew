@@ -16,6 +16,7 @@ use crate::agent::AgentMode;
 use crate::bash::active_shell_display_name;
 use crate::mcp::McpSettings;
 use crate::mcp_oauth::McpOAuthRecord;
+use crate::permissions::{PermissionMode, PermissionRules};
 use crate::skill::SkillSettings;
 use crate::subagent::SubAgentSettings;
 use crate::todo::TodoListState;
@@ -341,6 +342,13 @@ pub struct ToolSettings {
     /// to `false`. Requires the `rtk` binary on the system PATH.
     #[serde(default)]
     pub rtk_enabled: bool,
+    /// How much the agent may run without asking. See `crate::permissions`.
+    #[serde(default)]
+    pub permission_mode: PermissionMode,
+    /// Global allow/ask/deny rules, merged with the project's
+    /// `.sinew/permissions.json`.
+    #[serde(default)]
+    pub permission_rules: PermissionRules,
 }
 
 fn default_notifications_enabled() -> bool {
@@ -368,6 +376,8 @@ impl Default for ToolSettings {
             ponytail_enabled: false,
             ponytail_prompt: String::new(),
             rtk_enabled: false,
+            permission_mode: PermissionMode::default(),
+            permission_rules: PermissionRules::default(),
         }
     }
 }
@@ -438,6 +448,8 @@ pub struct ToolSettingsView {
     pub ponytail_prompt: String,
     pub default_ponytail_prompt: String,
     pub rtk_enabled: bool,
+    pub permission_mode: PermissionMode,
+    pub permission_rules: PermissionRules,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -647,6 +659,8 @@ pub fn tool_settings_view(settings: &ToolSettings, catalog: &[ToolDescriptor]) -
         ponytail_prompt: settings.ponytail_prompt().to_string(),
         default_ponytail_prompt: DEFAULT_PONYTAIL_PROMPT.to_string(),
         rtk_enabled: settings.rtk_enabled,
+        permission_mode: settings.permission_mode,
+        permission_rules: settings.permission_rules.clone(),
         tools: catalog
             .iter()
             .filter_map(|descriptor| {

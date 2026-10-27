@@ -211,6 +211,31 @@ pub(super) struct AnswerQuestionInput {
     pub(super) stop_questions: bool,
 }
 
+/// Answer to a permission prompt: `decision` is `allow_once`,
+/// `allow_always` or `deny` (with an optional note for the agent).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AnswerApprovalInput {
+    pub(super) conversation_id: String,
+    pub(super) tool_call_id: String,
+    pub(super) decision: String,
+    #[serde(default)]
+    pub(super) message: Option<String>,
+}
+
+impl AnswerApprovalInput {
+    pub(super) fn reply(&self) -> std::result::Result<sinew_app::ApprovalReply, String> {
+        match self.decision.as_str() {
+            "allow_once" => Ok(sinew_app::ApprovalReply::AllowOnce),
+            "allow_always" => Ok(sinew_app::ApprovalReply::AllowAlways),
+            "deny" => Ok(sinew_app::ApprovalReply::Deny {
+                message: self.message.clone(),
+            }),
+            other => Err(format!("unknown approval decision `{other}`")),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RejectQuestionInput {

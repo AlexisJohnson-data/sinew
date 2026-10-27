@@ -84,6 +84,7 @@ Code map:
 │   │       ├── lib.rs
 │   │       ├── mcp.rs
 │   │       ├── mcp_oauth.rs
+│   │       ├── permissions.rs
 │   │       ├── powershell.rs
 │   │       ├── question.rs
 │   │       ├── read.rs
@@ -296,6 +297,7 @@ Code map:
     │   ├── Workspace.tsx
     │   └── chat
     │       ├── AIThinkingBlock.tsx
+    │       ├── ApprovalCard.tsx
     │       ├── ChatPane.tsx
     │       ├── DotmSquare2.tsx
     │       ├── DotmSquare5.tsx

@@ -8,6 +8,7 @@ pub mod grep;
 pub mod image;
 pub mod mcp;
 pub mod mcp_oauth;
+pub mod permissions;
 #[cfg(windows)]
 mod powershell;
 pub mod question;
@@ -29,7 +30,7 @@ pub mod write;
 pub use agent::{
     clean_context_descriptor, run_turn, system_prompt_for_mode,
     system_prompt_for_mode_with_plan_prompt, AgentEvent, AgentEventScope, AgentMode,
-    ConversationEvent, EngineCommand, QuestionReply, TurnCancel, TurnContext,
+    ApprovalReply, ConversationEvent, EngineCommand, QuestionReply, TurnCancel, TurnContext,
 };
 #[cfg(windows)]
 pub use bash::wsl_working_directory;

@@ -43,6 +43,8 @@ import type {
   SkillSettings,
   SubAgentConfig,
   SubAgentSettings,
+  PermissionMode,
+  PermissionRules,
   ShellPreference,
   ThinkingLevel,
   ToolConfig,
@@ -221,6 +223,8 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   ponytailPrompt: "",
   defaultPonytailPrompt: "",
   rtkEnabled: false,
+  permissionMode: "auto",
+  permissionRules: { allow: [], ask: [], deny: [] },
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -531,6 +535,18 @@ export function SettingsPane({ workspacePath }: Props) {
     },
     [],
   );
+
+  const updatePermissionMode = useCallback((permissionMode: PermissionMode) => {
+    setToolSettings((current) =>
+      current ? { ...current, permissionMode } : current,
+    );
+  }, []);
+
+  const updatePermissionRules = useCallback((permissionRules: PermissionRules) => {
+    setToolSettings((current) =>
+      current ? { ...current, permissionRules } : current,
+    );
+  }, []);
 
   const updateShellPreference = useCallback((shellPreference: ShellPreference) => {
     setToolSettings((current) =>
@@ -1794,6 +1810,8 @@ export function SettingsPane({ workspacePath }: Props) {
             onNanoBananaApiKeyChange={updateNanoBananaApiKey}
             onWebSearchProviderChange={updateWebSearchProvider}
             onShellPreferenceChange={updateShellPreference}
+            onPermissionModeChange={updatePermissionMode}
+            onPermissionRulesChange={updatePermissionRules}
             onNotificationsEnabledChange={updateNotificationsEnabled}
             onPonytailEnabledChange={updatePonytailEnabled}
             onRtkEnabledChange={updateRtkEnabled}
@@ -2858,6 +2876,8 @@ type ToolsSectionProps = {
   onNanoBananaApiKeyChange: (value: string) => void;
   onWebSearchProviderChange: (value: WebSearchProvider) => void;
   onShellPreferenceChange: (value: ShellPreference) => void;
+  onPermissionModeChange: (value: PermissionMode) => void;
+  onPermissionRulesChange: (value: PermissionRules) => void;
   onNotificationsEnabledChange: (value: boolean) => void;
   onPonytailEnabledChange: (value: boolean) => void;
   onRtkEnabledChange: (value: boolean) => void;
@@ -2892,6 +2912,8 @@ function ToolsSection({
   onNanoBananaApiKeyChange,
   onWebSearchProviderChange,
   onShellPreferenceChange,
+  onPermissionModeChange,
+  onPermissionRulesChange,
   onNotificationsEnabledChange,
   onPonytailEnabledChange,
   onRtkEnabledChange,
@@ -2911,6 +2933,8 @@ function ToolsSection({
   const notificationsEnabled = settings?.notificationsEnabled ?? true;
   const ponytailEnabled = settings?.ponytailEnabled ?? false;
   const rtkEnabled = settings?.rtkEnabled ?? false;
+  const permissionMode = settings?.permissionMode ?? "auto";
+  const permissionRules = settings?.permissionRules ?? { allow: [], ask: [], deny: [] };
   const openAiConnected = openAiStatus?.connected === true;
   const subscriptionActive =
     imageProvider === "gptImage2" && openAiConnected && openaiImageUseSubscription;
@@ -3181,6 +3205,61 @@ function ToolsSection({
               {rtkEnabled
                 ? "RTK is active. Shell commands (git, cargo, npm, etc.) are automatically routed through RTK for compressed output, reducing token usage by 60–90%."
                 : "RTK is off. Shell output goes to the context as-is. Requires the rtk binary on the system PATH."}
+            </p>
+          </section>
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>Permissions</h2>
+            </div>
+            <div
+              className="settings-pane__tool-provider-switch"
+              role="group"
+              aria-label="Permission mode"
+            >
+              <button
+                type="button"
+                data-active={permissionMode === "auto" ? "true" : "false"}
+                onClick={() => onPermissionModeChange("auto")}
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                data-active={permissionMode === "ask_shell" ? "true" : "false"}
+                onClick={() => onPermissionModeChange("ask_shell")}
+              >
+                Ask for shell
+              </button>
+              <button
+                type="button"
+                data-active={permissionMode === "ask_all" ? "true" : "false"}
+                onClick={() => onPermissionModeChange("ask_all")}
+              >
+                Ask for everything
+              </button>
+            </div>
+            <p className="settings-pane__field-hint">
+              {permissionMode === "auto"
+                ? "The agent runs freely. Machine-wiping commands (rm -rf /, format C:, mkfs…) are always blocked, and risky ones (git push --force, rm -rf outside the project, curl | sh…) ask first."
+                : permissionMode === "ask_shell"
+                  ? "Every shell command asks for approval unless an allow rule covers it. File edits stay automatic."
+                  : "Shell commands, file edits and MCP tools all ask for approval unless an allow rule covers them."}
+            </p>
+            {(["allow", "ask", "deny"] as const).map((list) => (
+              <PermissionRuleList
+                key={list}
+                list={list}
+                rules={permissionRules[list]}
+                onChange={(rules) =>
+                  onPermissionRulesChange({ ...permissionRules, [list]: rules })
+                }
+              />
+            ))}
+            <p className="settings-pane__field-hint">
+              One rule per line: <code>bash: npm run *</code>, <code>edit: src/**</code>,{" "}
+              <code>mcp: mcp__github__*</code>. Projects can add their own in{" "}
+              <code>.sinew/permissions.json</code> ("Always allow in this project" writes
+              there). Deny beats ask, ask beats allow; the built-in blocklist always wins.
             </p>
           </section>
           {IS_WINDOWS && (
@@ -5312,6 +5391,15 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
     ponytailPrompt: settings.ponytailPrompt ?? "",
     defaultPonytailPrompt: settings.defaultPonytailPrompt ?? "",
     rtkEnabled: settings.rtkEnabled === true,
+    permissionMode:
+      settings.permissionMode === "ask_shell" || settings.permissionMode === "ask_all"
+        ? settings.permissionMode
+        : "auto",
+    permissionRules: {
+      allow: settings.permissionRules?.allow ?? [],
+      ask: settings.permissionRules?.ask ?? [],
+      deny: settings.permissionRules?.deny ?? [],
+    },
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];
@@ -6608,4 +6696,47 @@ function humanizeToolName(name: string): string {
     .trim();
   if (!spaced) return name;
   return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+}
+
+const PERMISSION_LIST_LABELS = {
+  allow: "Always allow",
+  ask: "Always ask",
+  deny: "Always deny",
+} as const;
+
+/// One of the global allow / ask / deny lists, edited as one rule per line.
+function PermissionRuleList({
+  list,
+  rules,
+  onChange,
+}: {
+  list: keyof PermissionRules;
+  rules: string[];
+  onChange: (rules: string[]) => void;
+}) {
+  const [draft, setDraft] = useState(rules.join("\n"));
+  useEffect(() => {
+    setDraft(rules.join("\n"));
+  }, [rules]);
+  return (
+    <div className="settings-pane__tool-config">
+      <p className="settings-pane__tool-config-help">{PERMISSION_LIST_LABELS[list]}</p>
+      <textarea
+        className="settings-pane__tool-config-desc"
+        aria-label={PERMISSION_LIST_LABELS[list]}
+        value={draft}
+        rows={Math.max(2, rules.length + 1)}
+        placeholder={list === "deny" ? "bash: docker system prune*" : "bash: npm run *"}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() =>
+          onChange(
+            draft
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean),
+          )
+        }
+      />
+    </div>
+  );
 }

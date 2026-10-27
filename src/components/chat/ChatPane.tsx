@@ -27,6 +27,8 @@ import {
 import { useChatSearch } from "./useChatSearch";
 import { PlanningNextMoveBlock } from "./PlanningNextMoveBlock";
 import { Questionnaire, type QuestionItem } from "./Questionnaire";
+import { ApprovalCard } from "./ApprovalCard";
+import type { PendingApproval } from "./stream";
 import {
   AiAgentGlyph,
   subAgentToolTitle,
@@ -64,7 +66,9 @@ import type {
   MessageVisibility,
   ModeModelSettings,
   ModelRef,
+  ApprovalDecision,
   DiscoveredModels,
+  PermissionMode,
   OpenRouterModel,
   Part,
   PlanArtifact,
@@ -529,6 +533,7 @@ export function ChatPane({
   // is wrapped with a strong instruction to drive the browser_* tools
   // instead of reading source code. Resets after the message is sent.
   const [forceBrowser, setForceBrowser] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("auto");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [optimisticModeSelectionsByConversation, setOptimisticModeSelectionsByConversation] =
@@ -747,9 +752,29 @@ export function ChatPane({
     };
   }, [loadConfiguredProviders]);
 
+  // Composer shortcut for Settings → Tools → Permissions: cycles
+  // Auto → Ask for shell → Ask for everything. Applies from the next tool call.
+  const cyclePermissionMode = useCallback(async () => {
+    try {
+      const settings = await api.listToolSettings(workspacePath);
+      const current = settings.permissionMode ?? "auto";
+      const next: PermissionMode =
+        current === "auto" ? "ask_shell" : current === "ask_shell" ? "ask_all" : "auto";
+      const saved = await api.saveToolSettings(workspacePath, {
+        ...settings,
+        permissionMode: next,
+      });
+      setPermissionMode(saved.permissionMode ?? next);
+      window.dispatchEvent(new CustomEvent(TOOL_SETTINGS_CHANGED_EVENT));
+    } catch (err) {
+      setView((prev) => ({ ...prev, lastError: String(err) }));
+    }
+  }, [workspacePath]);
+
   const loadAgentTeamsEnabled = useCallback(async () => {
     try {
       const settings = await api.listToolSettings(workspacePath);
+      setPermissionMode(settings.permissionMode ?? "auto");
       setAgentTeamsEnabled(
         settings.tools.some(
           (tool) => canonicalToolName(tool.name) === AGENT_TEAMS_TOOL_NAME && tool.enabled,
@@ -1815,6 +1840,45 @@ export function ChatPane({
       if (!runningIds.has(id)) askedQuestionIdsRef.current.delete(id);
     }
   }, [view.blocks]);
+  // Permission prompts park the agent just like questions do: ping once per
+  // prompt so a backgrounded window doesn't leave the turn stuck.
+  const pingedApprovalIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = view.pendingApprovals ?? [];
+    for (const approval of pending) {
+      if (pingedApprovalIdsRef.current.has(approval.id)) continue;
+      pingedApprovalIdsRef.current.add(approval.id);
+      void pingUserAttention("Sinew · Approval needed", approval.subject);
+    }
+    const live = new Set(pending.map((approval) => approval.id));
+    for (const id of Array.from(pingedApprovalIdsRef.current)) {
+      if (!live.has(id)) pingedApprovalIdsRef.current.delete(id);
+    }
+  }, [view.pendingApprovals]);
+  const handleApprovalAnswer = useCallback(
+    async (approval: PendingApproval, decision: ApprovalDecision, message?: string) => {
+      try {
+        const accepted = await api.answerApproval(
+          conversationId,
+          approval.id,
+          decision,
+          message,
+        );
+        if (!accepted) {
+          // The turn ended or was cancelled meanwhile; drop the stale card.
+          setView((prev) => ({
+            ...prev,
+            pendingApprovals: (prev.pendingApprovals ?? []).filter(
+              (a) => a.id !== approval.id,
+            ),
+          }));
+        }
+      } catch (err) {
+        setView((prev) => ({ ...prev, lastError: String(err) }));
+      }
+    },
+    [conversationId],
+  );
   // Plan mode and Goal mode reach "user, take a look" moments through
   // their own state machine, not via tool calls. Watch those transitions
   // and ping just like we do for questions, so the user is never stuck
@@ -3763,6 +3827,12 @@ export function ChatPane({
                   activeAgentName={viewingSubAgent ? activeSubAgent?.name : undefined}
                 />
               )}
+              {!viewingSubAgent &&
+                (view.pendingApprovals ?? []).map((approval) => (
+                  <div className="msg" data-role="assistant" key={"approval:" + approval.id}>
+                    <ApprovalCard approval={approval} onAnswer={handleApprovalAnswer} />
+                  </div>
+                ))}
               {showPlanningNextMove && (
                 <div className="msg" data-role="assistant">
                   <PlanningNextMoveBlock />
@@ -4117,6 +4187,32 @@ export function ChatPane({
                 aria-pressed={forceBrowser}
               >
                 <Icon icon="solar:global-linear" width={18} height={18} />
+              </button>
+              <button
+                type="button"
+                className="composer__iconbtn"
+                data-active={permissionMode === "auto" ? "false" : "true"}
+                onClick={() => void cyclePermissionMode()}
+                title={
+                  permissionMode === "auto"
+                    ? "Permissions: Auto — dangerous commands are blocked, risky ones ask. Click to ask before every shell command."
+                    : permissionMode === "ask_shell"
+                      ? "Permissions: ask before shell commands. Click to also ask before file edits and MCP tools."
+                      : "Permissions: ask before shell commands, file edits and MCP tools. Click to go back to Auto."
+                }
+                aria-label="Permission mode"
+              >
+                <Icon
+                  icon={
+                    permissionMode === "auto"
+                      ? "solar:shield-check-linear"
+                      : permissionMode === "ask_shell"
+                        ? "solar:shield-warning-linear"
+                        : "solar:lock-keyhole-linear"
+                  }
+                  width={18}
+                  height={18}
+                />
               </button>
               {noProvidersConfigured ? (
                 <button

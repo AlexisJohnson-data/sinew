@@ -56,6 +56,22 @@ pub enum AgentEvent {
         max_output_tokens: u32,
         usage: Usage,
     },
+    /// A tool call is waiting for the user's permission.
+    ApprovalRequested {
+        id: String,
+        tool_name: String,
+        /// The command, file paths or MCP tool being approved.
+        subject: String,
+        reason: String,
+        /// Rule saved by "always allow in this project".
+        suggested_rule: String,
+    },
+    /// The permission prompt `id` was answered or cancelled.
+    ApprovalResolved {
+        id: String,
+        /// `allowed`, `allowed_always` or `denied`.
+        outcome: String,
+    },
     Interrupted,
     Error {
         message: String,

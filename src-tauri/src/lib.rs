@@ -503,6 +503,7 @@ pub fn run() {
             turns::send_message,
             turns::answer_question,
             turns::reject_question,
+            turns::answer_approval,
             turns::compact_conversation,
             turns::list_active_turns,
             turns::replay_active_turn_events,

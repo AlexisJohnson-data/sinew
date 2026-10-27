@@ -272,6 +272,10 @@ impl BashTool {
         }
     }
 
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
     pub fn descriptor(&self) -> ToolDescriptor {
         let shell = self.shell;
         ToolDescriptor {

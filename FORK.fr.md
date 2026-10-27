@@ -60,6 +60,7 @@ d'une utilisation quotidienne.
 - [Citer une réponse dans le rédacteur](#citer-une-réponse-dans-le-rédacteur)
 - [Correctif de fiabilité Gemini / Antigravity](#correctif-de-fiabilité-gemini--antigravity)
 - [Suivi automatique des modèles par compte](#suivi-automatique-des-modèles-par-compte)
+- [Permissions de l'agent](#permissions-de-lagent)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -214,6 +215,43 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Permissions de l'agent
+
+L'agent ne peut plus tout exécuter sans garde-fou. Chaque appel d'outil passe
+par `crates/sinew-app/src/permissions.rs` avant de s'exécuter, avec cet ordre
+de priorité :
+
+1. **Liste noire, toujours active** : les commandes qui peuvent détruire la
+   machine (`rm -rf /`, `~`, `/mnt/c`, `Remove-Item -Recurse C:\`, `format C:`,
+   `mkfs`, `dd of=/dev/sda`, bombe fork…) sont refusées, même à travers `sudo`,
+   `bash -c`, `wsl --`, `cmd /c`, `$(…)` ou un enchaînement `; && |`. Aucune
+   règle ni aucun mode ne les débloque.
+2. Règles `deny`, puis `ask`, puis `allow` (globales dans Réglages → Outils →
+   Permissions, plus `.sinew/permissions.json` par projet). Format :
+   `bash: npm run *`, `edit: src/**`, `mcp: mcp__github__*`.
+3. **Commandes risquées, toujours demandées** : `git push --force`,
+   `git reset --hard`, `git clean -f`, `rm -rf` hors du projet, `curl … | sh`,
+   `npm publish`, `DROP TABLE/DATABASE`.
+4. **Mode** : *Auto* (défaut), *Demander pour le shell*, *Tout demander*
+   (shell + éditions + MCP). Le bouton bouclier de la barre du chat change de
+   mode d'un clic.
+
+Une demande affiche une carte dans le chat : *Allow once*, *Always allow in
+this project* (enregistre la règle dans `.sinew/permissions.json`), *Deny* ou
+*Deny with a message* (le message est transmis à l'agent). Notification si la
+fenêtre n'est pas au premier plan, push et boutons sur le téléphone via
+Remote. Les demandes des sous-agents remontent dans le chat principal ; Stop
+refuse la demande en attente. Les cartes d'outil affichent `BLOCKED` /
+`DENIED` quand un appel n'a pas été exécuté.
+
+C'est un garde-fou contre les accidents, pas un bac à sable : une commande
+volontairement camouflée peut passer.
+
+Code : `permissions.rs` (règles + tests), `agent/tool_dispatch.rs`
+(`permission_gate`), `agent/cancel.rs` (`ApprovalReply`), commande
+`answer_approval` dans `src-tauri/src/turns.rs`,
+`src/components/chat/ApprovalCard.tsx`.
 
 ### Suivi automatique des modèles par compte
 
