@@ -156,6 +156,7 @@ function isHiddenUserText(part: Part): boolean {
     record.attachment_context === true ||
     record.plan_control === "stop_questions" ||
     record.system_reminder === true ||
+    typeof record.slash_command === "string" ||
     record.compaction_retained_user === true ||
     record.ui_only === true
   );

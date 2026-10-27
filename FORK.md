@@ -54,6 +54,7 @@ daily use.
 - [Gemini / Antigravity reliability fix](#gemini--antigravity-reliability-fix)
 - [Per-account model auto-discovery](#per-account-model-auto-discovery)
 - [Agent permissions](#agent-permissions)
+- [Slash commands and on-demand invocation](#slash-commands-and-on-demand-invocation)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -190,6 +191,41 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Slash commands and on-demand invocation
+
+Typing `/` in the chat opens a menu with three families:
+
+- **Actions** run by the UI: `/help`, `/new`, `/compact`, `/plan`, `/act`,
+  `/goal`, `/permissions`.
+- **Commands** = prompts sent to the agent. Built-in: `/review` (reviews
+  uncommitted changes), `/commit`, `/push` (commits pending changes if any,
+  then pushes the branch, with `-u origin` when needed, never force-pushes),
+  `/init` (creates/updates `AGENTS.md`), `/test`. Your own: a Markdown file in
+  `.sinew/commands/` or `.claude/commands/` (project) or the same folders in
+  your home (Windows and WSL). Claude Code compatible format: `description:` /
+  `argument-hint:` frontmatter, `$ARGUMENTS`, `$1`…`$9`. Project > global >
+  built-in.
+- **Skills**, disabled ones included.
+
+The bubble shows what you typed (`/review src/`); the command's prompt goes in
+a hidden part of the message. Expansion happens in Rust, so commands also
+work from the phone.
+
+`@` now offers **MCP servers** (above the files).
+
+**On-demand invocation**: a disabled skill or MCP server stays invisible to
+the agent, but naming it in a message (`/frontend-design`, `@github`) turns it
+on for **the rest of that conversation** (and only that one). The agent can't
+reach for it on its own unless you invoked it.
+
+Settings → **Commands** lists the commands with their source and creates a
+new one in `.sinew/commands/`.
+
+Code: `crates/sinew-app/src/commands.rs` (discovery, built-ins, expansion,
+`apply_invocations`), `send_message` in `src-tauri/src/turns.rs`,
+`list_slash_commands` / `create_slash_command` / `list_mcp_mentions` commands,
+menus in `src/components/chat/ChatPane.tsx`.
 
 ### Agent permissions
 

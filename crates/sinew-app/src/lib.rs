@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod bash;
+pub mod commands;
 pub mod browser;
 pub mod compact;
 pub mod edit;

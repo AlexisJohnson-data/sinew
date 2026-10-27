@@ -283,7 +283,7 @@ fn detect_wsl_skill_roots() -> Vec<PathBuf> {
 }
 
 #[cfg(windows)]
-fn wsl_distros() -> Vec<String> {
+pub(crate) fn wsl_distros() -> Vec<String> {
     // `wsl.exe --list` only reads the registry; it does NOT start the VM, so
     // detection stays cheap and never wakes an idle distro on its own.
     let output = Command::new("wsl.exe")
@@ -316,7 +316,7 @@ fn parse_skill_name(content: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn parse_frontmatter(content: &str) -> HashMap<String, String> {
+pub(crate) fn parse_frontmatter(content: &str) -> HashMap<String, String> {
     let mut fields = HashMap::new();
     let mut lines = content.lines();
     if lines.next().map(str::trim) != Some("---") {

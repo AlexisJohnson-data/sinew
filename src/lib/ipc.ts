@@ -33,6 +33,8 @@ import type {
   OpenAiProviderStatus,
   ApprovalDecision,
   DiscoveredModels,
+  McpMention,
+  SlashCommand,
   OpenRouterModel,
   OpenRouterModelSearchResult,
   OpenRouterProviderStatus,
@@ -731,6 +733,16 @@ export const api = {
         stopQuestions,
       },
     });
+  },
+  listSlashCommands(workspacePath: string) {
+    return invoke<SlashCommand[]>("list_slash_commands", { input: { workspacePath } });
+  },
+  /// Creates `.sinew/commands/<name>.md` from a template; returns its path.
+  createSlashCommand(workspacePath: string, name: string) {
+    return invoke<string>("create_slash_command", { input: { workspacePath, name } });
+  },
+  listMcpMentions() {
+    return invoke<McpMention[]>("list_mcp_mentions");
   },
   /// Answer a permission prompt. `message` (deny only) is relayed to the agent.
   answerApproval(

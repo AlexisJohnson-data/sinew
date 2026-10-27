@@ -221,7 +221,7 @@ function clearSession() {
 
 function plainTextFromParts(parts = []) {
   return parts
-    .filter((part) => part.type === "text" && !part.meta?.attachment_context && !part.meta?.plan_control && !part.meta?.system_reminder)
+    .filter((part) => part.type === "text" && !part.meta?.attachment_context && !part.meta?.plan_control && !part.meta?.system_reminder && !part.meta?.slash_command)
     .map((part) => part.text || "")
     .join("\n")
     .trim();

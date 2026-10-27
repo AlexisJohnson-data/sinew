@@ -234,6 +234,13 @@ export function Workspace({
     }
   }, [workspacePath]);
 
+  // `/new` in the composer (ChatPane dispatches this event).
+  useEffect(() => {
+    const onNewConversation = () => void createConversation();
+    window.addEventListener("sinew:new-conversation", onNewConversation);
+    return () => window.removeEventListener("sinew:new-conversation", onNewConversation);
+  }, [createConversation]);
+
   const renameConversation = useCallback(
     async (id: string, title: string) => {
       try {

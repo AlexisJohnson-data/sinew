@@ -76,6 +76,7 @@ Code map:
 │   │       │   ├── tool_summary.rs
 │   │       │   └── turn.rs
 │   │       ├── bash.rs
+│   │       ├── commands.rs
 │   │       ├── compact.rs
 │   │       ├── edit.rs
 │   │       ├── glob.rs

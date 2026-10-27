@@ -412,6 +412,22 @@ export type InstalledSkill = {
   enabled: boolean;
 };
 
+/// A slash command from `sinew_app::commands` (built-in or Markdown file).
+export type SlashCommand = {
+  name: string;
+  description: string;
+  argumentHint?: string | null;
+  source: "project" | "global" | "builtin";
+  path?: string | null;
+};
+
+/// An MCP server as the composer's `@` menu offers it.
+export type McpMention = {
+  mention: string;
+  name: string;
+  enabled: boolean;
+};
+
 export type SkillConfig = {
   name: string;
   enabled: boolean;

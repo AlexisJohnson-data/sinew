@@ -133,6 +133,22 @@ pub(super) struct WorkspaceInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct CreateSlashCommandInput {
+    pub(super) workspace_path: String,
+    pub(super) name: String,
+}
+
+/// An MCP server as the `@` menu shows it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct McpMention {
+    pub(super) mention: String,
+    pub(super) name: String,
+    pub(super) enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct WorkspaceEntriesInput {
     pub(super) workspace_path: String,
     pub(super) relative_path: Option<String>,

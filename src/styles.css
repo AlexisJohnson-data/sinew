@@ -11315,3 +11315,56 @@ textarea {
   border-color: var(--danger);
   opacity: 0.9;
 }
+/* `/` menu extras: argument hint after the name, source tag on the right. */
+.mention-popover__hint {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.mention-popover__kind {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Settings → Commands */
+.settings-pane__command-new {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.settings-pane__command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-pane__command-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--r-med);
+  background: var(--bg-2);
+  font-size: var(--fs-sm);
+}
+.settings-pane__command-name {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  color: var(--text-0);
+}
+.settings-pane__command-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-pane__command-source {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

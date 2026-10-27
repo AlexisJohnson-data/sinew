@@ -44,6 +44,7 @@ import type {
   SubAgentConfig,
   SubAgentSettings,
   PermissionMode,
+  SlashCommand,
   PermissionRules,
   ShellPreference,
   ThinkingLevel,
@@ -236,7 +237,7 @@ type Props = {
   workspacePath: string;
 };
 
-type Section = "about" | "providers" | "tools" | "mcp" | "skills" | "subagents";
+type Section = "about" | "providers" | "tools" | "mcp" | "skills" | "commands" | "subagents";
 
 export function SettingsPane({ workspacePath }: Props) {
   const [section, setSection] = useState<Section>("about");
@@ -1732,6 +1733,20 @@ export function SettingsPane({ workspacePath }: Props) {
         <button
           type="button"
           className="settings-pane__nav-item"
+          data-active={section === "commands" ? "true" : "false"}
+          onClick={() => setSection("commands")}
+        >
+          <Icon
+            icon="solar:command-linear"
+            width={15}
+            height={15}
+            className="settings-pane__nav-icon"
+          />
+          <span className="settings-pane__nav-label">Commands</span>
+        </button>
+        <button
+          type="button"
+          className="settings-pane__nav-item"
           data-active={section === "subagents" ? "true" : "false"}
           onClick={() => setSection("subagents")}
         >
@@ -1870,6 +1885,8 @@ export function SettingsPane({ workspacePath }: Props) {
             onDeleteSkill={(skill) => void deleteSkill(skill)}
             onSaveSkillContent={saveSkillContent}
           />
+        ) : section === "commands" ? (
+          <CommandsSection workspacePath={workspacePath} />
         ) : (
           <SubAgentsSection
             agents={filteredSubAgents}
@@ -6738,5 +6755,125 @@ function PermissionRuleList({
         }
       />
     </div>
+  );
+}
+
+const COMMAND_SOURCE_LABELS = {
+  project: "Project",
+  global: "Global",
+  builtin: "Built-in",
+} as const;
+
+/// Slash commands: built-ins plus Markdown files from `.sinew/commands`,
+/// `.claude/commands` (project) and the same folders in the home directory.
+function CommandsSection({ workspacePath }: { workspacePath: string }) {
+  const [commands, setCommands] = useState<SlashCommand[] | null>(null);
+  const [newName, setNewName] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setCommands(await api.listSlashCommands(workspacePath));
+    } catch (err) {
+      setStatus(String(err));
+      setCommands([]);
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    const name = newName.trim().replace(/^\//, "");
+    if (!name) return;
+    try {
+      const path = await api.createSlashCommand(workspacePath, name);
+      setNewName("");
+      setStatus(`Created ${path}`);
+      await load();
+      void api.openPathWithDefaultApp(path).catch(() => undefined);
+    } catch (err) {
+      setStatus(String(err));
+    }
+  };
+
+  return (
+    <>
+      <header className="settings-pane__header">
+        <div className="settings-pane__header-text">
+          <h1 className="settings-pane__title">Commands</h1>
+          <p className="settings-pane__subtitle">
+            {commands === null ? "Loading…" : `${commands.length} available — type / in the chat`}
+          </p>
+        </div>
+        <div className="settings-pane__actions">
+          {status && <span className="settings-pane__status">{status}</span>}
+          <button type="button" className="settings-pane__btn" onClick={() => void load()}>
+            <Icon icon="solar:refresh-linear" width={13} height={13} />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+      <div className="settings-pane__body settings-pane__body--tools">
+        <section className="settings-pane__tool-group">
+          <div className="settings-pane__tool-group-head">
+            <h2>New command</h2>
+          </div>
+          <form
+            className="settings-pane__command-new"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void create();
+            }}
+          >
+            <input
+              className="settings-pane__tool-config-desc"
+              placeholder="deploy"
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+            />
+            <button type="submit" className="settings-pane__btn" data-primary="true">
+              Create in .sinew/commands
+            </button>
+          </form>
+          <p className="settings-pane__field-hint">
+            A command is a Markdown prompt: <code>/deploy staging</code> sends its text with{" "}
+            <code>$ARGUMENTS</code> = <code>staging</code> (<code>$1</code>, <code>$2</code>… for
+            single words). Optional frontmatter: <code>description:</code>,{" "}
+            <code>argument-hint:</code>. Files in <code>.claude/commands</code> work too, and a file
+            named like a built-in replaces it.
+          </p>
+        </section>
+        <section className="settings-pane__tool-group">
+          <div className="settings-pane__tool-group-head">
+            <h2>Available</h2>
+          </div>
+          <div className="settings-pane__command-list">
+            {(commands ?? []).map((command) => (
+              <div className="settings-pane__command-row" key={command.name}>
+                <span className="settings-pane__command-name">
+                  /{command.name}
+                  {command.argumentHint ? ` ${command.argumentHint}` : ""}
+                </span>
+                <span className="settings-pane__command-desc">{command.description}</span>
+                <span className="settings-pane__command-source">
+                  {COMMAND_SOURCE_LABELS[command.source]}
+                </span>
+                {command.path && (
+                  <button
+                    type="button"
+                    className="settings-pane__btn"
+                    onClick={() => void api.openPathWithDefaultApp(command.path!)}
+                  >
+                    Open
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </>
   );
 }

@@ -783,6 +783,16 @@ fn unique_tool_name(
     format!("mcp__tool__{hash}")
 }
 
+impl McpServerConfig {
+    /// Name the user types after `@` to invoke this server (same slug as in
+    /// its tool names, e.g. "GitHub MCP" -> `github_mcp`).
+    pub fn mention_name(&self) -> String {
+        slug(&self.name)
+            .or_else(|| slug(&self.id))
+            .unwrap_or_else(|| "server".into())
+    }
+}
+
 fn slug(value: &str) -> Option<String> {
     let mut out = String::new();
     for ch in value.chars() {

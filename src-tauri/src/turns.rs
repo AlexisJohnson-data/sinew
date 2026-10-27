@@ -178,6 +178,32 @@ pub(super) async fn send_message(
         plan_control,
         message_visibility,
     ));
+    // `/name args`: the bubble keeps what the user typed, the agent also gets
+    // the command's prompt in a hidden part.
+    if matches!(message_visibility, MessageVisibilityInput::Normal) {
+        if let Some((name, arguments)) = sinew_app::commands::leading_command(text) {
+            if let Some(command) = sinew_app::commands::find_command(&workspace_root, name) {
+                if let Some(message) = conversation.history.last_mut() {
+                    message.parts.push(Part::Text {
+                        text: sinew_app::commands::expand(&command.template, arguments),
+                        meta: Some(json!({ "slash_command": name })),
+                    });
+                }
+            }
+        }
+    }
+    // Disabled skills / MCP servers the user named in this conversation are
+    // switched on for it (and only for it).
+    let mut skill_settings = skill_settings;
+    let mut mcp_settings = mcp_settings;
+    let activated = sinew_app::commands::apply_invocations(
+        &conversation.history,
+        &mut skill_settings,
+        &mut mcp_settings,
+    );
+    if !activated.is_empty() {
+        tracing::info!(conversation = %input.conversation_id, ?activated, "invoked disabled skills/MCP servers");
+    }
     state
         .store
         .save_conversation(&conversation)

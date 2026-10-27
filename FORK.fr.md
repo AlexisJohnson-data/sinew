@@ -61,6 +61,7 @@ d'une utilisation quotidienne.
 - [Correctif de fiabilité Gemini / Antigravity](#correctif-de-fiabilité-gemini--antigravity)
 - [Suivi automatique des modèles par compte](#suivi-automatique-des-modèles-par-compte)
 - [Permissions de l'agent](#permissions-de-lagent)
+- [Commandes slash et invocation à la demande](#commandes-slash-et-invocation-à-la-demande)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -215,6 +216,42 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Commandes slash et invocation à la demande
+
+Taper `/` dans le chat ouvre un menu avec trois familles :
+
+- **Actions** exécutées par l'interface : `/help`, `/new`, `/compact`,
+  `/plan`, `/act`, `/goal`, `/permissions`.
+- **Commandes** = prompts envoyés à l'agent. Intégrées : `/review` (relit les
+  changements non commités), `/commit`, `/push` (commite s'il y a des
+  modifications puis pousse la branche, avec `-u origin` si besoin, jamais de
+  push forcé), `/init` (crée/met à jour `AGENTS.md`), `/test`. Les tiennes :
+  un fichier Markdown dans `.sinew/commands/` ou `.claude/commands/` (projet)
+  ou dans les mêmes dossiers de ton home (Windows et WSL). Format compatible
+  Claude Code : frontmatter `description:` / `argument-hint:`, `$ARGUMENTS`,
+  `$1`…`$9`. Projet > global > intégrée.
+- **Compétences**, y compris celles désactivées.
+
+La bulle affiche ce que tu as tapé (`/review src/`) ; le prompt de la
+commande part dans une partie cachée du message. L'expansion se fait côté
+Rust, donc les commandes marchent aussi depuis le téléphone.
+
+`@` propose maintenant les **serveurs MCP** (au-dessus des fichiers).
+
+**Invocation à la demande** : une compétence ou un serveur MCP désactivé
+reste invisible pour l'agent, mais si tu le nommes dans un message
+(`/frontend-design`, `@github`), il est activé pour **toute la suite de cette
+conversation** (et seulement elle). L'agent ne peut donc pas s'en servir de
+lui-même sans que tu l'aies invoqué.
+
+Réglages → **Commands** liste les commandes avec leur source et crée une
+nouvelle commande dans `.sinew/commands/`.
+
+Code : `crates/sinew-app/src/commands.rs` (découverte, intégrées, expansion,
+`apply_invocations`), `send_message` dans `src-tauri/src/turns.rs`, commandes
+`list_slash_commands` / `create_slash_command` / `list_mcp_mentions`, menus
+dans `src/components/chat/ChatPane.tsx`.
 
 ### Permissions de l'agent
 

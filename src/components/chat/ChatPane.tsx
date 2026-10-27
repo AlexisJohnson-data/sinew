@@ -68,7 +68,9 @@ import type {
   ModelRef,
   ApprovalDecision,
   DiscoveredModels,
+  McpMention,
   PermissionMode,
+  SlashCommand,
   OpenRouterModel,
   Part,
   PlanArtifact,
@@ -279,6 +281,41 @@ function optimisticNextUserHistoryIndex(
     next = Math.max(next, latestUserHistoryIndex + 2);
   }
   return next;
+}
+
+/// Composer actions run by the UI itself (no agent turn).
+const SLASH_ACTIONS: { name: string; description: string }[] = [
+  { name: "help", description: "List the available commands" },
+  { name: "new", description: "Start a new conversation" },
+  { name: "compact", description: "Compact the conversation context" },
+  { name: "plan", description: "Switch to Plan mode" },
+  { name: "act", description: "Switch to Act mode" },
+  { name: "goal", description: "Switch to Goal mode" },
+  { name: "permissions", description: "Cycle the permission mode" },
+];
+const SLASH_ACTION_NAMES = new Set(SLASH_ACTIONS.map((action) => action.name));
+const NEW_CONVERSATION_EVENT = "sinew:new-conversation";
+
+/// One row of the `/` menu.
+type SlashItem =
+  | { kind: "action"; name: string; description: string }
+  | { kind: "command"; command: SlashCommand }
+  | { kind: "skill"; skill: InstalledSkill };
+
+function slashItemName(item: SlashItem): string {
+  return item.kind === "command"
+    ? item.command.name
+    : item.kind === "skill"
+      ? item.skill.name
+      : item.name;
+}
+
+function slashItemDescription(item: SlashItem): string {
+  return item.kind === "command"
+    ? item.command.description
+    : item.kind === "skill"
+      ? item.skill.description ?? ""
+      : item.description;
 }
 
 type MentionState = {
@@ -658,6 +695,9 @@ export function ChatPane({
   const skillMentionRef = useRef<MentionState | null>(null);
   const [skillList, setSkillList] = useState<InstalledSkill[] | null>(null);
   const [skillMention, setSkillMention] = useState<MentionState | null>(null);
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [mcpMentions, setMcpMentions] = useState<McpMention[]>([]);
+  const slashActionRef = useRef<((name: string) => void) | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const overlayInnerRef = useRef<HTMLDivElement | null>(null);
   const planWritingRef = useRef<{ conversationId: string; placeholderId: string } | null>(null);
@@ -1333,6 +1373,9 @@ export function ChatPane({
             const query = value.slice(i + 1, caret);
             if (!/\s/.test(query) && query.length <= 80) {
               setSkillMention(null);
+              if (mentionRef.current === null) {
+                void api.listMcpMentions().then(setMcpMentions).catch(() => undefined);
+              }
               setMention((prev) =>
                 prev && prev.tokenStart === i && prev.query === query
                   ? prev
@@ -1351,6 +1394,12 @@ export function ChatPane({
             if (!/[\s/\\]/.test(query) && query.length <= 64) {
               const start = i;
               setMention(null);
+              if (skillMentionRef.current === null) {
+                void api
+                  .listSlashCommands(workspacePath)
+                  .then(setSlashCommands)
+                  .catch(() => undefined);
+              }
               void refreshSkills(skillMentionRef.current === null);
               setSkillMention((prev) =>
                 prev && prev.tokenStart === start && prev.query === query
@@ -1370,7 +1419,7 @@ export function ChatPane({
       setMention(null);
       setSkillMention(null);
     },
-    [refreshMentionFiles, refreshSkills],
+    [refreshMentionFiles, refreshSkills, workspacePath],
   );
 
   const matches = useMemo<WorkspaceEntry[]>(() => {
@@ -1395,18 +1444,34 @@ export function ChatPane({
     return scored.slice(0, MENTION_MAX_RESULTS).map((s) => s.file);
   }, [mention, mentionFiles]);
 
+  // MCP servers offered by the `@` menu (disabled ones too: naming one turns
+  // it on for this conversation). Listed before the files.
+  const mcpMatches = useMemo<McpMention[]>(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    return mcpMentions
+      .filter(
+        (server) =>
+          !q ||
+          server.mention.includes(q) ||
+          server.name.toLowerCase().includes(q),
+      )
+      .slice(0, MENTION_MAX_RESULTS);
+  }, [mention, mcpMentions]);
+  const atItemCount = mcpMatches.length + matches.length;
+
   useEffect(() => {
     if (!mention) return;
-    if (matches.length === 0) {
+    if (atItemCount === 0) {
       if (mention.index !== 0) {
         setMention({ ...mention, index: 0 });
       }
       return;
     }
-    if (mention.index >= matches.length) {
-      setMention({ ...mention, index: matches.length - 1 });
+    if (mention.index >= atItemCount) {
+      setMention({ ...mention, index: atItemCount - 1 });
     }
-  }, [mention, matches]);
+  }, [mention, atItemCount]);
 
   const enabledSkills = useMemo(
     () => (skillList ?? []).filter((skill) => skill.enabled),
@@ -1418,26 +1483,42 @@ export function ChatPane({
     [enabledSkills],
   );
 
-  const skillMatches = useMemo<InstalledSkill[]>(() => {
+  // `/` menu: UI actions, then slash commands, then every skill (disabled
+  // ones too — invoking one turns it on for this conversation).
+  const skillMatches = useMemo<SlashItem[]>(() => {
     if (!skillMention) return [];
+    const commandNames = new Set(slashCommands.map((command) => command.name));
+    const items: SlashItem[] = [
+      ...SLASH_ACTIONS.map((action) => ({ kind: "action" as const, ...action })),
+      ...slashCommands
+        .filter((command) => !SLASH_ACTION_NAMES.has(command.name))
+        .map((command) => ({ kind: "command" as const, command })),
+      ...(skillList ?? [])
+        .filter((skill) => !commandNames.has(skill.name) && !SLASH_ACTION_NAMES.has(skill.name))
+        .map((skill) => ({ kind: "skill" as const, skill })),
+    ];
+    const kindRank = { action: 0, command: 1, skill: 2 } as const;
     const q = skillMention.query.toLowerCase();
-    if (!q) return enabledSkills.slice(0, MENTION_MAX_RESULTS);
-    const scored: { skill: InstalledSkill; score: number }[] = [];
-    for (const skill of enabledSkills) {
-      const name = skill.name.toLowerCase();
+    if (!q) return items.slice(0, 40);
+    const scored: { item: SlashItem; score: number }[] = [];
+    for (const item of items) {
+      const name = slashItemName(item).toLowerCase();
       let score = 0;
       if (name === q) score = 1000;
       else if (name.startsWith(q)) score = 800;
       else if (name.includes(q)) score = 600;
-      else if (skill.description?.toLowerCase().includes(q)) score = 300;
+      else if (slashItemDescription(item).toLowerCase().includes(q)) score = 300;
       else continue;
-      scored.push({ skill, score });
+      scored.push({ item, score });
     }
     scored.sort(
-      (a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+      (a, b) =>
+        b.score - a.score ||
+        kindRank[a.item.kind] - kindRank[b.item.kind] ||
+        slashItemName(a.item).localeCompare(slashItemName(b.item)),
     );
-    return scored.slice(0, MENTION_MAX_RESULTS).map((s) => s.skill);
-  }, [skillMention, enabledSkills]);
+    return scored.slice(0, 40).map((s) => s.item);
+  }, [skillMention, slashCommands, skillList]);
 
   useEffect(() => {
     if (!skillMention) return;
@@ -1453,13 +1534,22 @@ export function ChatPane({
   }, [skillMention, skillMatches]);
 
   const selectSkillMention = useCallback(
-    (skill: InstalledSkill) => {
+    (item: SlashItem) => {
       if (!skillMention) return;
       const ta = textareaRef.current;
       const tokenEnd = ta
         ? ta.selectionStart
         : skillMention.tokenStart + 1 + skillMention.query.length;
-      const insertion = `/${skill.name} `;
+      if (item.kind === "action") {
+        // Actions run now; the typed `/token` is removed from the draft.
+        const next = text.slice(0, skillMention.tokenStart) + text.slice(tokenEnd);
+        pendingCaretRef.current = skillMention.tokenStart;
+        setText(next);
+        setSkillMention(null);
+        slashActionRef.current?.(item.name);
+        return;
+      }
+      const insertion = `/${slashItemName(item)} `;
       const next =
         text.slice(0, skillMention.tokenStart) +
         insertion +
@@ -1469,6 +1559,19 @@ export function ChatPane({
       setSkillMention(null);
     },
     [skillMention, text],
+  );
+
+  const selectMcpMention = useCallback(
+    (server: McpMention) => {
+      if (!mention) return;
+      const ta = textareaRef.current;
+      const tokenEnd = ta ? ta.selectionStart : mention.tokenStart + 1 + mention.query.length;
+      const insertion = `@${server.mention} `;
+      setText(text.slice(0, mention.tokenStart) + insertion + text.slice(tokenEnd));
+      pendingCaretRef.current = mention.tokenStart + insertion.length;
+      setMention(null);
+    },
+    [mention, text],
   );
 
   const selectMention = useCallback(
@@ -2134,6 +2237,12 @@ export function ChatPane({
   ]);
 
   const handleSend = useCallback(async () => {
+    const typedAction = /^\/([a-z]+)$/.exec(text.trim())?.[1];
+    if (typedAction && SLASH_ACTION_NAMES.has(typedAction)) {
+      setText("");
+      slashActionRef.current?.(typedAction);
+      return;
+    }
     if (!modelEntry) return;
     const currentAttachments = composerAttachments;
     let value = text.trim() || attachmentOnlyMessage(currentAttachments);
@@ -2744,6 +2853,34 @@ export function ChatPane({
     [effectiveMode, onModeChange, selectorLocked, isStreaming, view.status],
   );
 
+  // UI actions of the `/` menu (see SLASH_ACTIONS).
+  slashActionRef.current = (name: string) => {
+    switch (name) {
+      case "help":
+        // The full menu is the help: reopen it on an empty query.
+        setText("/");
+        pendingCaretRef.current = 1;
+        void api.listSlashCommands(workspacePath).then(setSlashCommands).catch(() => undefined);
+        void refreshSkills(true);
+        setSkillMention({ tokenStart: 0, query: "", index: 0 });
+        return;
+      case "new":
+        window.dispatchEvent(new CustomEvent(NEW_CONVERSATION_EVENT));
+        return;
+      case "compact":
+        handleCompact();
+        return;
+      case "plan":
+      case "act":
+      case "goal":
+        void handleModeSelect(name);
+        return;
+      case "permissions":
+        void cyclePermissionMode();
+        return;
+    }
+  };
+
   const commandSelectionForMode = useCallback(
     (targetMode: AgentMode): ModeModelSelection => {
       const rawSelection =
@@ -2992,28 +3129,32 @@ export function ChatPane({
     if (mention) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        if (matches.length > 0) {
+        if (atItemCount > 0) {
           setMention({
             ...mention,
-            index: (mention.index + 1) % matches.length,
+            index: (mention.index + 1) % atItemCount,
           });
         }
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        if (matches.length > 0) {
+        if (atItemCount > 0) {
           setMention({
             ...mention,
-            index: (mention.index - 1 + matches.length) % matches.length,
+            index: (mention.index - 1 + atItemCount) % atItemCount,
           });
         }
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
-        if (matches.length > 0) {
+        if (atItemCount > 0) {
           event.preventDefault();
-          selectMention(matches[mention.index] ?? matches[0]);
+          if (mention.index < mcpMatches.length) {
+            selectMcpMention(mcpMatches[mention.index]);
+          } else {
+            selectMention(matches[mention.index - mcpMatches.length] ?? matches[0]);
+          }
           return;
         }
       }
@@ -3952,44 +4093,67 @@ export function ChatPane({
             <div
               className="mention-popover"
               role="listbox"
-              aria-label="Skill mentions"
+              aria-label="Commands and skills"
             >
               {skillMatches.length === 0 ? (
                 <div className="mention-popover__empty">
-                  {skillList === null
-                    ? "Loading skills…"
-                    : enabledSkills.length === 0
-                      ? "No skills enabled"
-                      : "No matches"}
+                  {skillList === null ? "Loading…" : "No matches"}
                 </div>
               ) : (
-                skillMatches.map((skill, idx) => {
+                skillMatches.map((item, idx) => {
                   const selected = idx === skillMention.index;
+                  const name = slashItemName(item);
+                  const disabledSkill = item.kind === "skill" && !item.skill.enabled;
+                  const hint =
+                    item.kind === "command" ? item.command.argumentHint ?? "" : "";
                   return (
                     <button
-                      key={skill.name}
+                      key={`${item.kind}:${name}`}
                       type="button"
                       role="option"
                       aria-selected={selected}
                       className="mention-popover__row"
                       data-selected={selected ? "true" : "false"}
                       onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => selectSkillMention(skill)}
+                      onClick={() => selectSkillMention(item)}
                       onMouseEnter={() =>
                         setSkillMention((prev) =>
                           prev ? { ...prev, index: idx } : prev,
                         )
                       }
+                      title={
+                        disabledSkill
+                          ? "Disabled skill — invoking it turns it on for this conversation"
+                          : slashItemDescription(item)
+                      }
                     >
                       <span className="mention-popover__icon">
                         <Icon
-                          icon="solar:magic-stick-3-linear"
+                          icon={
+                            item.kind === "action"
+                              ? "solar:bolt-linear"
+                              : item.kind === "command"
+                                ? "solar:command-linear"
+                                : "solar:magic-stick-3-linear"
+                          }
                           width={14}
                           height={14}
                         />
                       </span>
-                      <span className="mention-popover__name mention-popover__name--wide">
-                        Skill: {skill.name}
+                      <span className="mention-popover__name">
+                        /{name}
+                        {hint && <span className="mention-popover__hint"> {hint}</span>}
+                      </span>
+                      <span className="mention-popover__path">
+                        {disabledSkill ? "(disabled) " : ""}
+                        {slashItemDescription(item)}
+                      </span>
+                      <span className="mention-popover__kind">
+                        {item.kind === "action"
+                          ? "action"
+                          : item.kind === "skill"
+                            ? "skill"
+                            : item.command.source}
                       </span>
                     </button>
                   );
@@ -4003,12 +4167,48 @@ export function ChatPane({
               role="listbox"
               aria-label="File mentions"
             >
+              {mcpMatches.map((server, idx) => {
+                const selected = idx === mention.index;
+                return (
+                  <button
+                    key={`mcp:${server.mention}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className="mention-popover__row"
+                    data-selected={selected ? "true" : "false"}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectMcpMention(server)}
+                    onMouseEnter={() =>
+                      setMention((prev) => (prev ? { ...prev, index: idx } : prev))
+                    }
+                    title={
+                      server.enabled
+                        ? "MCP server"
+                        : "Disabled MCP server — mentioning it turns it on for this conversation"
+                    }
+                  >
+                    <span className="mention-popover__icon">
+                      <Icon icon="solar:plug-circle-linear" width={14} height={14} />
+                    </span>
+                    <span className="mention-popover__name">@{server.mention}</span>
+                    <span className="mention-popover__path">
+                      {server.enabled ? "" : "(disabled) "}
+                      {server.name}
+                    </span>
+                    <span className="mention-popover__kind">mcp</span>
+                  </button>
+                );
+              })}
               {matches.length === 0 ? (
-                <div className="mention-popover__empty">
-                  {mentionFiles === null ? "Loading files…" : "No matches"}
-                </div>
+                mcpMatches.length === 0 && (
+                  <div className="mention-popover__empty">
+                    {mentionFiles === null ? "Loading files…" : "No matches"}
+                  </div>
+                )
               ) : (
-                matches.map((file, idx) => {
+                matches.map((file, fileIdx) => {
+                  const idx = fileIdx + mcpMatches.length;
                   const selected = idx === mention.index;
                   return (
                     <button

@@ -375,6 +375,70 @@ pub(super) async fn probe_mcp_tools(
     Ok(probe_mcp_servers(&settings).await)
 }
 
+/// Slash commands for the composer's `/` menu (built-ins, global and
+/// project Markdown commands).
+#[tauri::command]
+pub(super) async fn list_slash_commands(
+    input: WorkspaceInput,
+) -> std::result::Result<Vec<sinew_app::commands::SlashCommand>, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    Ok(sinew_app::commands::discover_commands(&workspace_root))
+}
+
+/// Create `.sinew/commands/<name>.md` from a starter template and return its
+/// path (an existing file is left untouched).
+#[tauri::command]
+pub(super) async fn create_slash_command(
+    input: CreateSlashCommandInput,
+) -> std::result::Result<String, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let name = input.name.trim().trim_start_matches('/');
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err("use letters, digits, - or _ for the command name".into());
+    }
+    let dir = workspace_root.join(".sinew").join("commands");
+    std::fs::create_dir_all(&dir).map_err(error_to_string)?;
+    let path = dir.join(format!("{name}.md"));
+    if !path.exists() {
+        let template = format!(
+            "---
+description: What /{name} does
+argument-hint: [arguments]
+---
+             Describe here what the agent should do when you type /{name}.
+
+             $ARGUMENTS is replaced by what you type after the command; $1, $2… by each word.
+"
+        );
+        std::fs::write(&path, template).map_err(error_to_string)?;
+    }
+    Ok(path.display().to_string())
+}
+
+/// MCP servers for the composer's `@` menu, disabled ones included: naming
+/// one in a message switches it on for that conversation.
+#[tauri::command]
+pub(super) async fn list_mcp_mentions(
+    state: State<'_, DesktopState>,
+) -> std::result::Result<Vec<McpMention>, String> {
+    let settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    Ok(settings
+        .servers
+        .iter()
+        .map(|server| McpMention {
+            mention: server.mention_name(),
+            name: server.name.clone(),
+            enabled: server.enabled,
+        })
+        .collect())
+}
+
 #[tauri::command]
 pub(super) async fn list_installed_skills_command(
     state: State<'_, DesktopState>,
