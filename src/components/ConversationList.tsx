@@ -8,6 +8,7 @@ type Props = {
   streamingIds: ReadonlySet<string>;
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onFork: (id: string) => void;
   onDelete: (id: string) => void;
 };
 
@@ -20,6 +21,7 @@ export function ConversationList({
   streamingIds,
   onSelect,
   onRename,
+  onFork,
   onDelete,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -107,6 +109,16 @@ export function ConversationList({
                   }}
                 >
                   <Icon icon="solar:pen-linear" width={13} height={13} />
+                </button>
+                <button
+                  className="conv-row__btn"
+                  title="Fork: continue a copy of this conversation"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onFork(conv.id);
+                  }}
+                >
+                  <Icon icon="solar:branching-paths-up-linear" width={13} height={13} />
                 </button>
                 <button
                   className="conv-row__btn conv-row__btn--danger"

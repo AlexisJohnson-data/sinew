@@ -388,6 +388,15 @@ export const api = {
       input: { workspacePath, conversationId },
     });
   },
+  forkConversation(
+    workspacePath: string,
+    conversationId: string,
+    beforeHistoryIndex?: number,
+  ) {
+    return invoke<SavedConversation>("fork_conversation", {
+      input: { workspacePath, conversationId, beforeHistoryIndex },
+    });
+  },
   renameConversation(
     workspacePath: string,
     conversationId: string,

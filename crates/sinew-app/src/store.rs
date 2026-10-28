@@ -183,6 +183,17 @@ pub struct SavedConversation {
     pub plan_workflow: PlanWorkflowState,
     pub goal_workflow: GoalWorkflowState,
     pub history: Vec<ChatMessage>,
+    /// The conversation this one was forked from, while it still exists.
+    /// Only read from the store; saving never changes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkOrigin {
+    pub conversation_id: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -898,7 +909,65 @@ impl AppStore {
             plan_workflow,
             goal_workflow,
             history: Vec::new(),
+            forked_from: None,
         })
+    }
+
+    /// Copies `source` (already cut to the history the fork should keep)
+    /// into a new conversation that remembers where it came from. The
+    /// plan and goal workflows start idle; the workspace is not touched.
+    pub fn create_fork(&self, source: &SavedConversation) -> Result<SavedConversation> {
+        let id = Uuid::new_v4().to_string();
+        let now = now_ms();
+        let base = source.title.trim();
+        let title = if base.is_empty() || base == DEFAULT_CONVERSATION_TITLE {
+            "Fork".to_string()
+        } else if base.ends_with("(fork)") {
+            base.to_string()
+        } else {
+            format!("{base} (fork)")
+        };
+        let fork = SavedConversation {
+            id: id.clone(),
+            workspace_id: source.workspace_id.clone(),
+            title: title.clone(),
+            model: source.model.clone(),
+            mode_model_settings: source.mode_model_settings.clone(),
+            system_prompt: source.system_prompt.clone(),
+            todo_list: source.todo_list.clone(),
+            plan_workflow: PlanWorkflowState::default(),
+            goal_workflow: GoalWorkflowState::default(),
+            history: source.history.clone(),
+            forked_from: Some(ForkOrigin {
+                conversation_id: source.id.clone(),
+                title: source.title.clone(),
+            }),
+        };
+        {
+            let conn = self.connection()?;
+            conn.execute(
+                "insert into conversations (id, workspace_id, title, title_initialized, model_json, mode_model_settings_json, system_prompt, todo_list_json, plan_workflow_json, goal_workflow_json, forked_from, created_at_ms, updated_at_ms)
+                 values (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    &id,
+                    &fork.workspace_id,
+                    &title,
+                    serde_json::to_string(&fork.model)?,
+                    serde_json::to_string(&fork.mode_model_settings)?,
+                    &fork.system_prompt,
+                    serde_json::to_string(&fork.todo_list)?,
+                    serde_json::to_string(&fork.plan_workflow)?,
+                    serde_json::to_string(&fork.goal_workflow)?,
+                    &source.id,
+                    now,
+                    now,
+                ],
+            )
+            .context("unable to insert forked conversation")?;
+        }
+        // Writes the copied messages.
+        self.save_conversation(&fork)?;
+        Ok(fork)
     }
 
     pub fn list_conversations(&self, workspace_id: &str) -> Result<Vec<ConversationSummary>> {
@@ -936,7 +1005,10 @@ impl AppStore {
         let conn = self.connection()?;
         let conversation = conn
             .query_row(
-                "select title, model_json, system_prompt, todo_list_json, plan_workflow_json, mode_model_settings_json, goal_workflow_json from conversations where workspace_id = ?1 and id = ?2",
+                "select c.title, c.model_json, c.system_prompt, c.todo_list_json, c.plan_workflow_json, c.mode_model_settings_json, c.goal_workflow_json, c.forked_from, p.title
+                 from conversations c
+                 left join conversations p on p.id = c.forked_from
+                 where c.workspace_id = ?1 and c.id = ?2",
                 params![workspace_id, id],
                 |row| {
                     let model_json: String = row.get(1)?;
@@ -944,6 +1016,17 @@ impl AppStore {
                     let plan_workflow_json: String = row.get(4)?;
                     let mode_model_settings_json: Option<String> = row.get(5)?;
                     let goal_workflow_json: String = row.get(6)?;
+                    // The origin's title is null once it has been deleted.
+                    let forked_from = match (
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                    ) {
+                        (Some(conversation_id), Some(title)) => Some(ForkOrigin {
+                            conversation_id,
+                            title,
+                        }),
+                        _ => None,
+                    };
                     let model = serde_json::from_str::<ModelRef>(&model_json).map_err(|err| {
                         rusqlite::Error::FromSqlConversionFailure(
                             1,
@@ -967,6 +1050,7 @@ impl AppStore {
                             .unwrap_or_default(),
                         serde_json::from_str::<GoalWorkflowState>(&goal_workflow_json)
                             .unwrap_or_default(),
+                        forked_from,
                     ))
                 },
             )
@@ -981,6 +1065,7 @@ impl AppStore {
             todo_list,
             plan_workflow,
             goal_workflow,
+            forked_from,
         )) = conversation
         else {
             return Ok(None);
@@ -1022,6 +1107,7 @@ impl AppStore {
             plan_workflow,
             goal_workflow,
             history,
+            forked_from,
         }))
     }
 
@@ -1669,7 +1755,7 @@ impl AppStore {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap_or(0);
 
-        if version >= 10 {
+        if version >= 11 {
             return Ok(());
         }
 
@@ -1716,6 +1802,7 @@ impl AppStore {
         ensure_conversations_goal_workflow_column(&conn)?;
         ensure_conversations_mode_model_settings_column(&conn)?;
         ensure_conversations_title_initialized_column(&conn)?;
+        ensure_conversations_forked_from_column(&conn)?;
         ensure_app_settings_table(&conn)?;
         ensure_turn_checkpoints_table(&conn)?;
         crate::usage::ensure_usage_table(&conn)?;
@@ -1723,7 +1810,7 @@ impl AppStore {
             conn.execute("delete from turn_checkpoints", [])
                 .context("unable to clear legacy turn checkpoints")?;
         }
-        conn.pragma_update(None, "user_version", 10)
+        conn.pragma_update(None, "user_version", 11)
             .context("unable to set sqlite schema version")?;
         Ok(())
     }
@@ -1811,6 +1898,15 @@ fn ensure_conversations_title_initialized_column(conn: &Connection) -> Result<()
         "#,
     )
     .context("unable to add conversation title initialization column")?;
+    Ok(())
+}
+
+fn ensure_conversations_forked_from_column(conn: &Connection) -> Result<()> {
+    if conversation_has_column(conn, "forked_from")? {
+        return Ok(());
+    }
+    conn.execute_batch("alter table conversations add column forked_from text;")
+        .context("unable to add conversation fork origin column")?;
     Ok(())
 }
 
@@ -2154,6 +2250,57 @@ mod tests {
                 .load_conversation("workspace", &conversation.id)?
                 .expect("conversation should exist");
             assert_eq!(reloaded.title, "First request");
+            Ok(())
+        })();
+        let _ = fs::remove_file(path);
+        result
+    }
+
+    #[test]
+    fn fork_copies_history_and_remembers_its_origin() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("sinew-store-fork-test-{}.sqlite3", Uuid::new_v4()));
+        let store = AppStore { path: path.clone() };
+        let result = (|| -> Result<()> {
+            store.migrate()?;
+            let model = ModelRef::new("test", "model");
+            let mut original = store.create_conversation("workspace", &model, "system")?;
+            original.history = vec![
+                message(Role::User, "First request", None),
+                message(Role::Assistant, "First answer", None),
+                message(Role::User, "Second request", None),
+            ];
+            store.save_conversation(&original)?;
+            let mut source = store
+                .load_conversation("workspace", &original.id)?
+                .expect("conversation should exist");
+            source.history.truncate(2);
+
+            let fork = store.create_fork(&source)?;
+            let loaded = store
+                .load_conversation("workspace", &fork.id)?
+                .expect("fork should exist");
+            assert_eq!(loaded.title, "First request (fork)");
+            assert_eq!(loaded.history.len(), 2);
+            let origin = loaded.forked_from.clone().expect("fork should name its origin");
+            assert_eq!(origin.conversation_id, original.id);
+            assert_eq!(origin.title, "First request");
+
+            // The original keeps everything; a fork of a fork keeps one suffix.
+            let untouched = store
+                .load_conversation("workspace", &original.id)?
+                .expect("original should exist");
+            assert_eq!(untouched.history.len(), 3);
+            assert!(untouched.forked_from.is_none());
+            assert_eq!(store.create_fork(&loaded)?.title, "First request (fork)");
+
+            // Once the origin is gone the fork no longer points at it.
+            store.delete_conversation("workspace", &original.id)?;
+            let orphan = store
+                .load_conversation("workspace", &fork.id)?
+                .expect("fork should survive");
+            assert!(orphan.forked_from.is_none());
+            assert_eq!(orphan.history.len(), 2);
             Ok(())
         })();
         let _ = fs::remove_file(path);

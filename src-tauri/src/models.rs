@@ -351,6 +351,17 @@ pub(super) struct StopAgentSwarmInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct ForkConversationInput {
+    pub(super) workspace_path: String,
+    pub(super) conversation_id: String,
+    /// Keep only what came before this user message; the whole
+    /// conversation when absent.
+    #[serde(default)]
+    pub(super) before_history_index: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct RenameConversationInput {
     pub(super) workspace_path: String,
     pub(super) conversation_id: String,

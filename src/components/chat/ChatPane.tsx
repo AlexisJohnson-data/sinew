@@ -95,7 +95,7 @@ import {
   type ChatViewState,
   type SubAgentBlock,
 } from "./stream";
-import type { AgentEvent } from "../../types";
+import type { AgentEvent, SavedConversation } from "../../types";
 
 type Attachment = {
   path: string;
@@ -210,6 +210,14 @@ type Props = {
     implementSkills?: string[],
   ) => Promise<void>;
   onStop: () => Promise<void>;
+  /// Forks this conversation before `beforeHistoryIndex` and switches to
+  /// the fork; `seedDraft` runs with the fork's id before the switch.
+  onFork: (
+    beforeHistoryIndex: number,
+    seedDraft: (forkId: string) => void,
+  ) => Promise<void>;
+  forkedFrom?: SavedConversation["forkedFrom"];
+  onOpenConversation: (id: string) => void;
   onOpenFile: (path: string) => void;
   onOpenSettings: (section?: "providers") => void;
   externalDrops: ExternalDropFeed;
@@ -513,6 +521,9 @@ export function ChatPane({
   onModeChange,
   onModelPreferenceChange,
   onImplementPlanFresh,
+  onFork,
+  forkedFrom,
+  onOpenConversation,
   onStop,
   onOpenFile,
   onOpenSettings,
@@ -3090,6 +3101,33 @@ export function ChatPane({
     [attachments, text, view.status, workspacePath],
   );
 
+  // Opens a new conversation holding everything before this message, with
+  // the message back in its composer. The original stays as it is.
+  const handleForkFromMessage = useCallback(
+    (block: Extract<ChatBlock, { kind: "user-text" }>) => {
+      const inline: InlineMention[] = [];
+      const chips: Attachment[] = [];
+      for (const att of block.attachments ?? []) {
+        const rel = relativizePath(workspacePath, att.path);
+        if (rel && block.text.includes(`@${rel}`)) {
+          inline.push({ path: rel, absolutePath: att.path, name: att.name });
+        } else {
+          chips.push({ ...att, origin: "manual" });
+        }
+      }
+      void onFork(block.historyIndex, (forkId) => {
+        composerDraftsRef.current.set(
+          forkId,
+          buildComposerDraft(block.text, chips, inline, null),
+        );
+        // The draft effect re-reads the stored text on a conversation switch.
+        saveComposerDraft(forkId, block.text);
+        pendingCaretRef.current = block.text.length;
+      });
+    },
+    [onFork, workspacePath],
+  );
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (skillMention) {
       if (event.key === "ArrowDown") {
@@ -3914,6 +3952,20 @@ export function ChatPane({
       )}
       <div className="chat-body" ref={bodyRef}>
         <div className="chat-body__content" ref={bodyContentRef}>
+          {forkedFrom && !viewingSubAgent && (
+            <div className="fork-origin">
+              <Icon icon="solar:branching-paths-up-linear" width={14} height={14} />
+              <span>Forked from</span>
+              <button
+                type="button"
+                className="fork-origin__link"
+                onClick={() => onOpenConversation(forkedFrom.conversationId)}
+                title="Open the original conversation"
+              >
+                {forkedFrom.title}
+              </button>
+            </div>
+          )}
           {displayView.blocks.length === 0 && !showPlanningNextMove ? (
             <div className="chat-empty">
               <span className="chat-empty__mark">
@@ -3944,6 +3996,7 @@ export function ChatPane({
                   blocks={displayView.blocks}
                   onPreviewImage={setPreviewImage}
                   onRewindMessage={viewingSubAgent ? () => {} : handleRewindToMessage}
+                  onForkMessage={viewingSubAgent ? undefined : handleForkFromMessage}
                   rewindDisabled={viewingSubAgent || view.status === "streaming"}
                   rewriteHistoryIndex={
                     viewingSubAgent ? null : rewriteState?.historyIndex ?? null
@@ -6687,6 +6740,7 @@ function ChatBlocks({
   blocks,
   onPreviewImage,
   onRewindMessage,
+  onForkMessage,
   rewindDisabled,
   rewriteHistoryIndex,
   onOpenFile,
@@ -6711,6 +6765,7 @@ function ChatBlocks({
   blocks: ChatBlock[];
   onPreviewImage: (path: string) => void;
   onRewindMessage: (block: Extract<ChatBlock, { kind: "user-text" }>) => void;
+  onForkMessage?: (block: Extract<ChatBlock, { kind: "user-text" }>) => void;
   rewindDisabled: boolean;
   rewriteHistoryIndex: number | null;
   onOpenFile: (path: string) => void;
@@ -6769,6 +6824,7 @@ function ChatBlocks({
             block={item.block}
             onPreviewImage={onPreviewImage}
             onRewindMessage={onRewindMessage}
+            onForkMessage={onForkMessage}
             rewindDisabled={rewindDisabled}
             rewriteHistoryIndex={rewriteHistoryIndex}
             onOpenFile={onOpenFile}
@@ -6797,6 +6853,7 @@ function BlockView({
   block,
   onPreviewImage,
   onRewindMessage,
+  onForkMessage,
   rewindDisabled,
   rewriteHistoryIndex,
   onOpenFile,
@@ -6818,6 +6875,7 @@ function BlockView({
   block: ChatBlock;
   onPreviewImage: (path: string) => void;
   onRewindMessage: (block: Extract<ChatBlock, { kind: "user-text" }>) => void;
+  onForkMessage?: (block: Extract<ChatBlock, { kind: "user-text" }>) => void;
   rewindDisabled: boolean;
   rewriteHistoryIndex: number | null;
   onOpenFile: (path: string) => void;
@@ -6933,6 +6991,24 @@ function BlockView({
                   </button>
                 );
               })}
+            </div>
+          )}
+          {onForkMessage && !teamMessages && (
+            <div className="msg__actions msg__actions--hover">
+              <button
+                type="button"
+                className="msg__action"
+                onClick={() => onForkMessage(block)}
+                title="Fork from here: a new conversation with everything before this message"
+                aria-label="Fork from this message"
+              >
+                <Icon
+                  icon="solar:branching-paths-up-linear"
+                  width={14}
+                  height={14}
+                  aria-hidden="true"
+                />
+              </button>
             </div>
           )}
         </div>

@@ -64,6 +64,7 @@ d'une utilisation quotidienne.
 - [Commandes slash et invocation à la demande](#commandes-slash-et-invocation-à-la-demande)
 - [Diagnostics des serveurs de langage](#diagnostics-des-serveurs-de-langage)
 - [Mémoire persistante](#mémoire-persistante)
+- [Bifurquer une conversation](#bifurquer-une-conversation)
 - [Suivi de l'usage et des coûts](#suivi-de-lusage-et-des-coûts)
 
 **Espace de travail & UX**
@@ -219,6 +220,29 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Bifurquer une conversation
+
+Essayer une autre piste sans perdre celle qu'on avait.
+
+- **Depuis un de vos messages** : survolez-le et cliquez sur l'icône de
+  bifurcation. Une nouvelle conversation s'ouvre avec tout ce qui précède ce
+  message, et le message revient dans le rédacteur pour le reformuler ou
+  l'envoyer à un autre modèle.
+- **Conversation entière** : l'icône de bifurcation sur une ligne de la
+  liste des conversations.
+- La copie garde le modèle, les réglages par mode, le prompt système et la
+  liste de tâches ; le plan et l'objectif repartent de zéro. Son titre
+  reçoit le suffixe `(fork)`.
+- Une ligne **Forked from** en haut renvoie à l'original (elle disparaît si
+  l'original est supprimé).
+- Les fichiers ne sont jamais touchés : pour annuler aussi les
+  modifications de fichiers, utilisez le retour arrière existant (cliquez
+  sur un de vos messages).
+
+Code : `AppStore::create_fork` et la colonne `forked_from` dans
+`crates/sinew-app/src/store.rs`, la commande `fork_conversation` dans
+`src-tauri/src/conversations.rs`, `ChatPane.tsx`, `ConversationList.tsx`.
 
 ### Suivi de l'usage et des coûts
 

@@ -58,6 +58,7 @@ daily use.
 - [Language-server diagnostics](#language-server-diagnostics)
 - [Persistent memory](#persistent-memory)
 - [Usage and cost tracking](#usage-and-cost-tracking)
+- [Fork a conversation](#fork-a-conversation)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -194,6 +195,25 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Fork a conversation
+
+Try another direction without losing the one you had.
+
+- **From one of your messages**: hover it and click the fork icon. A new
+  conversation opens with everything before that message, and the message
+  is back in the composer to rephrase or send to another model.
+- **Whole conversation**: the fork icon on a row of the conversation list.
+- The fork keeps the model, mode settings, system prompt and todo list; the
+  plan and goal workflows start idle. Its title gets a `(fork)` suffix.
+- A **Forked from** line at the top links back to the original (it
+  disappears if the original is deleted).
+- Files are never touched: to also undo file changes, use the existing
+  rollback (click one of your messages).
+
+Code: `AppStore::create_fork` and the `forked_from` column in
+`crates/sinew-app/src/store.rs`, the `fork_conversation` command in
+`src-tauri/src/conversations.rs`, `ChatPane.tsx`, `ConversationList.tsx`.
 
 ### Usage and cost tracking
 

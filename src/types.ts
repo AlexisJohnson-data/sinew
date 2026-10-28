@@ -116,6 +116,8 @@ export type SavedConversation = {
   planWorkflow: PlanWorkflowState;
   goalWorkflow: GoalWorkflowState;
   history: ChatMessage[];
+  /// Set while the conversation this one was forked from still exists.
+  forkedFrom?: { conversationId: string; title: string };
 };
 
 export type TodoStatus = "pending" | "in_progress" | "done";

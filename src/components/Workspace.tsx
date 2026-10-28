@@ -242,6 +242,30 @@ export function Workspace({
     return () => window.removeEventListener("sinew:new-conversation", onNewConversation);
   }, [createConversation]);
 
+  const forkConversation = useCallback(
+    async (
+      id: string,
+      beforeHistoryIndex?: number,
+      seedDraft?: (forkId: string) => void,
+    ) => {
+      const seq = ++navigationSeqRef.current;
+      try {
+        const fork = await api.forkConversation(workspacePath, id, beforeHistoryIndex);
+        const summaries = await api.listConversations(workspacePath);
+        if (seq !== navigationSeqRef.current) return;
+        if (workspacePathRef.current !== workspacePath) return;
+        seedDraft?.(fork.id);
+        activeConvIdRef.current = fork.id;
+        setConversations(summaries);
+        setActiveConv(fork);
+      } catch (err) {
+        console.error(err);
+        void notify("Fork failed", String(err), { force: true });
+      }
+    },
+    [workspacePath],
+  );
+
   const renameConversation = useCallback(
     async (id: string, title: string) => {
       try {
@@ -2326,6 +2350,7 @@ export function Workspace({
                 streamingIds={streamingConversationIds}
                 onSelect={selectConversation}
                 onRename={renameConversation}
+                onFork={(id) => void forkConversation(id)}
                 onDelete={deleteConversation}
               />
             </div>
@@ -2485,6 +2510,11 @@ export function Workspace({
             onModelPreferenceChange={changeConversationModelPreference}
             onImplementPlanFresh={implementPlanFresh}
             onStop={stopTurn}
+            onFork={(beforeHistoryIndex, seedDraft) =>
+              forkConversation(activeConv.id, beforeHistoryIndex, seedDraft)
+            }
+            forkedFrom={activeConv.forkedFrom}
+            onOpenConversation={(id) => void selectConversation(id)}
             onOpenFile={openChatFile}
             onOpenSettings={openSettings}
             externalDrops={externalDropFeed}

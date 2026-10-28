@@ -470,6 +470,7 @@ pub(super) async fn wake_main_agent_for_swarm_notice(
                                 plan_workflow: plan_workflow.clone(),
                                 goal_workflow: output.goal_workflow,
                                 history: output.history,
+                                forked_from: None,
                             };
                             let saved_ok = match store.save_conversation(&saved) {
                                 Ok(()) => true,

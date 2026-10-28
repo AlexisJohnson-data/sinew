@@ -444,6 +444,7 @@ pub fn run() {
             conversations::list_conversations,
             conversations::create_conversation,
             conversations::load_conversation,
+            conversations::fork_conversation,
             conversations::rename_conversation,
             conversations::delete_conversation,
             conversations::set_conversation_mode,

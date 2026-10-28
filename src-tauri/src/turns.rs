@@ -417,6 +417,7 @@ pub(super) async fn send_message(
                                 plan_workflow,
                                 goal_workflow,
                                 history,
+                                forked_from: None,
                             };
                             let saved_ok = match store.save_conversation(&saved) {
                                 Ok(()) => true,

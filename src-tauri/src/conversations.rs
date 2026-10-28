@@ -51,6 +51,36 @@ pub(super) async fn load_conversation(
         .ok_or_else(|| "conversation not found".to_string())
 }
 
+/// Copies a conversation (or the part before one of the user's messages)
+/// into a new one. The workspace files are left as they are.
+#[tauri::command]
+pub(super) async fn fork_conversation(
+    state: State<'_, DesktopState>,
+    input: ForkConversationInput,
+) -> std::result::Result<SavedConversation, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let mut source = state
+        .store
+        .load_conversation(
+            &workspace_root.display().to_string(),
+            &input.conversation_id,
+        )
+        .map_err(error_to_string)?
+        .ok_or_else(|| "conversation not found".to_string())?;
+    if let Some(index) = input.before_history_index {
+        if index >= source.history.len() {
+            return Err("fork index out of bounds".into());
+        }
+        if !is_rewritable_user_message(&source.history[index]) {
+            return Err("fork index must point to a user message".into());
+        }
+        source.history.truncate(index);
+        source.todo_list = todo_list_from_history(&source.history);
+    }
+    state.store.create_fork(&source).map_err(error_to_string)
+}
+
 #[tauri::command]
 pub(super) async fn rename_conversation(
     state: State<'_, DesktopState>,
