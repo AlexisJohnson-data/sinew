@@ -11852,40 +11852,32 @@ textarea {
   position: relative;
   display: inline-flex;
 }
+/* A pill with the percentage, so it never reads as a second context ring. */
 .plan-ring__button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  --pill: #4f9bcb;
+  border: 1px solid color-mix(in srgb, var(--pill) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pill) 10%, transparent);
+  color: var(--pill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background 120ms ease;
 }
 .plan-ring__button:hover {
-  background: var(--bg-2);
+  background: color-mix(in srgb, var(--pill) 20%, transparent);
 }
-.plan-ring__track {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text-3) 35%, transparent);
-  stroke-width: 2.2;
+.plan-ring__button[data-level="warn"] {
+  --pill: #d19935;
 }
-.plan-ring__fill {
-  fill: none;
-  stroke: #4f9bcb;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  transform: rotate(-90deg);
-  transform-origin: 50% 50%;
-  transition: stroke-dashoffset 300ms ease;
-}
-.plan-ring__button[data-level="warn"] .plan-ring__fill {
-  stroke: #d19935;
-}
-.plan-ring__button[data-level="danger"] .plan-ring__fill {
-  stroke: var(--danger);
+.plan-ring__button[data-level="danger"] {
+  --pill: var(--danger);
 }
 .plan-ring__popover {
   position: absolute;

@@ -4731,6 +4731,16 @@ export function ChatPane({
               )}
             </div>
             <div className="composer__actions-right">
+              <ConversationCost
+                conversationId={conversationId}
+                subscribeEvents={subscribeEvents}
+              />
+              <PlanUsageRing
+                provider={modelEntry?.provider ?? activeModel.provider}
+                workspacePath={workspacePath}
+                subscribeEvents={subscribeEvents}
+              />
+              {/* Compaction sits next to the context meter it empties. */}
               <button
                 type="button"
                 className="composer__iconbtn composer__compact"
@@ -4744,15 +4754,6 @@ export function ChatPane({
                   Compaction
                 </span>
               </button>
-              <ConversationCost
-                conversationId={conversationId}
-                subscribeEvents={subscribeEvents}
-              />
-              <PlanUsageRing
-                provider={modelEntry?.provider ?? activeModel.provider}
-                workspacePath={workspacePath}
-                subscribeEvents={subscribeEvents}
-              />
               <ContextMeter state={visibleContextEstimate} />
               {view.status === "streaming" ? (
                 <button

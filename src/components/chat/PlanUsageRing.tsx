@@ -11,8 +11,6 @@ import {
 import type { AgentEvent, QuotaSnapshot } from "../../types";
 
 const REFRESH_MS = 5 * 60 * 1000;
-const RADIUS = 6;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 type Props = {
   /// Provider of the model selected in the composer.
@@ -23,8 +21,10 @@ type Props = {
   ) => () => void;
 };
 
-/// A small ring next to the composer showing how close the selected
-/// provider's plan is to its limit; click for every window.
+/// A small pill next to the composer showing how close the selected
+/// provider's plan is to its limit; click for every window. It is a
+/// pill with a number, not a ring, so it can't be mistaken for the
+/// context meter.
 export function PlanUsageRing({ provider, workspacePath, subscribeEvents }: Props) {
   const [snapshots, setSnapshots] = useState<QuotaSnapshot[]>([]);
   const [open, setOpen] = useState(false);
@@ -95,17 +95,8 @@ export function PlanUsageRing({ provider, workspacePath, subscribeEvents }: Prop
         aria-expanded={open}
         title={`${windowLabel(tightest)} · ${percent}%`}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <circle className="plan-ring__track" cx="8" cy="8" r={RADIUS} />
-          <circle
-            className="plan-ring__fill"
-            cx="8"
-            cy="8"
-            r={RADIUS}
-            strokeDasharray={CIRCUMFERENCE}
-            strokeDashoffset={CIRCUMFERENCE * (1 - Math.min(100, tightest.usedPercent) / 100)}
-          />
-        </svg>
+        <Icon icon="solar:speedometer-middle-linear" width={13} height={13} aria-hidden="true" />
+        <span>{percent}%</span>
       </button>
       {open && (
         <div className="plan-ring__popover" role="dialog" aria-label="Plan limits">
