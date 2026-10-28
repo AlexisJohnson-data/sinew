@@ -11456,3 +11456,158 @@ textarea {
 .settings-pane__lsp-path {
   grid-column: 1 / -1;
 }
+/* "Memory updated" card for the memory tool (sinew_app::memory). */
+.memory-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.memory-card[data-undone="true"] {
+  opacity: 0.55;
+}
+.memory-card[data-undone="true"] .memory-card__text {
+  text-decoration: line-through;
+}
+.memory-card__icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.memory-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.memory-card__title {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.memory-card__text {
+  color: var(--text-1, inherit);
+  overflow-wrap: anywhere;
+}
+.memory-card__undo {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+/* Settings → Memory. */
+.settings-pane__memory-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-pane__memory-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.settings-pane__memory-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-pane__memory-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.settings-pane__memory-edit input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Welcome → "Your instructions" (~/.sinew/AGENTS.md). */
+.welcome__instructions {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: transparent;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-card);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.welcome__instructions:hover {
+  background: var(--bg-2);
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+.welcome__instructions-title {
+  font-weight: 600;
+}
+.welcome__instructions-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.welcome__instructions-edit {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+/* Editor for ~/.sinew/AGENTS.md (reuses the migrate modal). */
+.instructions-dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+.instructions-dialog__editor {
+  width: 100%;
+  min-height: 300px;
+  max-height: 60vh;
+  resize: vertical;
+  padding: 10px 12px;
+  background: var(--bg-0, var(--bg-2));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  box-sizing: border-box;
+}
+.instructions-dialog__editor:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+.instructions-dialog__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

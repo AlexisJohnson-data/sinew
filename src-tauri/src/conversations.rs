@@ -439,6 +439,115 @@ pub(super) async fn list_mcp_mentions(
         .collect())
 }
 
+/// `~/.sinew/AGENTS.md` for the Welcome screen's editor (empty when the
+/// file does not exist yet).
+#[tauri::command]
+pub(super) async fn read_global_instructions() -> std::result::Result<GlobalInstructions, String> {
+    let path = sinew_app::memory::global_instructions_path().map_err(error_to_string)?;
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(error_to_string(err)),
+    };
+    Ok(GlobalInstructions {
+        path: path.display().to_string(),
+        content,
+    })
+}
+
+/// Save `~/.sinew/AGENTS.md`; applies from the next message in every project.
+#[tauri::command]
+pub(super) async fn save_global_instructions(
+    input: SaveGlobalInstructionsInput,
+) -> std::result::Result<GlobalInstructions, String> {
+    let path = sinew_app::memory::global_instructions_path().map_err(error_to_string)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(error_to_string)?;
+    }
+    fs::write(&path, &input.content).map_err(error_to_string)?;
+    Ok(GlobalInstructions {
+        path: path.display().to_string(),
+        content: input.content,
+    })
+}
+
+/// Both memory scopes for Settings → Memory.
+#[tauri::command]
+pub(super) async fn memory_list(
+    input: WorkspaceInput,
+) -> std::result::Result<MemoryListing, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let scope = |scope| -> std::result::Result<MemoryScopeListing, String> {
+        Ok(MemoryScopeListing {
+            path: sinew_app::memory::scope_path(scope, &workspace_root)
+                .map_err(error_to_string)?
+                .display()
+                .to_string(),
+            entries: sinew_app::memory::load(scope, &workspace_root),
+        })
+    };
+    Ok(MemoryListing {
+        user: scope(sinew_app::memory::MemoryScope::User)?,
+        project: scope(sinew_app::memory::MemoryScope::Project)?,
+    })
+}
+
+/// Add, edit or remove one entry — from Settings, or the chat card's undo.
+#[tauri::command]
+pub(super) async fn memory_apply(
+    input: MemoryApplyInput,
+) -> std::result::Result<sinew_app::memory::MemoryChange, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    sinew_app::memory::apply(
+        &workspace_root,
+        input.scope,
+        input.action,
+        input.id.as_deref(),
+        input.text.as_deref(),
+    )
+    .map_err(error_to_string)
+}
+
+/// Path of a memory file (or `~/.sinew/AGENTS.md` for `instructions`),
+/// created empty when missing so it can be opened in an editor.
+#[tauri::command]
+pub(super) async fn memory_file_path(
+    input: MemoryFileInput,
+) -> std::result::Result<String, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let path = match input.file.as_str() {
+        "user" => sinew_app::memory::scope_path(sinew_app::memory::MemoryScope::User, &workspace_root),
+        "project" => {
+            sinew_app::memory::scope_path(sinew_app::memory::MemoryScope::Project, &workspace_root)
+        }
+        "instructions" => sinew_app::memory::global_instructions_path(),
+        other => return Err(format!("unknown memory file {other}")),
+    }
+    .map_err(error_to_string)?;
+    if !path.exists() {
+        match input.file.as_str() {
+            "user" | "project" => {
+                let scope = if input.file == "user" {
+                    sinew_app::memory::MemoryScope::User
+                } else {
+                    sinew_app::memory::MemoryScope::Project
+                };
+                sinew_app::memory::save(scope, &workspace_root, &[]).map_err(error_to_string)?;
+            }
+            _ => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).map_err(error_to_string)?;
+                }
+                fs::write(&path, "").map_err(error_to_string)?;
+            }
+        }
+    }
+    Ok(path.display().to_string())
+}
+
 /// Language servers for Settings: found or not, and what they are doing.
 #[tauri::command]
 pub(super) async fn lsp_status(

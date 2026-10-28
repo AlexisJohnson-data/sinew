@@ -60,6 +60,16 @@ pub(super) fn summarize_tool(name: &str, input: &Value) -> String {
             .unwrap_or_else(|| "workspace".to_string());
         return format!("Grep in {scope}");
     }
+    if name == tool_names::MEMORY {
+        let action = input.get("action").and_then(|value| value.as_str()).unwrap_or("list");
+        let scope = input.get("scope").and_then(|value| value.as_str()).unwrap_or("");
+        return match action {
+            "add" => format!("Remember ({scope})"),
+            "update" => format!("Update {scope} memory"),
+            "remove" => format!("Forget ({scope})"),
+            _ => "List memory".to_string(),
+        };
+    }
     if name == tool_names::DIAGNOSTICS {
         let paths: Vec<&str> = input
             .get("paths")

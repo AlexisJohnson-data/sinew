@@ -442,9 +442,13 @@ pub(super) fn tool_name_set(tools: &[ToolDescriptor]) -> HashSet<String> {
 pub(super) fn workspace_rules_weight(workspace_root: &Path) -> Result<u64> {
     let mut weight = 0;
 
-    if let Some(instructions) =
-        read_workspace_prompt_file(workspace_root, WORKSPACE_INSTRUCTIONS_FILE)?
-    {
+    if let Some(instructions) = global_instructions() {
+        weight += context_text_weight(&format!(
+            "# User instructions\n\nThe following instructions come from the user and apply to every project. Project instructions below take precedence when they conflict.\n\n{instructions}"
+        ));
+    }
+
+    if let Some(instructions) = workspace_instructions(workspace_root)? {
         weight += context_text_weight(&format!(
             "# Workspace instructions\n\nThe following instructions come from the current workspace and should be treated as the project source of truth.\n\n{instructions}"
         ));

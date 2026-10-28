@@ -358,9 +358,21 @@ pub struct ToolSettings {
     /// `python`, `go`), overriding the PATH lookup.
     #[serde(default)]
     pub lsp_server_paths: BTreeMap<String, String>,
+    /// Persistent memory across conversations (`crate::memory`): injected
+    /// into the prompt and editable by the main agent. On by default.
+    #[serde(default = "default_memory_enabled")]
+    pub memory_enabled: bool,
+    /// Whether the agent may save memories on its own judgement, rather than
+    /// only when the user asks. On by default.
+    #[serde(default = "default_memory_enabled")]
+    pub memory_auto_save: bool,
 }
 
 fn default_lsp_enabled() -> bool {
+    true
+}
+
+fn default_memory_enabled() -> bool {
     true
 }
 
@@ -393,6 +405,8 @@ impl Default for ToolSettings {
             permission_rules: PermissionRules::default(),
             lsp_enabled: default_lsp_enabled(),
             lsp_server_paths: BTreeMap::new(),
+            memory_enabled: default_memory_enabled(),
+            memory_auto_save: default_memory_enabled(),
         }
     }
 }
@@ -467,6 +481,8 @@ pub struct ToolSettingsView {
     pub permission_rules: PermissionRules,
     pub lsp_enabled: bool,
     pub lsp_server_paths: BTreeMap<String, String>,
+    pub memory_enabled: bool,
+    pub memory_auto_save: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -680,6 +696,8 @@ pub fn tool_settings_view(settings: &ToolSettings, catalog: &[ToolDescriptor]) -
         permission_rules: settings.permission_rules.clone(),
         lsp_enabled: settings.lsp_enabled,
         lsp_server_paths: settings.lsp_server_paths.clone(),
+        memory_enabled: settings.memory_enabled,
+        memory_auto_save: settings.memory_auto_save,
         tools: catalog
             .iter()
             .filter_map(|descriptor| {
@@ -734,6 +752,7 @@ fn default_tool_display_name(name: &str) -> String {
         "update_goal" => "Update goal".to_string(),
         "context_compaction" => "Compact context".to_string(),
         "diagnostics" => "Diagnostics".to_string(),
+        "memory" => "Memory".to_string(),
         _ => humanize_tool_name(name),
     }
 }

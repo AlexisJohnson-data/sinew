@@ -207,6 +207,27 @@ export type ToolSettings = {
   permissionRules: PermissionRules;
   lspEnabled: boolean;
   lspServerPaths: Record<string, string>;
+  memoryEnabled: boolean;
+  memoryAutoSave: boolean;
+};
+
+export type MemoryScope = "user" | "project";
+export type MemoryAction = "add" | "update" | "remove";
+
+export type MemoryEntry = { id: string; text: string };
+
+/// What a memory write did (sinew_app::memory::MemoryChange).
+export type MemoryChange = {
+  action: MemoryAction;
+  scope: MemoryScope;
+  id: string;
+  text: string;
+  previous?: string;
+};
+
+export type MemoryListing = {
+  user: { path: string; entries: MemoryEntry[] };
+  project: { path: string; entries: MemoryEntry[] };
 };
 
 /// One language server as Settings shows it (sinew_app::lsp::LspServerStatus).

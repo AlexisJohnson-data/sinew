@@ -21,6 +21,7 @@ pub const SKILL: &str = "skill";
 pub const UPDATE_GOAL: &str = "update_goal";
 pub const CONTEXT_COMPACTION: &str = "context_compaction";
 pub const DIAGNOSTICS: &str = "diagnostics";
+pub const MEMORY: &str = "memory";
 
 pub const TEAM_RUN: &str = "team_run";
 pub const TEAM_CREATE: &str = "team_create";

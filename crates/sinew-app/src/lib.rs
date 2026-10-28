@@ -9,6 +9,7 @@ pub mod grep;
 pub mod image;
 pub mod lsp;
 pub mod mcp;
+pub mod memory;
 pub mod mcp_oauth;
 pub mod permissions;
 #[cfg(windows)]

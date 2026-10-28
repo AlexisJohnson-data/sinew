@@ -11,6 +11,7 @@ import type {
   RecentWorkspace,
   ShellPreference,
 } from "../types";
+import { InstructionsDialog } from "./InstructionsDialog";
 import { MigrationDialog } from "./MigrationDialog";
 import { SinewMark } from "./SinewMark";
 import { WindowControls, isWindowsPlatform } from "./WindowControls";
@@ -67,6 +68,7 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     () => new Set(),
   );
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   // Current shell preference, surfaced on Welcome so a first-time user
   // knows what's going to back the bash tool / interactive terminal —
   // and can flip it without having to dig through Settings.
@@ -277,6 +279,23 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           <span className="welcome__cta-chev">
             <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
           </span>
+        </button>
+
+        <button
+          type="button"
+          className="welcome__instructions"
+          onClick={() => setInstructionsOpen(true)}
+          title="Edit ~/.sinew/AGENTS.md — your rules for every project"
+        >
+          <Icon icon="solar:document-text-linear" width={15} height={15} />
+          <span className="welcome__instructions-title">Your instructions</span>
+          <span className="welcome__instructions-sub">~/.sinew/AGENTS.md · every project</span>
+          <Icon
+            icon="solar:pen-linear"
+            width={13}
+            height={13}
+            className="welcome__instructions-edit"
+          />
         </button>
 
         {error && (
@@ -516,6 +535,10 @@ export function Welcome({ onPick, error, deriveName }: Props) {
           </aside>
         )}
       </main>
+      <InstructionsDialog
+        open={instructionsOpen}
+        onClose={() => setInstructionsOpen(false)}
+      />
     </div>
   );
 }

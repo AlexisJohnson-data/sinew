@@ -56,6 +56,7 @@ daily use.
 - [Agent permissions](#agent-permissions)
 - [Slash commands and on-demand invocation](#slash-commands-and-on-demand-invocation)
 - [Language-server diagnostics](#language-server-diagnostics)
+- [Persistent memory](#persistent-memory)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -193,6 +194,40 @@ projects worked, started ones didn't. Two root causes, both in
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
 
+### Persistent memory
+
+The agent remembers, from one conversation to the next, what the code does
+not show: your preferences, your corrections, the project's decisions and
+pitfalls.
+
+| Scope | Typical content | File |
+|---|---|---|
+| **You** (every project) | "answer in French", "never push without asking" | `~/.sinew/memory/user.md` |
+| **Project** | "releases are cut by pushing a vX.Y.Z tag" | `~/.sinew/memory/projects/<project>.md` |
+
+- The files live **outside the repository** (private, never committed by
+  mistake). Plain Markdown, one `- [id] text` entry per line, editable by
+  hand. `SINEW_MEMORY_DIR` moves them.
+- Both scopes are added to the system prompt when a turn starts (about 8 KB
+  each at most), so a change applies from the next turn and the prompt cache
+  holds within a turn.
+- The `memory` tool (`add` / `update` / `remove` / `list`) lets the main
+  agent edit them; sub-agents and swarm members only read them. Anything that
+  looks like a secret (API key, token, password, private key) is refused.
+- `/remember <text>` asks the agent to save something.
+- Each write shows a "Saved about you / for this project" card with **Undo**.
+- Settings → Tools → **Memory**: on/off, and "Agent decides" vs "Only when
+  asked". Settings → **Memory**: list, add, edit, delete, open the files.
+- **Your instructions**: `~/.sinew/AGENTS.md` is loaded in every project. A
+  project without `AGENTS.md` but with a `CLAUDE.md` gets that one.
+
+Code: `crates/sinew-app/src/memory.rs` (storage, tool, prompt section),
+`agent/turn.rs` (injection), `global_instructions` /
+`workspace_instructions` in `src-tauri/src/turns.rs`, `memory_list` /
+`memory_apply` / `memory_file_path` commands, `MemoryCard` in
+`src/components/chat/ToolCard.tsx`, `MemorySection` in
+`src/components/SettingsPane.tsx`.
+
 ### Language-server diagnostics
 
 After every `edit_file` / `write_file`, Sinew asks the project's language
@@ -234,7 +269,7 @@ Typing `/` in the chat opens a menu with three families:
 - **Commands** = prompts sent to the agent. Built-in: `/review` (reviews
   uncommitted changes), `/commit`, `/push` (commits pending changes if any,
   then pushes the branch, with `-u origin` when needed, never force-pushes),
-  `/init` (creates/updates `AGENTS.md`), `/test`. Your own: a Markdown file in
+  `/init` (creates/updates `AGENTS.md`), `/test`, `/remember`. Your own: a Markdown file in
   `.sinew/commands/` or `.claude/commands/` (project) or the same folders in
   your home (Windows and WSL). Claude Code compatible format: `description:` /
   `argument-hint:` frontmatter, `$ARGUMENTS`, `$1`…`$9`. Project > global >

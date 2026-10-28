@@ -1610,6 +1610,7 @@ pub(super) fn tool_descriptors_for_workspace(
         tools.push(CreateImageTool::new(workspace_root).descriptor());
     }
     tools.push(sinew_app::lsp::descriptor());
+    tools.push(sinew_app::memory::descriptor());
     tools
 }
 
@@ -1622,12 +1623,33 @@ pub(super) fn configurable_tool_catalog(workspace_root: &Path) -> Vec<ToolDescri
     tools
 }
 
+/// The user's own instructions for every project, `~/.sinew/AGENTS.md`.
+pub(super) fn global_instructions() -> Option<String> {
+    let path = sinew_app::memory::global_instructions_path().ok()?;
+    let contents = fs::read_to_string(path).ok()?;
+    let contents = contents.trim();
+    (!contents.is_empty()).then(|| contents.to_string())
+}
+
+/// The project's `AGENTS.md`, or its `CLAUDE.md` when there is no
+/// `AGENTS.md` (projects set up for Claude Code).
+pub(super) fn workspace_instructions(workspace_root: &Path) -> Result<Option<String>> {
+    match read_workspace_prompt_file(workspace_root, WORKSPACE_INSTRUCTIONS_FILE)? {
+        Some(instructions) => Ok(Some(instructions)),
+        None => read_workspace_prompt_file(workspace_root, WORKSPACE_CLAUDE_INSTRUCTIONS_FILE),
+    }
+}
+
 pub(super) fn system_prompt_for_workspace(workspace_root: &Path, base: &str) -> Result<String> {
     let mut sections = vec![format!("# Shell environment\n\n{}", shell_system_prompt())];
 
-    if let Some(instructions) =
-        read_workspace_prompt_file(workspace_root, WORKSPACE_INSTRUCTIONS_FILE)?
-    {
+    if let Some(instructions) = global_instructions() {
+        sections.push(format!(
+            "# User instructions\n\nThe following instructions come from the user and apply to every project. Project instructions below take precedence when they conflict.\n\n{instructions}"
+        ));
+    }
+
+    if let Some(instructions) = workspace_instructions(workspace_root)? {
         sections.push(format!(
             "# Workspace instructions\n\nThe following instructions come from the current workspace and should be treated as the project source of truth.\n\n{instructions}"
         ));

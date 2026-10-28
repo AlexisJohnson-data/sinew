@@ -129,6 +129,8 @@ pub(super) async fn run_tool(
         result
     } else if canonical_name == tool_names::DIAGNOSTICS {
         lsp::run_tool(bash.workspace_root(), tool_settings, input).await
+    } else if canonical_name == tool_names::MEMORY {
+        crate::memory::run_tool(bash.workspace_root(), tool_settings, input)
     } else if canonical_name == tool_names::CREATE_IMAGE {
         if mode == AgentMode::Plan {
             return ToolRunResult::err("create_image is unavailable in Plan mode", Vec::new());

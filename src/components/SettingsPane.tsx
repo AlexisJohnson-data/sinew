@@ -46,6 +46,9 @@ import type {
   PermissionMode,
   SlashCommand,
   LspServerStatus,
+  MemoryEntry,
+  MemoryListing,
+  MemoryScope,
   PermissionRules,
   ShellPreference,
   ThinkingLevel,
@@ -229,6 +232,8 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   permissionRules: { allow: [], ask: [], deny: [] },
   lspEnabled: true,
   lspServerPaths: {},
+  memoryEnabled: true,
+  memoryAutoSave: true,
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -240,7 +245,15 @@ type Props = {
   workspacePath: string;
 };
 
-type Section = "about" | "providers" | "tools" | "mcp" | "skills" | "commands" | "subagents";
+type Section =
+  | "about"
+  | "providers"
+  | "tools"
+  | "mcp"
+  | "skills"
+  | "commands"
+  | "memory"
+  | "subagents";
 
 export function SettingsPane({ workspacePath }: Props) {
   const [section, setSection] = useState<Section>("about");
@@ -539,6 +552,14 @@ export function SettingsPane({ workspacePath }: Props) {
     },
     [],
   );
+
+  const updateMemoryEnabled = useCallback((memoryEnabled: boolean) => {
+    setToolSettings((current) => (current ? { ...current, memoryEnabled } : current));
+  }, []);
+
+  const updateMemoryAutoSave = useCallback((memoryAutoSave: boolean) => {
+    setToolSettings((current) => (current ? { ...current, memoryAutoSave } : current));
+  }, []);
 
   const updateLspEnabled = useCallback((lspEnabled: boolean) => {
     setToolSettings((current) => (current ? { ...current, lspEnabled } : current));
@@ -1758,6 +1779,20 @@ export function SettingsPane({ workspacePath }: Props) {
         <button
           type="button"
           className="settings-pane__nav-item"
+          data-active={section === "memory" ? "true" : "false"}
+          onClick={() => setSection("memory")}
+        >
+          <Icon
+            icon="solar:notebook-bookmark-linear"
+            width={15}
+            height={15}
+            className="settings-pane__nav-icon"
+          />
+          <span className="settings-pane__nav-label">Memory</span>
+        </button>
+        <button
+          type="button"
+          className="settings-pane__nav-item"
           data-active={section === "subagents" ? "true" : "false"}
           onClick={() => setSection("subagents")}
         >
@@ -1842,6 +1877,8 @@ export function SettingsPane({ workspacePath }: Props) {
             onPonytailEnabledChange={updatePonytailEnabled}
             onRtkEnabledChange={updateRtkEnabled}
             onLspEnabledChange={updateLspEnabled}
+            onMemoryEnabledChange={updateMemoryEnabled}
+            onMemoryAutoSaveChange={updateMemoryAutoSave}
             onLspServerPathsChange={updateLspServerPaths}
             workspacePath={workspacePath}
             onLinkupApiKeyChange={updateLinkupApiKey}
@@ -1901,6 +1938,8 @@ export function SettingsPane({ workspacePath }: Props) {
           />
         ) : section === "commands" ? (
           <CommandsSection workspacePath={workspacePath} />
+        ) : section === "memory" ? (
+          <MemorySection workspacePath={workspacePath} />
         ) : (
           <SubAgentsSection
             agents={filteredSubAgents}
@@ -2913,6 +2952,8 @@ type ToolsSectionProps = {
   onPonytailEnabledChange: (value: boolean) => void;
   onRtkEnabledChange: (value: boolean) => void;
   onLspEnabledChange: (value: boolean) => void;
+  onMemoryEnabledChange: (value: boolean) => void;
+  onMemoryAutoSaveChange: (value: boolean) => void;
   onLspServerPathsChange: (value: Record<string, string>) => void;
   workspacePath: string;
   onLinkupApiKeyChange: (value: string) => void;
@@ -2953,6 +2994,8 @@ function ToolsSection({
   onRtkEnabledChange,
   onLspEnabledChange,
   onLspServerPathsChange,
+  onMemoryEnabledChange,
+  onMemoryAutoSaveChange,
   workspacePath,
   onLinkupApiKeyChange,
   openAiStatus,
@@ -3251,6 +3294,56 @@ function ToolsSection({
             onEnabledChange={onLspEnabledChange}
             onServerPathsChange={onLspServerPathsChange}
           />
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>Memory</h2>
+            </div>
+            <div className="settings-pane__tool-provider-switch" role="group" aria-label="Memory">
+              <button
+                type="button"
+                data-active={settings?.memoryEnabled !== false ? "true" : "false"}
+                onClick={() => onMemoryEnabledChange(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                data-active={settings?.memoryEnabled === false ? "true" : "false"}
+                onClick={() => onMemoryEnabledChange(false)}
+              >
+                Off
+              </button>
+            </div>
+            {settings?.memoryEnabled !== false && (
+              <div
+                className="settings-pane__tool-provider-switch"
+                role="group"
+                aria-label="Who saves memories"
+              >
+                <button
+                  type="button"
+                  data-active={settings?.memoryAutoSave !== false ? "true" : "false"}
+                  onClick={() => onMemoryAutoSaveChange(true)}
+                >
+                  Agent decides
+                </button>
+                <button
+                  type="button"
+                  data-active={settings?.memoryAutoSave === false ? "true" : "false"}
+                  onClick={() => onMemoryAutoSaveChange(false)}
+                >
+                  Only when asked
+                </button>
+              </div>
+            )}
+            <p className="settings-pane__field-hint">
+              {settings?.memoryEnabled === false
+                ? "Off. Every conversation starts from the project files only."
+                : settings?.memoryAutoSave === false
+                  ? "The agent reads its memory every turn but only saves when you ask (\"remember…\", /remember)."
+                  : "The agent reads its memory every turn and saves what is worth keeping: your preferences, your corrections, durable facts about the project. Review it in Settings → Memory."}
+            </p>
+          </section>
           <section className="settings-pane__tool-group">
             <div className="settings-pane__tool-group-head">
               <h2>Permissions</h2>
@@ -5446,6 +5539,8 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
     },
     lspEnabled: settings.lspEnabled !== false,
     lspServerPaths: settings.lspServerPaths ?? {},
+    memoryEnabled: settings.memoryEnabled !== false,
+    memoryAutoSave: settings.memoryAutoSave !== false,
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];
@@ -6923,6 +7018,189 @@ function DiagnosticsSettings({
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+/// Settings → Memory: what the agent remembers, editable entry by entry.
+function MemorySection({ workspacePath }: { workspacePath: string }) {
+  const [listing, setListing] = useState<MemoryListing | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setListing(await api.memoryList(workspacePath));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (work: () => Promise<unknown>) => {
+    setStatus(null);
+    try {
+      await work();
+      await load();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const openFile = (file: "user" | "project" | "instructions") =>
+    run(async () => {
+      const path = await api.memoryFilePath(workspacePath, file);
+      await api.openPathWithDefaultApp(path);
+    });
+
+  const count = listing ? listing.user.entries.length + listing.project.entries.length : null;
+
+  return (
+    <>
+      <header className="settings-pane__header">
+        <div className="settings-pane__header-text">
+          <h1 className="settings-pane__title">Memory</h1>
+          <p className="settings-pane__subtitle">
+            {count === null ? "Loading…" : `${count} ${count === 1 ? "entry" : "entries"} the agent reads every turn`}
+          </p>
+        </div>
+        <div className="settings-pane__actions">
+          {status && <span className="settings-pane__status">{status}</span>}
+          <button type="button" className="settings-pane__btn" onClick={() => void load()}>
+            <Icon icon="solar:refresh-linear" width={13} height={13} />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+      <div className="settings-pane__body settings-pane__body--tools">
+        {(["user", "project"] as const).map((scope) => (
+          <MemoryScopeList
+            key={scope}
+            scope={scope}
+            entries={listing?.[scope].entries ?? []}
+            onAdd={(text) => run(() => api.memoryApply(workspacePath, scope, "add", undefined, text))}
+            onUpdate={(id, text) => run(() => api.memoryApply(workspacePath, scope, "update", id, text))}
+            onRemove={(id) => run(() => api.memoryApply(workspacePath, scope, "remove", id))}
+            onOpenFile={() => void openFile(scope)}
+          />
+        ))}
+        <section className="settings-pane__tool-group">
+          <div className="settings-pane__tool-group-head">
+            <h2>Your instructions</h2>
+          </div>
+          <p className="settings-pane__field-hint">
+            <code>~/.sinew/AGENTS.md</code> is loaded in every project, before the project's own{" "}
+            <code>AGENTS.md</code> (or its <code>CLAUDE.md</code> when it has no{" "}
+            <code>AGENTS.md</code>). Write there the rules you want everywhere.
+          </p>
+          <div>
+            <button type="button" className="settings-pane__btn" onClick={() => void openFile("instructions")}>
+              Open ~/.sinew/AGENTS.md
+            </button>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function MemoryScopeList({
+  scope,
+  entries,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onOpenFile,
+}: {
+  scope: MemoryScope;
+  entries: MemoryEntry[];
+  onAdd: (text: string) => Promise<void>;
+  onUpdate: (id: string, text: string) => Promise<void>;
+  onRemove: (id: string) => Promise<void>;
+  onOpenFile: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  return (
+    <section className="settings-pane__tool-group">
+      <div className="settings-pane__tool-group-head">
+        <h2>{scope === "user" ? "About you · all projects" : "This project"}</h2>
+      </div>
+      {entries.length === 0 ? (
+        <p className="settings-pane__field-hint">Nothing yet.</p>
+      ) : (
+        <ul className="settings-pane__memory-list">
+          {entries.map((entry) => (
+            <li key={entry.id} className="settings-pane__memory-row">
+              {editing?.id === entry.id ? (
+                <form
+                  className="settings-pane__memory-edit"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onUpdate(entry.id, editing.text).then(() => setEditing(null));
+                  }}
+                >
+                  <input
+                    className="settings-pane__tool-config-desc"
+                    value={editing.text}
+                    autoFocus
+                    onChange={(event) => setEditing({ id: entry.id, text: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setEditing(null);
+                    }}
+                  />
+                  <button type="submit" className="settings-pane__btn" data-primary="true">
+                    Save
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <span className="settings-pane__memory-text">{entry.text}</span>
+                  <button
+                    type="button"
+                    className="settings-pane__icon-btn"
+                    title="Edit"
+                    onClick={() => setEditing({ id: entry.id, text: entry.text })}
+                  >
+                    <Icon icon="solar:pen-linear" width={13} height={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-pane__icon-btn"
+                    title="Delete"
+                    onClick={() => void onRemove(entry.id)}
+                  >
+                    <Icon icon="solar:trash-bin-minimalistic-linear" width={13} height={13} />
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="settings-pane__memory-edit"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!draft.trim()) return;
+          void onAdd(draft).then(() => setDraft(""));
+        }}
+      >
+        <input
+          className="settings-pane__tool-config-desc"
+          placeholder={scope === "user" ? "e.g. Answer in French" : "e.g. Releases are cut by pushing a vX.Y.Z tag"}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="submit" className="settings-pane__btn">
+          Add
+        </button>
+        <button type="button" className="settings-pane__btn" onClick={onOpenFile}>
+          Open file
+        </button>
+      </form>
     </section>
   );
 }

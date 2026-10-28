@@ -86,6 +86,7 @@ Code map:
 │   │       ├── lsp.rs
 │   │       ├── mcp.rs
 │   │       ├── mcp_oauth.rs
+│   │       ├── memory.rs
 │   │       ├── permissions.rs
 │   │       ├── powershell.rs
 │   │       ├── question.rs
@@ -286,6 +287,7 @@ Code map:
     │   ├── EditorPane.tsx
     │   ├── FileTree.tsx
     │   ├── GitPanel.tsx
+    │   ├── InstructionsDialog.tsx
     │   ├── RemotePanel.tsx
     │   ├── SearchPane.tsx
     │   ├── SettingsPane.tsx

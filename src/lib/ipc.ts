@@ -36,6 +36,10 @@ import type {
   McpMention,
   SlashCommand,
   LspServerStatus,
+  MemoryAction,
+  MemoryChange,
+  MemoryListing,
+  MemoryScope,
   OpenRouterModel,
   OpenRouterModelSearchResult,
   OpenRouterProviderStatus,
@@ -741,6 +745,33 @@ export const api = {
   /// Creates `.sinew/commands/<name>.md` from a template; returns its path.
   createSlashCommand(workspacePath: string, name: string) {
     return invoke<string>("create_slash_command", { input: { workspacePath, name } });
+  },
+  /// ~/.sinew/AGENTS.md: the user's instructions for every project.
+  readGlobalInstructions() {
+    return invoke<{ path: string; content: string }>("read_global_instructions");
+  },
+  saveGlobalInstructions(content: string) {
+    return invoke<{ path: string; content: string }>("save_global_instructions", {
+      input: { content },
+    });
+  },
+  memoryList(workspacePath: string) {
+    return invoke<MemoryListing>("memory_list", { input: { workspacePath } });
+  },
+  memoryApply(
+    workspacePath: string,
+    scope: MemoryScope,
+    action: MemoryAction,
+    id?: string,
+    text?: string,
+  ) {
+    return invoke<MemoryChange>("memory_apply", {
+      input: { workspacePath, scope, action, id, text },
+    });
+  },
+  /// `file`: "user", "project" or "instructions" (~/.sinew/AGENTS.md).
+  memoryFilePath(workspacePath: string, file: "user" | "project" | "instructions") {
+    return invoke<string>("memory_file_path", { input: { workspacePath, file } });
   },
   lspStatus(workspacePath: string) {
     return invoke<LspServerStatus[]>("lsp_status", { input: { workspacePath } });

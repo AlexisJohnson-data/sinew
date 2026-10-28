@@ -34,6 +34,7 @@ import {
   subAgentToolTitle,
   ToolCard,
   type ToolCardTeamAgent,
+  WorkspacePathContext,
 } from "./ToolCard";
 import { TodoStrip, type QueuedPromptStripItem } from "./TodoStrip";
 import { fileIcon } from "../../lib/fileIcon";
@@ -3936,6 +3937,7 @@ export function ChatPane({
           ) : (
             <>
               {displayView.blocks.length > 0 && (
+                <WorkspacePathContext.Provider value={workspacePath}>
                 <ChatBlocks
                   blocks={displayView.blocks}
                   onPreviewImage={setPreviewImage}
@@ -3967,6 +3969,7 @@ export function ChatPane({
                   activeTeamNames={activeTeamNames}
                   activeAgentName={viewingSubAgent ? activeSubAgent?.name : undefined}
                 />
+                </WorkspacePathContext.Provider>
               )}
               {!viewingSubAgent &&
                 (view.pendingApprovals ?? []).map((approval) => (

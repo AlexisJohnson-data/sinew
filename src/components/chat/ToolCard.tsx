@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -8,7 +10,13 @@ import {
 } from "react";
 import { Icon } from "@iconify/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { FileChange, TodoStatus, ToolResultImage } from "../../types";
+import type {
+  FileChange,
+  MemoryChange,
+  TodoStatus,
+  ToolResultImage,
+} from "../../types";
+import { api } from "../../lib/ipc";
 import { canonicalToolName } from "../../lib/tools";
 import { FileChangeBlock } from "./FileChangeBlock";
 
@@ -1039,6 +1047,62 @@ function SwarmAgentsInline({
   );
 }
 
+/// The open workspace, for cards that act on it (memory undo).
+export const WorkspacePathContext = createContext("");
+
+function memoryChange(meta: Record<string, unknown> | null | undefined): MemoryChange | null {
+  const raw = meta?.memory;
+  if (!raw || typeof raw !== "object") return null;
+  const change = raw as MemoryChange;
+  return typeof change.id === "string" && typeof change.text === "string" ? change : null;
+}
+
+/// "Memory updated" card for the memory tool, with an undo button.
+function MemoryCard({ change }: { change: MemoryChange }) {
+  const workspacePath = useContext(WorkspacePathContext);
+  const [state, setState] = useState<"idle" | "undoing" | "undone" | "error">("idle");
+  const verb =
+    change.action === "add" ? "Saved" : change.action === "update" ? "Updated" : "Forgot";
+  const scope = change.scope === "user" ? "about you" : "for this project";
+  const undo = async () => {
+    setState("undoing");
+    try {
+      if (change.action === "add") {
+        await api.memoryApply(workspacePath, change.scope, "remove", change.id);
+      } else if (change.action === "update") {
+        await api.memoryApply(workspacePath, change.scope, "update", change.id, change.previous);
+      } else {
+        await api.memoryApply(workspacePath, change.scope, "add", change.id, change.text);
+      }
+      setState("undone");
+    } catch {
+      setState("error");
+    }
+  };
+  return (
+    <div className="memory-card" data-action={change.action} data-undone={state === "undone" ? "true" : undefined}>
+      <Icon icon="solar:notebook-bookmark-linear" width={14} height={14} className="memory-card__icon" />
+      <div className="memory-card__body">
+        <span className="memory-card__title">
+          {state === "undone" ? "Undone" : `${verb} ${scope}`}
+        </span>
+        <span className="memory-card__text">{change.text}</span>
+      </div>
+      {workspacePath && state !== "undone" && (
+        <button
+          type="button"
+          className="memory-card__undo"
+          disabled={state === "undoing"}
+          onClick={() => void undo()}
+          title={state === "error" ? "Undo failed — edit it in Settings → Memory" : "Undo this change"}
+        >
+          {state === "error" ? "Retry" : "Undo"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 type DiagnosticItem = {
   path?: string;
   line?: number;
@@ -1208,6 +1272,11 @@ export function ToolCard({
         onOpenFile={onOpenFile}
       />
     );
+  }
+
+  const memory = canonicalName === "memory" && !isError ? memoryChange(meta) : null;
+  if (memory && status !== "running") {
+    return <MemoryCard change={memory} />;
   }
 
   const rtkRewritten = (() => {

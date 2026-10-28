@@ -114,6 +114,16 @@ files). If tests fail, find the root cause and fix the code — change a test on
 itself is wrong — then rerun until everything passes. Report what failed and what you changed.
 Scope: $ARGUMENTS",
     },
+    Builtin {
+        name: "remember",
+        description: "Save something to your persistent memory",
+        argument_hint: Some("<what to remember>"),
+        template: "Save this to your persistent memory with the `memory` tool: $ARGUMENTS
+Pick the scope yourself: `user` for something about me or how I want you to work (it applies to \
+every project), `project` for something about this workspace. Rephrase it as one short, \
+self-contained fact. If it updates or contradicts an existing entry, update that entry instead \
+of adding a new one. Then confirm in one line what you saved.",
+    },
 ];
 
 /// Every command available in `workspace_root`, deduplicated by name with

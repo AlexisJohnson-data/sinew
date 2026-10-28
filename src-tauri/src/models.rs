@@ -125,6 +125,52 @@ pub(super) struct OpenCodeGoProviderStatus {
     pub(super) error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GlobalInstructions {
+    pub(super) path: String,
+    pub(super) content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SaveGlobalInstructionsInput {
+    pub(super) content: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct MemoryScopeListing {
+    pub(super) path: String,
+    pub(super) entries: Vec<sinew_app::memory::MemoryEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct MemoryListing {
+    pub(super) user: MemoryScopeListing,
+    pub(super) project: MemoryScopeListing,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct MemoryApplyInput {
+    pub(super) workspace_path: String,
+    pub(super) scope: sinew_app::memory::MemoryScope,
+    pub(super) action: sinew_app::memory::MemoryAction,
+    #[serde(default)]
+    pub(super) id: Option<String>,
+    #[serde(default)]
+    pub(super) text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct MemoryFileInput {
+    pub(super) workspace_path: String,
+    /// `user`, `project` or `instructions` (~/.sinew/AGENTS.md).
+    pub(super) file: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WorkspaceInput {

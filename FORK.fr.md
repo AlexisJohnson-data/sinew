@@ -63,6 +63,7 @@ d'une utilisation quotidienne.
 - [Permissions de l'agent](#permissions-de-lagent)
 - [Commandes slash et invocation à la demande](#commandes-slash-et-invocation-à-la-demande)
 - [Diagnostics des serveurs de langage](#diagnostics-des-serveurs-de-langage)
+- [Mémoire persistante](#mémoire-persistante)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -218,6 +219,43 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
 
+### Mémoire persistante
+
+L'agent retient d'une conversation à l'autre ce que le code ne montre pas :
+tes préférences, tes corrections, les décisions et les pièges du projet.
+
+| Portée | Contenu typique | Fichier |
+|---|---|---|
+| **Toi** (tous les projets) | « réponds en français », « jamais de push sans demander » | `~/.sinew/memory/user.md` |
+| **Projet** | « la release se fait en poussant un tag vX.Y.Z » | `~/.sinew/memory/projects/<projet>.md` |
+
+- Les fichiers sont **hors du dépôt** (privés, jamais commités par erreur).
+  Markdown simple, une entrée `- [id] texte` par ligne, modifiable à la
+  main. `SINEW_MEMORY_DIR` permet de les déplacer.
+- Les deux portées sont ajoutées au prompt système au début de chaque tour
+  (environ 8 Ko chacune au plus) : une modification s'applique au tour
+  suivant et le cache de prompt tient pendant le tour.
+- L'outil `memory` (`add` / `update` / `remove` / `list`) permet à
+  l'agent principal de les modifier ; les agents secondaires et le swarm ne
+  font que les lire. Tout ce qui ressemble à un secret (clé API, token, mot
+  de passe, clé privée) est refusé.
+- `/remember <texte>` demande à l'agent d'enregistrer quelque chose.
+- Chaque écriture affiche une carte « Saved about you / for this project »
+  avec **Undo**.
+- Réglages → Outils → **Memory** : activé/désactivé, et « Agent decides » ou
+  « Only when asked ». Réglages → **Memory** : liste, ajout, modification,
+  suppression, ouverture des fichiers.
+- **Tes instructions** : `~/.sinew/AGENTS.md` est chargé dans tous les
+  projets. Un projet sans `AGENTS.md` mais avec un `CLAUDE.md` utilise
+  celui-ci.
+
+Code : `crates/sinew-app/src/memory.rs` (stockage, outil, section du
+prompt), `agent/turn.rs` (injection), `global_instructions` /
+`workspace_instructions` dans `src-tauri/src/turns.rs`, commandes
+`memory_list` / `memory_apply` / `memory_file_path`, `MemoryCard` dans
+`src/components/chat/ToolCard.tsx`, `MemorySection` dans
+`src/components/SettingsPane.tsx`.
+
 ### Diagnostics des serveurs de langage
 
 Après chaque `edit_file` / `write_file`, Sinew demande au serveur de langage
@@ -262,7 +300,7 @@ Taper `/` dans le chat ouvre un menu avec trois familles :
 - **Commandes** = prompts envoyés à l'agent. Intégrées : `/review` (relit les
   changements non commités), `/commit`, `/push` (commite s'il y a des
   modifications puis pousse la branche, avec `-u origin` si besoin, jamais de
-  push forcé), `/init` (crée/met à jour `AGENTS.md`), `/test`. Les tiennes :
+  push forcé), `/init` (crée/met à jour `AGENTS.md`), `/test`, `/remember`. Les tiennes :
   un fichier Markdown dans `.sinew/commands/` ou `.claude/commands/` (projet)
   ou dans les mêmes dossiers de ton home (Windows et WSL). Format compatible
   Claude Code : frontmatter `description:` / `argument-hint:`, `$ARGUMENTS`,

@@ -107,6 +107,17 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
     } = ctx;
 
     send_event(&event_tx, event_scope.as_ref(), AgentEvent::TurnStarted);
+    // Read once per turn: a memory saved mid-turn applies from the next one,
+    // which keeps the system prompt (and its cache) stable within the turn.
+    let memory_writable = event_scope.is_none();
+    let system_prompt = match crate::memory::prompt_section(
+        bash.workspace_root(),
+        &tool_settings,
+        memory_writable,
+    ) {
+        Some(memory) => format!("{system_prompt}\n\n{memory}"),
+        None => system_prompt,
+    };
     strip_all_visible_tool_result_ids(&mut history);
     normalize_tool_call_inputs(&mut history);
     repair_missing_tool_results(&mut history);
@@ -164,6 +175,9 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
         }
         if tool_settings.lsp_enabled {
             tool_descriptors.push(crate::lsp::descriptor());
+        }
+        if tool_settings.memory_enabled && memory_writable {
+            tool_descriptors.push(crate::memory::descriptor());
         }
         if mode == AgentMode::Goal {
             tool_descriptors.push(update_goal_descriptor());
