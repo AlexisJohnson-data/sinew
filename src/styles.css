@@ -11611,3 +11611,298 @@ textarea {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+/* Conversation usage counter next to the context meter. */
+.conversation-cost {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+.conversation-cost__tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 240px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.conversation-cost:hover .conversation-cost__tip,
+.conversation-cost:focus-visible .conversation-cost__tip {
+  display: flex;
+}
+/* Settings → Usage. */
+.usage__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.usage__card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--bg-2);
+}
+.usage__card[data-alert="true"] {
+  border-color: var(--danger);
+}
+.usage__card-label {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.usage__card-value {
+  color: var(--text-1);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.usage__card-hint {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.usage__quota {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.usage__quota-provider {
+  font-weight: 600;
+}
+.usage__quota-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.usage__quota-label,
+.usage__quota-value {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.usage__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-3, var(--line));
+  overflow: hidden;
+}
+.usage__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--success, #2da47d);
+}
+.usage__bar-fill[data-level="warn"] {
+  background: #d19935;
+}
+.usage__bar-fill[data-level="danger"] {
+  background: var(--danger);
+}
+.usage__chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 140px;
+}
+.usage__chart-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 4px;
+}
+.usage__chart-bar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 1px;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in srgb, var(--text-3) 45%, transparent);
+  overflow: hidden;
+}
+.usage__chart-metered {
+  display: block;
+  width: 100%;
+  background: #e57e56;
+}
+.usage__chart-day {
+  color: var(--text-3);
+  font-size: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.usage__legend {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--text-3) 45%, transparent);
+}
+.usage__legend--metered {
+  background: #e57e56;
+}
+.usage__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+.usage__table th {
+  color: var(--text-3);
+  font-weight: 500;
+  text-align: right;
+  padding: 4px 6px;
+}
+.usage__table td {
+  padding: 5px 6px;
+  border-top: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+.usage__table td:first-child {
+  text-align: left;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage__inline-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.usage__inline-form input:not(.usage__number) {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.usage__number {
+  width: 110px;
+}
+.settings-pane__tool-provider-switch.usage__range {
+  grid-template-columns: repeat(3, auto);
+  white-space: nowrap;
+}
+/* Plan-usage ring next to the composer (PlanUsageRing.tsx). */
+.plan-ring {
+  position: relative;
+  display: inline-flex;
+}
+.plan-ring__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.plan-ring__button:hover {
+  background: var(--bg-2);
+}
+.plan-ring__track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--text-3) 35%, transparent);
+  stroke-width: 2.2;
+}
+.plan-ring__fill {
+  fill: none;
+  stroke: #4f9bcb;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 300ms ease;
+}
+.plan-ring__button[data-level="warn"] .plan-ring__fill {
+  stroke: #d19935;
+}
+.plan-ring__button[data-level="danger"] .plan-ring__fill {
+  stroke: var(--danger);
+}
+.plan-ring__popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: -60px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+  padding: 12px 14px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+}
+.plan-ring__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-3);
+}
+.plan-ring__all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+.plan-ring__status {
+  color: var(--danger);
+}
+.plan-ring__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-ring__row-text {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.plan-ring__label {
+  color: var(--text-1);
+}
+.plan-ring__meta {
+  display: inline-flex;
+  gap: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.plan-ring__percent {
+  font-variant-numeric: tabular-nums;
+}

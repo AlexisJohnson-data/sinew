@@ -11,5 +11,5 @@ pub use auth::{
     load_default_auth_status, oauth_authorize_url, AnthropicAuthStatus, Credential, PkceCodes,
 };
 pub use client::{AnthropicConfig, AnthropicProvider};
-pub use discovery::list_models;
+pub use discovery::{list_models, refresh_plan_limits};
 pub use model_info::{MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW};

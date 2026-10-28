@@ -263,6 +263,9 @@ async fn stream_sse_request_with_bearer(
         .await
         .map_err(|err| AppError::Network(err.to_string()))?;
 
+    if bearer.is_oauth {
+        record_codex_quota_headers(response.headers());
+    }
     if !response.status().is_success() {
         return Err(read_http_error(response).await);
     }
@@ -637,6 +640,16 @@ fn is_transient_http_status(status: reqwest::StatusCode) -> bool {
             | reqwest::StatusCode::SERVICE_UNAVAILABLE
             | reqwest::StatusCode::GATEWAY_TIMEOUT
     ) || status.is_server_error()
+}
+
+
+/// ChatGPT plans report their usage windows in `x-codex-*` headers.
+pub(crate) fn record_codex_quota_headers(headers: &reqwest::header::HeaderMap) {
+    let headers: Vec<(&str, &str)> = headers
+        .iter()
+        .filter_map(|(name, value)| Some((name.as_str(), value.to_str().ok()?)))
+        .collect();
+    sinew_core::quota::record_codex_headers(headers);
 }
 
 #[cfg(test)]

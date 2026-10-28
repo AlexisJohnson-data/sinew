@@ -37,6 +37,7 @@ where
                 match tokio::time::timeout(STREAM_IDLE_TIMEOUT, source.next()).await {
                     Ok(Some(Ok(event))) => {
                         saw_any_event = true;
+                        sinew_core::quota::observe_codex_event(&event);
                         let terminal = is_terminal_response_event(&event);
                         match parser.push(event) {
                             Ok(mut produced) => {

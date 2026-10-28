@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Icon } from "@iconify/react";
 import { Wrench } from "lucide-react";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
 import { canonicalToolName } from "../lib/tools";
 import { Markdown } from "./chat/Markdown";
 import { SinewMark } from "./SinewMark";
+import { UsageSection } from "./UsageSection";
 import { isWindowsPlatform } from "./WindowControls";
 import {
   MODELS,
@@ -245,18 +246,24 @@ type Props = {
   workspacePath: string;
 };
 
-type Section =
-  | "about"
-  | "providers"
-  | "tools"
-  | "mcp"
-  | "skills"
-  | "commands"
-  | "memory"
-  | "subagents";
+const SECTIONS = [
+  "about",
+  "providers",
+  "tools",
+  "mcp",
+  "skills",
+  "commands",
+  "memory",
+  "usage",
+  "subagents",
+] as const;
+type Section = (typeof SECTIONS)[number];
 
 export function SettingsPane({ workspacePath }: Props) {
-  const [section, setSection] = useState<Section>("about");
+  const [section, setSection] = useState<Section>(() => {
+    const requested = new URLSearchParams(window.location.search).get("section");
+    return SECTIONS.includes(requested as Section) ? (requested as Section) : "about";
+  });
   const [settings, setSettings] = useState<McpSettings>(EMPTY_SETTINGS);
   const [savedJson, setSavedJson] = useState("");
   const [jsonText, setJsonText] = useState("");
@@ -338,8 +345,20 @@ export function SettingsPane({ workspacePath }: Props) {
       if (detail?.section) setSection(detail.section);
     };
     window.addEventListener("sinew:open-settings-section", handler);
-    return () =>
+    // The backend re-targets an already-open Settings window this way.
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void listen<string>("settings-open-section", (event) => {
+      if (SECTIONS.includes(event.payload as Section)) setSection(event.payload as Section);
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
       window.removeEventListener("sinew:open-settings-section", handler);
+    };
   }, []);
 
   // ---- MCP load ---------------------------------------------------------
@@ -1805,6 +1824,20 @@ export function SettingsPane({ workspacePath }: Props) {
         <button
           type="button"
           className="settings-pane__nav-item"
+          data-active={section === "usage" ? "true" : "false"}
+          onClick={() => setSection("usage")}
+        >
+          <Icon
+            icon="solar:chart-2-linear"
+            width={15}
+            height={15}
+            className="settings-pane__nav-icon"
+          />
+          <span className="settings-pane__nav-label">Usage</span>
+        </button>
+        <button
+          type="button"
+          className="settings-pane__nav-item"
           data-active={section === "subagents" ? "true" : "false"}
           onClick={() => setSection("subagents")}
         >
@@ -1952,6 +1985,8 @@ export function SettingsPane({ workspacePath }: Props) {
           <CommandsSection workspacePath={workspacePath} />
         ) : section === "memory" ? (
           <MemorySection workspacePath={workspacePath} />
+        ) : section === "usage" ? (
+          <UsageSection />
         ) : (
           <SubAgentsSection
             agents={filteredSubAgents}

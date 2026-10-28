@@ -48,6 +48,13 @@ pub enum AgentEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         meta: Option<Value>,
     },
+    /// Final usage of one model response, sent once (unlike `TokenUsage`,
+    /// which streams updates). The desktop app records it for cost tracking.
+    UsageRecorded {
+        provider: String,
+        model: String,
+        usage: Usage,
+    },
     TokenUsage {
         provider: String,
         model: String,

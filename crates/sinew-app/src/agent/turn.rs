@@ -642,6 +642,17 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
         }
         if let Some(usage) = response_usage {
             attach_token_usage(&mut assistant, provider.name(), &model.name, usage);
+            if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                send_event(
+                    &event_tx,
+                    event_scope.as_ref(),
+                    AgentEvent::UsageRecorded {
+                        provider: model.provider.clone(),
+                        model: model.name.clone(),
+                        usage,
+                    },
+                );
+            }
         }
         if !assistant.parts.is_empty() {
             history.push(assistant.clone());

@@ -36,6 +36,10 @@ import type {
   McpMention,
   SlashCommand,
   LspServerStatus,
+  QuotaSnapshot,
+  UsageOverview,
+  UsageSettings,
+  UsageTotals,
   MemoryAction,
   MemoryChange,
   MemoryListing,
@@ -772,6 +776,26 @@ export const api = {
   /// `file`: "user", "project" or "instructions" (~/.sinew/AGENTS.md).
   memoryFilePath(workspacePath: string, file: "user" | "project" | "instructions") {
     return invoke<string>("memory_file_path", { input: { workspacePath, file } });
+  },
+  usageOverview(days: number, utcOffsetMinutes: number) {
+    return invoke<UsageOverview>("usage_overview", { input: { days, utcOffsetMinutes } });
+  },
+  /// Ask Claude / ChatGPT for their plan windows (throttled to once a minute).
+  refreshPlanLimits() {
+    return invoke<QuotaSnapshot[]>("refresh_plan_limits");
+  },
+  conversationUsage(conversationId: string) {
+    return invoke<UsageTotals>("conversation_usage", { input: { conversationId } });
+  },
+  saveUsageSettings(settings: UsageSettings) {
+    return invoke<UsageSettings>("save_usage_settings", { input: { settings } });
+  },
+  /// Re-fetch model prices from OpenRouter; returns their age in ms.
+  refreshModelPrices() {
+    return invoke<number | null>("refresh_model_prices");
+  },
+  exportUsageCsv(path: string, days: number) {
+    return invoke<void>("export_usage_csv", { input: { path, days } });
   },
   lspStatus(workspacePath: string) {
     return invoke<LspServerStatus[]>("lsp_status", { input: { workspacePath } });

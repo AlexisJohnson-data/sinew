@@ -180,6 +180,12 @@ impl ResponsesWebsocketConnection {
                 .await
                 .map_err(|err| map_ws_connect_error(err, &ws_url))?;
         tracing::debug!(status = %response.status(), "OpenAI responses websocket connected");
+        let headers: Vec<(&str, &str)> = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| Some((name.as_str(), value.to_str().ok()?)))
+            .collect();
+        sinew_core::quota::record_codex_headers(headers);
 
         Ok(Self {
             stream: Arc::new(Mutex::new(Some(WsStream::new(websocket)))),

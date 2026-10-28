@@ -1564,6 +1564,7 @@ export function applyEvent(
       return withStreamPhase(state, "waiting", { blocks: next });
     }
     case "token_usage":
+    case "usage_recorded":
       return state;
 
     case "interrupted": {

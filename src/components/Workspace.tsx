@@ -12,6 +12,7 @@ import { Icon } from "@iconify/react";
 import { moveArrayItem, remapIndexAfterMove } from "../lib/editorTabs";
 import { api } from "../lib/ipc";
 import { modelRefWithThinking, thinkingFromRef } from "../lib/models";
+import { notify } from "../lib/notify";
 import { recordRecent } from "../lib/recents";
 import { Splitter } from "./Splitter";
 import { FileTree, type FileTreeHandle } from "./FileTree";
@@ -1066,6 +1067,27 @@ export function Workspace({
       if (unlisten) unlisten();
     };
   }, [closeActiveEditorTab]);
+
+  // Daily budget alert from the usage tracker (src-tauri/src/usage.rs).
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | null = null;
+    void listen<{ spentUsd: number; budgetUsd: number }>("usage-budget-exceeded", (event) => {
+      const { spentUsd, budgetUsd } = event.payload;
+      void notify(
+        "Daily budget reached",
+        `Pay-per-token spend today: ${spentUsd.toFixed(2)} (budget ${budgetUsd.toFixed(2)}).`,
+        { force: true },
+      );
+    }).then((nextUnlisten) => {
+      if (disposed) nextUnlisten();
+      else unlisten = nextUnlisten;
+    });
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // ---------------- Event subscriptions ----------------
 

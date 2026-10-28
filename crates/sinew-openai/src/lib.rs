@@ -13,5 +13,5 @@ pub use auth::{
     PkceCodes,
 };
 pub use client::{OpenAiConfig, OpenAiProvider};
-pub use discovery::list_models;
+pub use discovery::{list_models, refresh_plan_limits};
 pub use model_info::{MODEL_ID, MODEL_MAX_OUTPUT, MODEL_WINDOW};

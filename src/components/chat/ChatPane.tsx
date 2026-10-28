@@ -28,6 +28,8 @@ import { useChatSearch } from "./useChatSearch";
 import { PlanningNextMoveBlock } from "./PlanningNextMoveBlock";
 import { Questionnaire, type QuestionItem } from "./Questionnaire";
 import { ApprovalCard } from "./ApprovalCard";
+import { ConversationCost } from "./ConversationCost";
+import { PlanUsageRing } from "./PlanUsageRing";
 import type { PendingApproval } from "./stream";
 import {
   AiAgentGlyph,
@@ -4689,6 +4691,15 @@ export function ChatPane({
                   Compaction
                 </span>
               </button>
+              <ConversationCost
+                conversationId={conversationId}
+                subscribeEvents={subscribeEvents}
+              />
+              <PlanUsageRing
+                provider={modelEntry?.provider ?? activeModel.provider}
+                workspacePath={workspacePath}
+                subscribeEvents={subscribeEvents}
+              />
               <ContextMeter state={visibleContextEstimate} />
               {view.status === "streaming" ? (
                 <button

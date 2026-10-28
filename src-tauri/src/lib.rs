@@ -131,6 +131,7 @@ mod terminal;
 mod tests;
 mod turns;
 mod updater;
+mod usage;
 mod workflow;
 mod workspace;
 
@@ -259,6 +260,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            usage::start_price_refresh(app.state::<DesktopState>().store.clone());
+
             // Point liteparse/PDFium at the bundled pdfium library shipped in the
             // app's resources, so PDF reading works on machines that never ran
             // the build. The lib path baked into the binary at compile time only
@@ -503,6 +506,12 @@ pub fn run() {
             conversations::list_mcp_mentions,
             conversations::lsp_status,
             conversations::memory_list,
+            usage::usage_overview,
+            usage::refresh_plan_limits,
+            usage::conversation_usage,
+            usage::save_usage_settings,
+            usage::refresh_model_prices,
+            usage::export_usage_csv,
             conversations::read_global_instructions,
             conversations::save_global_instructions,
             conversations::memory_apply,

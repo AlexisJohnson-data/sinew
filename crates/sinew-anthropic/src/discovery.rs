@@ -12,6 +12,9 @@ use sinew_core::{AppError, DiscoveredModel, Result};
 use crate::{auth::Credential, cli_version};
 
 const MODELS_URL: &str = "https://api.anthropic.com/v1/models";
+/// Plan usage (5-hour and weekly windows) for a Claude subscription, as the
+/// Claude apps and Claude Code's `/usage` show it.
+const PLAN_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const API_VERSION: &str = "2023-06-01";
 const OAUTH_BETA: &str = "oauth-2025-04-20";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -87,6 +90,42 @@ fn discovered_models(body: ModelsResponse) -> Vec<DiscoveredModel> {
             ..Default::default()
         })
         .collect()
+}
+
+/// Fetch the Claude plan's usage windows into `sinew_core::quota`.
+/// `Ok(false)` when Anthropic is not connected with a subscription login.
+pub async fn refresh_plan_limits() -> Result<bool> {
+    let Some(credential) = Credential::load_default()? else {
+        return Ok(false);
+    };
+    if !credential.is_oauth() {
+        return Ok(false);
+    }
+    let http = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    let token = credential.bearer_or_key(&http).await?;
+    let response = http
+        .get(PLAN_USAGE_URL)
+        .header("authorization", format!("Bearer {token}"))
+        .header("anthropic-beta", OAUTH_BETA)
+        .header("user-agent", cli_version::user_agent())
+        .send()
+        .await
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    if !response.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "Claude plan usage request failed with {}",
+            response.status()
+        )));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|err| AppError::Decode(format!("invalid Claude plan usage: {err}")))?;
+    sinew_core::quota::record_anthropic_usage(&body);
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -814,6 +814,15 @@ impl AppStore {
         &self.path
     }
 
+    /// A store backed by an arbitrary SQLite file (tests, tools).
+    pub fn open_at(path: &Path) -> Result<Self> {
+        let store = Self {
+            path: path.to_path_buf(),
+        };
+        store.migrate()?;
+        Ok(store)
+    }
+
     pub fn bootstrap_workspace(
         &self,
         workspace_root: &Path,
@@ -1660,7 +1669,7 @@ impl AppStore {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap_or(0);
 
-        if version >= 9 {
+        if version >= 10 {
             return Ok(());
         }
 
@@ -1709,16 +1718,17 @@ impl AppStore {
         ensure_conversations_title_initialized_column(&conn)?;
         ensure_app_settings_table(&conn)?;
         ensure_turn_checkpoints_table(&conn)?;
+        crate::usage::ensure_usage_table(&conn)?;
         if version < 8 {
             conn.execute("delete from turn_checkpoints", [])
                 .context("unable to clear legacy turn checkpoints")?;
         }
-        conn.pragma_update(None, "user_version", 9)
+        conn.pragma_update(None, "user_version", 10)
             .context("unable to set sqlite schema version")?;
         Ok(())
     }
 
-    fn connection(&self) -> Result<Connection> {
+    pub(crate) fn connection(&self) -> Result<Connection> {
         let conn = Connection::open(&self.path).context("unable to open sqlite database")?;
         conn.execute_batch("pragma foreign_keys = on;")
             .context("unable to enable foreign keys")?;
@@ -2003,6 +2013,11 @@ fn title_hidden_text(meta: &Option<Value>) -> bool {
         || meta.get("system_reminder").and_then(Value::as_bool) == Some(true)
         || meta.get("attachment_context").and_then(Value::as_bool) == Some(true)
         || meta.get("plan_control").and_then(Value::as_str).is_some()
+}
+
+/// Unix milliseconds, for sibling modules.
+pub(crate) fn now_ms_pub() -> i64 {
+    now_ms()
 }
 
 fn now_ms() -> i64 {

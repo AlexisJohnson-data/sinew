@@ -27,6 +27,7 @@ sinew-openai = { workspace = true }
 sinew-openrouter = { workspace = true }
 
 anyhow = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 base64 = { workspace = true }
 notify = { workspace = true }
 serde = { workspace = true }

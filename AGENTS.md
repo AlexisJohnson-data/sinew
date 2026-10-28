@@ -112,6 +112,7 @@ Code map:
 │   │       ├── todo.rs
 │   │       ├── tool_names.rs
 │   │       ├── tool_run.rs
+│   │       ├── usage.rs
 │   │       ├── web.rs
 │   │       ├── write.rs
 │   │       └── workspace.rs
@@ -124,6 +125,7 @@ Code map:
 │   │       ├── message.rs
 │   │       ├── model.rs
 │   │       ├── provider.rs
+│   │       ├── quota.rs
 │   │       ├── stream.rs
 │   │       └── tool.rs
 │   ├── sinew-deepseek
@@ -274,6 +276,7 @@ Code map:
 │       ├── tests.rs
 │       ├── turns.rs
 │       ├── updater.rs
+│       ├── usage.rs
 │       ├── workflow.rs
 │       └── workspace.rs
 └── src
@@ -296,6 +299,7 @@ Code map:
     │   ├── TerminalPanel.tsx
     │   ├── UpdateBadge.tsx
     │   ├── UpdaterLockScreen.tsx
+    │   ├── UsageSection.tsx
     │   ├── Welcome.tsx
     │   ├── WindowControls.tsx
     │   ├── Workspace.tsx
@@ -303,11 +307,13 @@ Code map:
     │       ├── AIThinkingBlock.tsx
     │       ├── ApprovalCard.tsx
     │       ├── ChatPane.tsx
+    │       ├── ConversationCost.tsx
     │       ├── DotmSquare2.tsx
     │       ├── DotmSquare5.tsx
     │       ├── FileChangeBlock.tsx
     │       ├── Markdown.tsx
     │       ├── MermaidDiagram.tsx
+    │       ├── PlanUsageRing.tsx
     │       ├── PlanningNextMoveBlock.tsx
     │       ├── Questionnaire.tsx
     │       ├── TodoStrip.tsx
@@ -322,4 +328,5 @@ Code map:
     │   ├── language.ts
     │   ├── models.ts
     │   ├── recents.ts
-    │   └── tools.ts
+    │   ├── tools.ts
+    │   └── usage.ts

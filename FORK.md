@@ -57,6 +57,7 @@ daily use.
 - [Slash commands and on-demand invocation](#slash-commands-and-on-demand-invocation)
 - [Language-server diagnostics](#language-server-diagnostics)
 - [Persistent memory](#persistent-memory)
+- [Usage and cost tracking](#usage-and-cost-tracking)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -193,6 +194,39 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Usage and cost tracking
+
+Every model response is recorded (provider, model, project, conversation,
+sub-agent, input/output/cache/reasoning tokens) with an estimated cost.
+
+- **Prices** come from OpenRouter's public catalogue, refreshed daily and
+  cached (no key needed), including cache and long-context rates. Sinew ids
+  are matched to OpenRouter's (`claude-opus-5-5` → `anthropic/claude-opus-5.5`);
+  a model with no match counts its tokens but no cost, and you can set a
+  custom price per model.
+- **Two kinds of money**, never mixed: real **spend** on pay-per-token
+  providers (DeepSeek, OpenRouter) and the **API equivalent** of subscription
+  use (Claude, ChatGPT, Gemini, Kimi, OpenCode Go), which is not billed.
+- **Plan limits**: Settings → Usage asks Claude and ChatGPT for their usage
+  windows when it opens and every 5 minutes (the endpoints the Claude apps
+  and Codex use), so the gauges are live without sending a message and
+  include usage outside Sinew. Every plan shape is read: Claude Pro/Max
+  (5 hours, week, model-specific weeks), ChatGPT Plus/Pro/Team (5 hours +
+  week, per-feature limits) and Go (30 days), with the plan name and reset
+  times. Response headers keep them fresh in between.
+- A **ring** next to the composer shows the selected provider's window
+  closest to its limit; click it for every window and a link to Settings.
+- The composer shows the conversation's total (`142k · ~$1.84`, breakdown on
+  hover). Settings → **Usage**: Today / 7 / 30 days, cards, plan limits,
+  per-day chart, tables by provider, model and project, CSV export, a daily
+  budget (notification only) and custom prices.
+
+Code: `crates/sinew-app/src/usage.rs` (prices, cost, `usage_events` table,
+summaries, CSV), `crates/sinew-core/src/quota.rs` (quota headers), the
+`UsageRecorded` event in `agent/turn.rs`, `src-tauri/src/usage.rs`
+(recording, budget alert, commands), `ConversationCost.tsx`,
+`UsageSection.tsx`.
 
 ### Persistent memory
 

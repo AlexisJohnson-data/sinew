@@ -14,6 +14,8 @@ use sinew_core::{AppError, DiscoveredModel, Result};
 use crate::auth::{BearerToken, Credential};
 
 const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
+/// Usage windows of a ChatGPT plan, as Codex's status line shows them.
+const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const API_MODELS_URL: &str = "https://api.openai.com/v1/models";
 /// The Codex endpoint hides models newer than the advertised client version,
 /// so we advertise the latest published `@openai/codex` release.
@@ -197,6 +199,47 @@ async fn latest_codex_version(http: &reqwest::Client) -> String {
     fetched
         .await
         .unwrap_or_else(|| FALLBACK_CODEX_VERSION.to_string())
+}
+
+/// Fetch the ChatGPT plan's usage windows into `sinew_core::quota`.
+/// `Ok(false)` when OpenAI is not connected with a ChatGPT login.
+pub async fn refresh_plan_limits() -> Result<bool> {
+    let Some(credential) = Credential::load_default()? else {
+        return Ok(false);
+    };
+    let http = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    let bearer = credential.bearer(&http).await?;
+    if !bearer.is_oauth {
+        return Ok(false);
+    }
+    let version = latest_codex_version(&http).await;
+    let mut request = http
+        .get(CODEX_USAGE_URL)
+        .header("authorization", format!("Bearer {}", bearer.token))
+        .header("originator", "codex_cli_rs")
+        .header("user-agent", format!("codex_cli_rs/{version}"));
+    if let Some(account_id) = &bearer.account_id {
+        request = request.header("chatgpt-account-id", account_id);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    if !response.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "ChatGPT plan usage request failed with {}",
+            response.status()
+        )));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|err| AppError::Decode(format!("invalid ChatGPT plan usage: {err}")))?;
+    sinew_core::quota::record_chatgpt_usage(&body);
+    Ok(true)
 }
 
 #[cfg(test)]

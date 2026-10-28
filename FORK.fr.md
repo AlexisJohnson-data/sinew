@@ -64,6 +64,7 @@ d'une utilisation quotidienne.
 - [Commandes slash et invocation à la demande](#commandes-slash-et-invocation-à-la-demande)
 - [Diagnostics des serveurs de langage](#diagnostics-des-serveurs-de-langage)
 - [Mémoire persistante](#mémoire-persistante)
+- [Suivi de l'usage et des coûts](#suivi-de-lusage-et-des-coûts)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -218,6 +219,45 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Suivi de l'usage et des coûts
+
+Chaque réponse du modèle est enregistrée (fournisseur, modèle, projet,
+conversation, agent secondaire, tokens d'entrée/sortie/cache/raisonnement)
+avec un coût estimé.
+
+- **Prix** : catalogue public d'OpenRouter, mis à jour chaque jour et mis en
+  cache (aucune clé nécessaire), tarifs du cache et du long contexte compris.
+  Les identifiants de Sinew sont associés à ceux d'OpenRouter
+  (`claude-opus-5-5` → `anthropic/claude-opus-5.5`) ; un modèle sans
+  correspondance compte ses tokens mais pas de coût, et tu peux fixer un prix
+  personnalisé par modèle.
+- **Deux sortes d'argent**, jamais mélangées : la **dépense** réelle des
+  fournisseurs payés au token (DeepSeek, OpenRouter) et l'**équivalent API**
+  de l'usage des abonnements (Claude, ChatGPT, Gemini, Kimi, OpenCode Go), qui
+  n'est pas facturé.
+- **Limites des forfaits** : Réglages → Usage interroge Claude et ChatGPT à
+  l'ouverture puis toutes les 5 minutes (les services qu'utilisent les apps
+  Claude et Codex) : les jauges sont à jour sans envoyer de message et
+  comptent l'usage hors de Sinew. Tous les forfaits sont lus : Claude
+  Pro/Max (5 h, semaine, semaines par modèle), ChatGPT Plus/Pro/Team (5 h +
+  semaine, limites par fonctionnalité) et Go (30 jours), avec le nom du
+  forfait et les heures de réinitialisation. Les en-têtes de réponse les
+  rafraîchissent entre-temps.
+- Un **cercle** à côté du composer montre la fenêtre la plus proche de sa
+  limite pour le fournisseur choisi ; un clic affiche toutes les fenêtres et
+  un lien vers les Réglages.
+- Le composer affiche le total de la conversation (`142k · ~$1.84`, détail
+  au survol). Réglages → **Usage** : aujourd'hui / 7 / 30 jours, cartes,
+  limites des forfaits, graphique par jour, tableaux par fournisseur, modèle
+  et projet, export CSV, budget journalier (simple notification) et prix
+  personnalisés.
+
+Code : `crates/sinew-app/src/usage.rs` (prix, coût, table `usage_events`,
+résumés, CSV), `crates/sinew-core/src/quota.rs` (en-têtes de quota),
+l'événement `UsageRecorded` dans `agent/turn.rs`, `src-tauri/src/usage.rs`
+(enregistrement, alerte de budget, commandes), `ConversationCost.tsx`,
+`UsageSection.tsx`.
 
 ### Mémoire persistante
 

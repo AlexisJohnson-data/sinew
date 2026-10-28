@@ -172,6 +172,7 @@ impl AnthropicProvider {
         retry_transient: bool,
     ) -> Result<reqwest::Response> {
         let response = self.send_json_accept(route, body, accept).await?;
+        record_quota_headers(&response);
         if response.status().is_success() || !response.status().is_client_error() {
             return Ok(response);
         }
@@ -195,6 +196,7 @@ impl AnthropicProvider {
         );
 
         let retry = self.send_json_accept(route, body, accept).await?;
+        record_quota_headers(&retry);
         if retry.status().is_success() || !retry.status().is_client_error() {
             return Ok(retry);
         }
@@ -794,6 +796,17 @@ fn is_context_length_message(message: &str) -> bool {
         || lower.contains("context length")
         || lower.contains("maximum context")
         || lower.contains("exceed") && lower.contains("context")
+}
+
+
+/// Claude plans report their 5-hour / weekly usage in response headers.
+fn record_quota_headers(response: &reqwest::Response) {
+    let headers: Vec<(&str, &str)> = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| Some((name.as_str(), value.to_str().ok()?)))
+        .collect();
+    sinew_core::quota::record_anthropic_headers(headers);
 }
 
 #[cfg(test)]

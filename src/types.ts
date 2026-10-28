@@ -243,6 +243,66 @@ export type LspServerStatus = {
   wsl: boolean;
 };
 
+/// Token and cost totals (sinew_app::usage::UsageTotals).
+export type UsageTotals = {
+  responses: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  meteredCostUsd: number;
+  subscriptionCostUsd: number;
+  unpricedResponses: number;
+};
+
+export type UsageGroup = UsageTotals & { key: string };
+
+export type UsageSummary = {
+  sinceMs: number;
+  totals: UsageTotals;
+  byProvider: UsageGroup[];
+  byModel: UsageGroup[];
+  byProject: UsageGroup[];
+  byDay: UsageGroup[];
+};
+
+export type QuotaWindow = {
+  label: string;
+  usedPercent: number;
+  resetsAtMs?: number;
+  windowMinutes?: number;
+};
+
+export type QuotaSnapshot = {
+  provider: string;
+  windows: QuotaWindow[];
+  status?: string;
+  plan?: string;
+  updatedAtMs: number;
+};
+
+export type PriceOverride = {
+  inputPerM: number;
+  outputPerM: number;
+  cacheReadPerM?: number | null;
+  cacheWritePerM?: number | null;
+};
+
+export type UsageSettings = {
+  dailyBudgetUsd?: number | null;
+  priceOverrides: Record<string, PriceOverride>;
+};
+
+export type UsageOverview = {
+  summary: UsageSummary;
+  quotas: QuotaSnapshot[];
+  settings: UsageSettings;
+  spentTodayUsd: number;
+  pricesAgeMs: number | null;
+};
+
 export type ProviderConnectionState =
   | "connected"
   | "connecting"
@@ -759,6 +819,12 @@ export type AgentEvent =
       file_changes: FileChange[];
       images: ToolResultImage[];
       meta?: Record<string, unknown> | null;
+    }
+  | {
+      type: "usage_recorded";
+      provider: string;
+      model: string;
+      usage: StreamTokenUsage;
     }
   | {
       type: "token_usage";

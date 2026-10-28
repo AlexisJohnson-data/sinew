@@ -955,6 +955,7 @@ pub(super) fn emit_agent_event(
     conversation_id: &str,
     event: &AgentEvent,
 ) -> Result<()> {
+    crate::usage::record_usage_event(app, workspace_id, conversation_id, event);
     let sequence = remember_active_turn_event(app, conversation_id, event.clone());
     remote::forward_agent_event(app, workspace_id, conversation_id, sequence, event);
     app.emit(

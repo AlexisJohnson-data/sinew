@@ -3,7 +3,7 @@ use crate::*;
 #[cfg(not(target_os = "windows"))]
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder},
-    Runtime,
+    Emitter, Runtime,
 };
 
 pub(super) fn error_to_string(error: impl std::fmt::Display) -> String {
@@ -170,6 +170,9 @@ pub(super) fn create_secondary_window(
         let _ = existing.unminimize();
         let _ = existing.show();
         let _ = existing.set_focus();
+        if let Some(section) = section {
+            let _ = app.emit_to(label.as_str(), "settings-open-section", section);
+        }
         return Ok(());
     }
 
