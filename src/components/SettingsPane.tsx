@@ -45,6 +45,7 @@ import type {
   SubAgentSettings,
   PermissionMode,
   SlashCommand,
+  LspServerStatus,
   PermissionRules,
   ShellPreference,
   ThinkingLevel,
@@ -226,6 +227,8 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   rtkEnabled: false,
   permissionMode: "auto",
   permissionRules: { allow: [], ask: [], deny: [] },
+  lspEnabled: true,
+  lspServerPaths: {},
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -536,6 +539,14 @@ export function SettingsPane({ workspacePath }: Props) {
     },
     [],
   );
+
+  const updateLspEnabled = useCallback((lspEnabled: boolean) => {
+    setToolSettings((current) => (current ? { ...current, lspEnabled } : current));
+  }, []);
+
+  const updateLspServerPaths = useCallback((lspServerPaths: Record<string, string>) => {
+    setToolSettings((current) => (current ? { ...current, lspServerPaths } : current));
+  }, []);
 
   const updatePermissionMode = useCallback((permissionMode: PermissionMode) => {
     setToolSettings((current) =>
@@ -1830,6 +1841,9 @@ export function SettingsPane({ workspacePath }: Props) {
             onNotificationsEnabledChange={updateNotificationsEnabled}
             onPonytailEnabledChange={updatePonytailEnabled}
             onRtkEnabledChange={updateRtkEnabled}
+            onLspEnabledChange={updateLspEnabled}
+            onLspServerPathsChange={updateLspServerPaths}
+            workspacePath={workspacePath}
             onLinkupApiKeyChange={updateLinkupApiKey}
             openAiStatus={openAiStatus}
           />
@@ -2898,6 +2912,9 @@ type ToolsSectionProps = {
   onNotificationsEnabledChange: (value: boolean) => void;
   onPonytailEnabledChange: (value: boolean) => void;
   onRtkEnabledChange: (value: boolean) => void;
+  onLspEnabledChange: (value: boolean) => void;
+  onLspServerPathsChange: (value: Record<string, string>) => void;
+  workspacePath: string;
   onLinkupApiKeyChange: (value: string) => void;
   openAiStatus: OpenAiProviderStatus | null;
 };
@@ -2934,6 +2951,9 @@ function ToolsSection({
   onNotificationsEnabledChange,
   onPonytailEnabledChange,
   onRtkEnabledChange,
+  onLspEnabledChange,
+  onLspServerPathsChange,
+  workspacePath,
   onLinkupApiKeyChange,
   openAiStatus,
 }: ToolsSectionProps) {
@@ -3224,6 +3244,13 @@ function ToolsSection({
                 : "RTK is off. Shell output goes to the context as-is. Requires the rtk binary on the system PATH."}
             </p>
           </section>
+          <DiagnosticsSettings
+            workspacePath={workspacePath}
+            enabled={settings?.lspEnabled ?? true}
+            serverPaths={settings?.lspServerPaths ?? {}}
+            onEnabledChange={onLspEnabledChange}
+            onServerPathsChange={onLspServerPathsChange}
+          />
           <section className="settings-pane__tool-group">
             <div className="settings-pane__tool-group-head">
               <h2>Permissions</h2>
@@ -5417,6 +5444,8 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
       ask: settings.permissionRules?.ask ?? [],
       deny: settings.permissionRules?.deny ?? [],
     },
+    lspEnabled: settings.lspEnabled !== false,
+    lspServerPaths: settings.lspServerPaths ?? {},
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];
@@ -6766,6 +6795,138 @@ const COMMAND_SOURCE_LABELS = {
 
 /// Slash commands: built-ins plus Markdown files from `.sinew/commands`,
 /// `.claude/commands` (project) and the same folders in the home directory.
+const LSP_STATE_LABELS: Record<LspServerStatus["state"], string> = {
+  not_installed: "Not installed",
+  idle: "Found · starts on the first edit",
+  starting: "Starting…",
+  indexing: "Indexing…",
+  ready: "Running",
+  failed: "Failed",
+};
+
+/// Settings → Tools → Diagnostics: master switch and per-language server state.
+function DiagnosticsSettings({
+  workspacePath,
+  enabled,
+  serverPaths,
+  onEnabledChange,
+  onServerPathsChange,
+}: {
+  workspacePath: string;
+  enabled: boolean;
+  serverPaths: Record<string, string>;
+  onEnabledChange: (value: boolean) => void;
+  onServerPathsChange: (value: Record<string, string>) => void;
+}) {
+  const [servers, setServers] = useState<LspServerStatus[] | null>(null);
+  const [restarting, setRestarting] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setServers(await api.lspStatus(workspacePath));
+    } catch {
+      setServers([]);
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const restart = async () => {
+    setRestarting(true);
+    try {
+      await api.lspRestart(workspacePath);
+      await load();
+    } finally {
+      setRestarting(false);
+    }
+  };
+
+  return (
+    <section className="settings-pane__tool-group">
+      <div className="settings-pane__tool-group-head">
+        <h2>Diagnostics</h2>
+      </div>
+      <div className="settings-pane__tool-provider-switch" role="group" aria-label="Diagnostics">
+        <button
+          type="button"
+          data-active={enabled ? "true" : "false"}
+          onClick={() => onEnabledChange(true)}
+        >
+          On
+        </button>
+        <button
+          type="button"
+          data-active={!enabled ? "true" : "false"}
+          onClick={() => onEnabledChange(false)}
+        >
+          Off
+        </button>
+      </div>
+      <p className="settings-pane__field-hint">
+        {enabled
+          ? "After each edit, the project's language server checks the file and its errors are added to the result, so the agent fixes them right away. The diagnostics tool lets it check other files. Servers that are not installed are skipped."
+          : "Off. The agent only sees errors when it builds or runs the tests itself."}
+      </p>
+      {enabled && (
+        <>
+          <div className="settings-pane__lsp-list">
+            {(servers ?? []).map((server) => (
+              <div key={server.language} className="settings-pane__lsp-row">
+                <span className="settings-pane__lsp-name">
+                  {server.label}
+                  {server.detected ? "" : " · not used by this project"}
+                </span>
+                <span className="settings-pane__lsp-state" data-state={server.state}>
+                  {LSP_STATE_LABELS[server.state]}
+                </span>
+                <span className="settings-pane__lsp-detail">
+                  {server.state === "not_installed" ? (
+                    <>
+                      Install {server.server}
+                      {server.wsl ? " inside WSL" : ""}: <code>{server.installHint}</code>
+                    </>
+                  ) : server.state === "failed" ? (
+                    server.detail
+                  ) : (
+                    <code>{server.command ?? server.server}</code>
+                  )}
+                </span>
+                <input
+                  className="addmcp__input settings-pane__lsp-path"
+                  value={serverPaths[server.language] ?? ""}
+                  placeholder={"Custom " + server.server + " path (optional)"}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    const next = { ...serverPaths };
+                    if (event.target.value.trim()) next[server.language] = event.target.value;
+                    else delete next[server.language];
+                    onServerPathsChange(next);
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div>
+            <button type="button" className="settings-pane__btn" onClick={() => void load()}>
+              Refresh
+            </button>{" "}
+            <button
+              type="button"
+              className="settings-pane__btn"
+              disabled={restarting}
+              onClick={() => void restart()}
+            >
+              {restarting ? "Restarting…" : "Restart servers"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function CommandsSection({ workspacePath }: { workspacePath: string }) {
   const [commands, setCommands] = useState<SlashCommand[] | null>(null);
   const [newName, setNewName] = useState("");

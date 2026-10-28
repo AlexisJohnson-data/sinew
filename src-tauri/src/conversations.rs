@@ -439,6 +439,27 @@ pub(super) async fn list_mcp_mentions(
         .collect())
 }
 
+/// Language servers for Settings: found or not, and what they are doing.
+#[tauri::command]
+pub(super) async fn lsp_status(
+    state: State<'_, DesktopState>,
+    input: WorkspaceInput,
+) -> std::result::Result<Vec<sinew_app::lsp::LspServerStatus>, String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    let settings = state.store.load_tool_settings().map_err(error_to_string)?;
+    Ok(sinew_app::lsp::status(&workspace_root, &settings).await)
+}
+
+/// Stop the workspace's language servers; they start again on the next edit.
+#[tauri::command]
+pub(super) async fn lsp_restart(input: WorkspaceInput) -> std::result::Result<(), String> {
+    let workspace_root =
+        normalize_workspace_root(&input.workspace_path).map_err(error_to_string)?;
+    sinew_app::lsp::restart_workspace(&workspace_root).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub(super) async fn list_installed_skills_command(
     state: State<'_, DesktopState>,

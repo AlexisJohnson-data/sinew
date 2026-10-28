@@ -1039,6 +1039,75 @@ function SwarmAgentsInline({
   );
 }
 
+type DiagnosticItem = {
+  path?: string;
+  line?: number;
+  column?: number;
+  severity?: string;
+  message?: string;
+  code?: string;
+};
+
+type DiagnosticsSummary = {
+  errors: number;
+  warnings: number;
+  pending: boolean;
+  items: DiagnosticItem[];
+};
+
+/// Set by sinew_app::lsp on edit_file / write_file / diagnostics results.
+function diagnosticsSummary(
+  meta: Record<string, unknown> | null | undefined,
+): DiagnosticsSummary | null {
+  const raw = meta?.diagnostics;
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  return {
+    errors: typeof value.errors === "number" ? value.errors : 0,
+    warnings: typeof value.warnings === "number" ? value.warnings : 0,
+    pending: value.pending === true,
+    items: Array.isArray(value.items) ? (value.items as DiagnosticItem[]) : [],
+  };
+}
+
+function DiagnosticsStrip({ summary }: { summary: DiagnosticsSummary }) {
+  const [open, setOpen] = useState(false);
+  const label = `${summary.errors} ${summary.errors === 1 ? "error" : "errors"}`;
+  return (
+    <div className="tool-card__diagnostics" data-open={open ? "true" : undefined}>
+      <button
+        type="button"
+        className="tool-card__diagnostics-toggle"
+        onClick={() => setOpen((value) => !value)}
+        title="Errors reported by the language server after this change"
+      >
+        <Icon icon="solar:danger-triangle-linear" width={12} height={12} />
+        <span>{label}</span>
+        <Icon
+          icon={open ? "solar:alt-arrow-up-linear" : "solar:alt-arrow-down-linear"}
+          width={11}
+          height={11}
+        />
+      </button>
+      {open && (
+        <ul className="tool-card__diagnostics-list">
+          {summary.items.map((item, index) => (
+            <li key={index} data-severity={item.severity ?? "error"}>
+              <span className="tool-card__diagnostics-where">
+                {item.path}:{item.line}:{item.column}
+              </span>
+              <span className="tool-card__diagnostics-message">
+                {item.code ? `[${item.code}] ` : ""}
+                {item.message}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ToolCard({
   name,
   status,
@@ -1240,6 +1309,7 @@ export function ToolCard({
     (isEditFile || isWriteFile) &&
     !!renderedFileChanges &&
     renderedFileChanges.length > 0;
+  const diagnostics = diagnosticsSummary(meta);
   const renderFileChanges = (bare = false) => {
     if (!renderedFileChanges || renderedFileChanges.length === 0) return null;
     return (
@@ -1247,6 +1317,7 @@ export function ToolCard({
         {renderedFileChanges.map((change, idx) => (
           <FileChangeBlock key={idx} change={change} live={isLiveFileChange} />
         ))}
+        {diagnostics && diagnostics.errors > 0 && <DiagnosticsStrip summary={diagnostics} />}
       </div>
     );
   };
@@ -1413,6 +1484,17 @@ export function ToolCard({
             }
           >
             {permissionOutcome === "blocked" ? "BLOCKED" : "DENIED"}
+          </span>
+        )}
+        {canonicalName === "diagnostics" && status !== "running" && diagnostics && (
+          <span
+            className="tool-card__rtk-badge tool-card__diagnostics-badge"
+            data-clean={diagnostics.errors === 0 ? "true" : undefined}
+            title={`${diagnostics.errors} errors, ${diagnostics.warnings} warnings`}
+          >
+            {diagnostics.errors === 0
+              ? "NO ERRORS"
+              : `${diagnostics.errors} ${diagnostics.errors === 1 ? "ERROR" : "ERRORS"}`}
           </span>
         )}
         {isBash && status !== "running" && rtkRewritten && (

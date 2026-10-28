@@ -205,6 +205,21 @@ export type ToolSettings = {
   rtkEnabled: boolean;
   permissionMode: PermissionMode;
   permissionRules: PermissionRules;
+  lspEnabled: boolean;
+  lspServerPaths: Record<string, string>;
+};
+
+/// One language server as Settings shows it (sinew_app::lsp::LspServerStatus).
+export type LspServerStatus = {
+  language: string;
+  label: string;
+  server: string;
+  command: string | null;
+  detected: boolean;
+  state: "not_installed" | "idle" | "starting" | "indexing" | "ready" | "failed";
+  detail: string | null;
+  installHint: string;
+  wsl: boolean;
 };
 
 export type ProviderConnectionState =

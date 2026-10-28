@@ -55,6 +55,7 @@ daily use.
 - [Per-account model auto-discovery](#per-account-model-auto-discovery)
 - [Agent permissions](#agent-permissions)
 - [Slash commands and on-demand invocation](#slash-commands-and-on-demand-invocation)
+- [Language-server diagnostics](#language-server-diagnostics)
 
 **Workspace & UX**
 - [WSL / Ubuntu shell support](#wsl--ubuntu-shell-support)
@@ -191,6 +192,38 @@ projects worked, started ones didn't. Two root causes, both in
 
 A request-body dump to `%TEMP%\sinew-google-bad-request.json` on any
 400 was added to make future diagnosis trivial.
+
+### Language-server diagnostics
+
+After every `edit_file` / `write_file`, Sinew asks the project's language
+server whether the file now has errors and appends them to the tool result,
+so the agent fixes what it just broke without waiting for a full build.
+
+| Language | Server | Install |
+|---|---|---|
+| Rust | `rust-analyzer` | `rustup component add rust-analyzer` |
+| TypeScript / JavaScript | `typescript-language-server` | `npm install -g typescript typescript-language-server` |
+| Python | `pyright-langserver` | `npm install -g pyright` |
+| Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
+
+- A server starts on the first edit of a file in its language, if it is
+  installed (nothing is installed automatically), and stays alive for the
+  workspace. In a `\\wsl$\…` workspace it runs inside WSL, with paths
+  translated between the UNC and Linux forms.
+- An edit waits **3 s at most**. Only **errors** are appended (20 at most);
+  if the server is still starting or indexing, the result just says so.
+- The new `diagnostics` tool lets the agent check other files (`paths`), or
+  list everything the servers report, warnings included.
+- The edit card shows an "N errors" pill that unfolds the list; the
+  `diagnostics` card shows a badge.
+- Settings → Tools → **Diagnostics**: on/off switch (on by default), state
+  of each server (not installed / found / indexing / running / failed) with
+  the install command, custom binary path, "Restart servers".
+
+Code: `crates/sinew-app/src/lsp.rs` (JSON-RPC client, server registry, WSL
+path mapping, the tool), hooks in `agent/tool_dispatch.rs` and
+`agent/turn.rs`, `lsp_status` / `lsp_restart` commands, `DiagnosticsStrip`
+in `src/components/chat/ToolCard.tsx`.
 
 ### Slash commands and on-demand invocation
 

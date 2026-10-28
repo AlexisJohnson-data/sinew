@@ -35,6 +35,7 @@ import type {
   DiscoveredModels,
   McpMention,
   SlashCommand,
+  LspServerStatus,
   OpenRouterModel,
   OpenRouterModelSearchResult,
   OpenRouterProviderStatus,
@@ -740,6 +741,12 @@ export const api = {
   /// Creates `.sinew/commands/<name>.md` from a template; returns its path.
   createSlashCommand(workspacePath: string, name: string) {
     return invoke<string>("create_slash_command", { input: { workspacePath, name } });
+  },
+  lspStatus(workspacePath: string) {
+    return invoke<LspServerStatus[]>("lsp_status", { input: { workspacePath } });
+  },
+  lspRestart(workspacePath: string) {
+    return invoke<void>("lsp_restart", { input: { workspacePath } });
   },
   listMcpMentions() {
     return invoke<McpMention[]>("list_mcp_mentions");

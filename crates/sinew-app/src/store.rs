@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -349,6 +349,19 @@ pub struct ToolSettings {
     /// `.sinew/permissions.json`.
     #[serde(default)]
     pub permission_rules: PermissionRules,
+    /// Language-server diagnostics after edits and the `diagnostics` tool
+    /// (`crate::lsp`). On by default; servers that are not installed are
+    /// skipped.
+    #[serde(default = "default_lsp_enabled")]
+    pub lsp_enabled: bool,
+    /// Optional server binary per language id (`rust`, `typescript`,
+    /// `python`, `go`), overriding the PATH lookup.
+    #[serde(default)]
+    pub lsp_server_paths: BTreeMap<String, String>,
+}
+
+fn default_lsp_enabled() -> bool {
+    true
 }
 
 fn default_notifications_enabled() -> bool {
@@ -378,6 +391,8 @@ impl Default for ToolSettings {
             rtk_enabled: false,
             permission_mode: PermissionMode::default(),
             permission_rules: PermissionRules::default(),
+            lsp_enabled: default_lsp_enabled(),
+            lsp_server_paths: BTreeMap::new(),
         }
     }
 }
@@ -450,6 +465,8 @@ pub struct ToolSettingsView {
     pub rtk_enabled: bool,
     pub permission_mode: PermissionMode,
     pub permission_rules: PermissionRules,
+    pub lsp_enabled: bool,
+    pub lsp_server_paths: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -661,6 +678,8 @@ pub fn tool_settings_view(settings: &ToolSettings, catalog: &[ToolDescriptor]) -
         rtk_enabled: settings.rtk_enabled,
         permission_mode: settings.permission_mode,
         permission_rules: settings.permission_rules.clone(),
+        lsp_enabled: settings.lsp_enabled,
+        lsp_server_paths: settings.lsp_server_paths.clone(),
         tools: catalog
             .iter()
             .filter_map(|descriptor| {
@@ -714,6 +733,7 @@ fn default_tool_display_name(name: &str) -> String {
         "clean_context" => "Clean context".to_string(),
         "update_goal" => "Update goal".to_string(),
         "context_compaction" => "Compact context".to_string(),
+        "diagnostics" => "Diagnostics".to_string(),
         _ => humanize_tool_name(name),
     }
 }

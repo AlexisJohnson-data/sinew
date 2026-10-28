@@ -83,6 +83,7 @@ Code map:
 │   │       ├── grep.rs
 │   │       ├── image.rs
 │   │       ├── lib.rs
+│   │       ├── lsp.rs
 │   │       ├── mcp.rs
 │   │       ├── mcp_oauth.rs
 │   │       ├── permissions.rs

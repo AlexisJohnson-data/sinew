@@ -501,6 +501,8 @@ pub fn run() {
             conversations::list_slash_commands,
             conversations::create_slash_command,
             conversations::list_mcp_mentions,
+            conversations::lsp_status,
+            conversations::lsp_restart,
             conversations::save_skill_settings,
             turns::check_rewrite_workspace_restore,
             turns::send_message,

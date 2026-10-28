@@ -60,6 +60,25 @@ pub(super) fn summarize_tool(name: &str, input: &Value) -> String {
             .unwrap_or_else(|| "workspace".to_string());
         return format!("Grep in {scope}");
     }
+    if name == tool_names::DIAGNOSTICS {
+        let paths: Vec<&str> = input
+            .get("paths")
+            .and_then(|value| value.as_array())
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter_map(|path| path.as_str())
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        return match paths.as_slice() {
+            [] => "Workspace diagnostics".to_string(),
+            [one] => format!("Diagnostics for {one}"),
+            [first, rest @ ..] => format!("Diagnostics for {first} +{}", rest.len()),
+        };
+    }
     if name == tool_names::GLOB {
         let pattern = input
             .get("pattern")

@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     permissions::{self, Decision},
-    rtk, tool_names, BashTool, BrowserTools, CreateImageTool, EditFileTool, GlobTool, GrepTool,
+    lsp, rtk, tool_names, BashTool, BrowserTools, CreateImageTool, EditFileTool, GlobTool, GrepTool,
     McpToolRegistry, QuestionTool, ReadFingerprint, ReadTool, SkillTool, SubAgentTool, TeamTool,
     ToDoListTool, TodoListState, ToolRunResult, ToolSettings, WebFetchTool, WebSearchTool,
     WriteFileTool,
@@ -117,12 +117,18 @@ pub(super) async fn run_tool(
         if mode == AgentMode::Plan {
             return ToolRunResult::err("edit_file is unavailable in Plan mode", Vec::new());
         }
-        edit_file.run(input, read_fingerprints).await
+        let mut result = edit_file.run(input, read_fingerprints).await;
+        lsp::attach_after_edit(bash.workspace_root(), tool_settings, &mut result).await;
+        result
     } else if canonical_name == tool_names::WRITE_FILE {
         if mode == AgentMode::Plan {
             return ToolRunResult::err("write_file is unavailable in Plan mode", Vec::new());
         }
-        write_file.run(input, read_fingerprints).await
+        let mut result = write_file.run(input, read_fingerprints).await;
+        lsp::attach_after_edit(bash.workspace_root(), tool_settings, &mut result).await;
+        result
+    } else if canonical_name == tool_names::DIAGNOSTICS {
+        lsp::run_tool(bash.workspace_root(), tool_settings, input).await
     } else if canonical_name == tool_names::CREATE_IMAGE {
         if mode == AgentMode::Plan {
             return ToolRunResult::err("create_image is unavailable in Plan mode", Vec::new());

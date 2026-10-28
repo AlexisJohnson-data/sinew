@@ -162,6 +162,9 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
             tool_descriptors.insert(5, write_file.descriptor());
             tool_descriptors.push(create_image.descriptor());
         }
+        if tool_settings.lsp_enabled {
+            tool_descriptors.push(crate::lsp::descriptor());
+        }
         if mode == AgentMode::Goal {
             tool_descriptors.push(update_goal_descriptor());
         }
@@ -679,7 +682,15 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                     run_update_goal(&mut goal_workflow, input.clone())
                 } else if let Some(handle) = eager_tool_results.remove(id) {
                     match handle.await {
-                        Ok(result) => result,
+                        Ok(mut result) => {
+                            crate::lsp::attach_after_edit(
+                                bash.workspace_root(),
+                                &tool_settings,
+                                &mut result,
+                            )
+                            .await;
+                            result
+                        }
                         Err(err) => {
                             ToolRunResult::err(format!("write_file task failed: {err}"), Vec::new())
                         }

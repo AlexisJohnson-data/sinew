@@ -62,6 +62,7 @@ d'une utilisation quotidienne.
 - [Suivi automatique des modèles par compte](#suivi-automatique-des-modèles-par-compte)
 - [Permissions de l'agent](#permissions-de-lagent)
 - [Commandes slash et invocation à la demande](#commandes-slash-et-invocation-à-la-demande)
+- [Diagnostics des serveurs de langage](#diagnostics-des-serveurs-de-langage)
 
 **Espace de travail & UX**
 - [Prise en charge du shell WSL / Ubuntu](#prise-en-charge-du-shell-wsl--ubuntu)
@@ -216,6 +217,41 @@ racines, toutes deux dans `crates/sinew-google/src/client.rs` :
 
 Un vidage du corps de requête vers `%TEMP%\sinew-google-bad-request.json`
 sur toute erreur 400 a été ajouté pour rendre le diagnostic futur trivial.
+
+### Diagnostics des serveurs de langage
+
+Après chaque `edit_file` / `write_file`, Sinew demande au serveur de langage
+du projet si le fichier contient des erreurs et les ajoute au résultat de
+l'outil : l'agent corrige ce qu'il vient de casser sans attendre un build
+complet.
+
+| Langage | Serveur | Installation |
+|---|---|---|
+| Rust | `rust-analyzer` | `rustup component add rust-analyzer` |
+| TypeScript / JavaScript | `typescript-language-server` | `npm install -g typescript typescript-language-server` |
+| Python | `pyright-langserver` | `npm install -g pyright` |
+| Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
+
+- Un serveur démarre à la première édition d'un fichier de son langage, s'il
+  est installé (rien n'est installé automatiquement), et reste ouvert pour le
+  projet. Dans un projet `\\wsl$\…`, il tourne dans WSL, et les chemins sont
+  traduits entre les formes UNC et Linux.
+- Une édition attend **3 s au plus**. Seules les **erreurs** sont ajoutées
+  (20 au plus) ; si le serveur démarre ou indexe encore, le résultat le dit.
+- Le nouvel outil `diagnostics` permet à l'agent de vérifier d'autres
+  fichiers (`paths`) ou de lister tout ce que signalent les serveurs,
+  avertissements compris.
+- La carte d'édition affiche une pastille « N errors » qui déplie la liste ;
+  la carte `diagnostics` affiche un badge.
+- Réglages → Outils → **Diagnostics** : interrupteur (activé par défaut), état
+  de chaque serveur (non installé / trouvé / indexation / actif / en échec)
+  avec la commande d'installation, chemin de binaire personnalisé,
+  « Restart servers ».
+
+Code : `crates/sinew-app/src/lsp.rs` (client JSON-RPC, registre des serveurs,
+traduction des chemins WSL, l'outil), branchements dans
+`agent/tool_dispatch.rs` et `agent/turn.rs`, commandes `lsp_status` /
+`lsp_restart`, `DiagnosticsStrip` dans `src/components/chat/ToolCard.tsx`.
 
 ### Commandes slash et invocation à la demande
 

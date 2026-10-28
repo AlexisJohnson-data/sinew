@@ -7,6 +7,7 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod image;
+pub mod lsp;
 pub mod mcp;
 pub mod mcp_oauth;
 pub mod permissions;
