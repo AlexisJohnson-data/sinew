@@ -822,8 +822,11 @@ export function SettingsPane({ workspacePath }: Props) {
       await api.openExternalUrl(login.authUrl);
       setProvidersMessage("Waiting for browser confirmation…");
     } catch (err) {
-      setProvidersMessage(err instanceof Error ? err.message : String(err));
-      void loadOpenAiStatus();
+      // Reload the card first: the status call resets the message, which
+      // would otherwise hide why the login could not start.
+      const message = err instanceof Error ? err.message : String(err);
+      await loadOpenAiStatus();
+      setProvidersMessage(message);
     } finally {
       setProvidersBusy(false);
     }
@@ -870,8 +873,11 @@ export function SettingsPane({ workspacePath }: Props) {
       await api.openExternalUrl(login.authUrl);
       setProvidersMessage("Waiting for browser confirmation...");
     } catch (err) {
-      setProvidersMessage(err instanceof Error ? err.message : String(err));
-      void loadAnthropicStatus();
+      // Reload the card first: the status call resets the message, which
+      // would otherwise hide why the login could not start.
+      const message = err instanceof Error ? err.message : String(err);
+      await loadAnthropicStatus();
+      setProvidersMessage(message);
     } finally {
       setProvidersBusy(false);
     }
@@ -918,8 +924,11 @@ export function SettingsPane({ workspacePath }: Props) {
       await api.openExternalUrl(login.authUrl);
       setProvidersMessage("Waiting for browser confirmation...");
     } catch (err) {
-      setProvidersMessage(err instanceof Error ? err.message : String(err));
-      void loadGoogleStatus();
+      // Reload the card first: the status call resets the message, which
+      // would otherwise hide why the login could not start.
+      const message = err instanceof Error ? err.message : String(err);
+      await loadGoogleStatus();
+      setProvidersMessage(message);
     } finally {
       setProvidersBusy(false);
     }
@@ -966,8 +975,11 @@ export function SettingsPane({ workspacePath }: Props) {
       await api.openExternalUrl(login.authUrl);
       setProvidersMessage(`Waiting for browser confirmation (${login.userCode})...`);
     } catch (err) {
-      setProvidersMessage(err instanceof Error ? err.message : String(err));
-      void loadKimiStatus();
+      // Reload the card first: the status call resets the message, which
+      // would otherwise hide why the login could not start.
+      const message = err instanceof Error ? err.message : String(err);
+      await loadKimiStatus();
+      setProvidersMessage(message);
     } finally {
       setProvidersBusy(false);
     }

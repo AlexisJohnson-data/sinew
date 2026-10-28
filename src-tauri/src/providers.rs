@@ -486,9 +486,18 @@ pub(super) async fn handle_openai_oauth_request(
 
 pub(super) async fn bind_anthropic_oauth_listener() -> Result<tokio::net::TcpListener> {
     const CALLBACK_PORT: u16 = 53692;
-    tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
-        .await
-        .context("unable to bind Anthropic OAuth callback port 53692")
+    match tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT)).await {
+        Ok(listener) => Ok(listener),
+        // Windows reserves shifting port ranges for Hyper-V / WSL / Docker
+        // (`netsh int ipv4 show excludedportrange protocol=tcp`), and 53692
+        // can land in one. The redirect URI carries the port, and loopback
+        // redirects accept any port, so let the OS pick a free one.
+        Err(fixed_err) => tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .with_context(|| {
+                format!("unable to bind an Anthropic OAuth callback port (53692: {fixed_err})")
+            }),
+    }
 }
 
 pub(super) async fn run_anthropic_oauth_server(
@@ -613,7 +622,11 @@ pub(super) async fn bind_google_oauth_listener() -> Result<tokio::net::TcpListen
     // so we must bind that exact port (not a random one).
     tokio::net::TcpListener::bind(("127.0.0.1", 51121))
         .await
-        .context("unable to bind Google OAuth callback port")
+        .context(
+            "unable to bind Google OAuth callback port 51121. If no app is using it, Windows may \
+             have reserved it for Hyper-V/WSL (check `netsh int ipv4 show excludedportrange \
+             protocol=tcp`); restarting the WinNAT service or rebooting frees it",
+        )
 }
 
 pub(super) async fn run_google_oauth_server(
