@@ -103,6 +103,9 @@ export function UsageSection() {
     run(() => api.saveUsageSettings(settings), "Saved");
 
   const totals = overview?.summary.totals;
+  const subscriptionGroups = (overview?.summary.byProvider ?? [])
+    .filter((group) => group.subscriptionCostUsd > 0)
+    .sort((a, b) => b.subscriptionCostUsd - a.subscriptionCostUsd);
 
   return (
     <>
@@ -150,11 +153,24 @@ export function UsageSection() {
             value={totals ? formatUsd(totals.meteredCostUsd) : "…"}
             hint="Pay-per-token providers (DeepSeek, OpenRouter): real money."
           />
-          <UsageCard
-            label="API equivalent"
-            value={totals ? formatUsd(totals.subscriptionCostUsd) : "…"}
-            hint="What your subscription use would cost on the API. Not billed."
-          />
+          {/* One card per plan: Claude and OpenCode Go are separate
+              subscriptions, so their API equivalents are never summed. */}
+          {subscriptionGroups.length > 0 ? (
+            subscriptionGroups.map((group) => (
+              <UsageCard
+                key={group.key}
+                label={`${providerLabel(group.key)} · API equivalent`}
+                value={formatUsd(group.subscriptionCostUsd)}
+                hint="What this plan's use would cost on the API. Not billed."
+              />
+            ))
+          ) : (
+            <UsageCard
+              label="API equivalent"
+              value={totals ? formatUsd(0) : "…"}
+              hint="What your subscription use would cost on the API. Not billed."
+            />
+          )}
           <UsageCard
             label="Tokens"
             value={totals ? formatTokens(totals.totalTokens) : "…"}
@@ -233,7 +249,7 @@ function QuotaList({ quotas, loading }: { quotas: QuotaSnapshot[]; loading: bool
         <p className="settings-pane__field-hint">
           {loading
             ? "Asking Claude and ChatGPT for your plan limits…"
-            : "No plan limits: connect Claude or ChatGPT with your subscription in Providers."}
+            : "No plan limits: connect Claude or ChatGPT with your subscription, or an OpenCode Go key, in Providers."}
         </p>
       ) : (
         quotas.map((quota) => (

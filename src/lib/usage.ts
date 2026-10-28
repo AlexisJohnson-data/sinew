@@ -29,7 +29,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   kimi: "Kimi",
   deepseek: "DeepSeek",
   openrouter: "OpenRouter",
-  opencode_go: "OpenCode Go",
+  "opencode-go": "OpenCode Go",
 };
 
 export function providerLabel(provider: string): string {
@@ -95,5 +95,6 @@ export function quotaLevel(percent: number): "ok" | "warn" | "danger" {
 export function quotaProvider(provider: string | undefined): string | null {
   if (provider === "anthropic") return "anthropic";
   if (provider === "openai") return "openai";
+  if (provider === "opencode-go") return "opencode-go";
   return null;
 }

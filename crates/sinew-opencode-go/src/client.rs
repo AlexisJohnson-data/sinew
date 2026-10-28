@@ -199,6 +199,38 @@ fn reasoning_effort_flag(effort: Option<Effort>) -> Option<&'static str> {
     }
 }
 
+/// Asks OpenCode Go how much of the plan's rolling, weekly and monthly
+/// allowance is used, and records it as plan limits. `Ok(false)` when no
+/// key is stored.
+pub async fn refresh_plan_limits() -> Result<bool> {
+    let Some(credential) = Credential::load_default()? else {
+        return Ok(false);
+    };
+    let http = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    let response = http
+        .get(format!("{}/usage", BASE_URL.trim_end_matches('/')))
+        .bearer_auth(credential.api_key())
+        .send()
+        .await
+        .map_err(|err| AppError::Network(err.to_string()))?;
+    if !response.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "OpenCode Go usage request failed with {}",
+            response.status()
+        )));
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|err| AppError::Decode(format!("invalid OpenCode Go usage: {err}")))?;
+    sinew_core::quota::record_opencode_go_usage(&body);
+    Ok(true)
+}
+
 /// Fetch the live model ids from OpenCode Go's OpenAI-compatible `/models`
 /// listing. The response is `{ "data": [ { "id": ... }, ... ] }`; we return the
 /// ids so the app can offer every model the subscription currently exposes

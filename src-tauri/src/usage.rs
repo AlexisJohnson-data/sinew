@@ -195,15 +195,19 @@ pub(super) async fn refresh_plan_limits() -> Vec<sinew_core::quota::QuotaSnapsho
         .lock()
         .await;
     if last.map_or(true, |at| at.elapsed() >= Duration::from_secs(60)) {
-        let (claude, chatgpt) = tokio::join!(
+        let (claude, chatgpt, opencode_go) = tokio::join!(
             sinew_anthropic::refresh_plan_limits(),
-            sinew_openai::refresh_plan_limits()
+            sinew_openai::refresh_plan_limits(),
+            sinew_opencode_go::refresh_plan_limits()
         );
         if let Err(err) = claude {
             tracing::warn!(%err, "unable to fetch Claude plan limits");
         }
         if let Err(err) = chatgpt {
             tracing::warn!(%err, "unable to fetch ChatGPT plan limits");
+        }
+        if let Err(err) = opencode_go {
+            tracing::warn!(%err, "unable to fetch OpenCode Go plan limits");
         }
         *last = Some(std::time::Instant::now());
     }

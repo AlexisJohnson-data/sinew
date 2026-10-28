@@ -291,6 +291,46 @@ pub fn record_anthropic_usage(body: &Value) {
     record("anthropic", windows, status);
 }
 
+/// Records the body of OpenCode Go's `GET /zen/go/v1/usage`: a rolling
+/// 5-hour, a weekly and a monthly window, each `{status, percent, resetsAt}`.
+pub fn record_opencode_go_usage(body: &Value) {
+    let (windows, status) = opencode_go_usage_windows(body);
+    record("opencode-go", windows, status);
+}
+
+fn opencode_go_usage_windows(body: &Value) -> (Vec<QuotaWindow>, Option<String>) {
+    let usage = body.get("usage").unwrap_or(body);
+    let mut windows = Vec::new();
+    let mut status = None;
+    for (key, label, minutes) in [
+        ("rolling", "5h", 300),
+        ("weekly", "7d", 10_080),
+        ("monthly", "30d", 43_200),
+    ] {
+        let Some(window) = usage.get(key) else {
+            continue;
+        };
+        let Some(percent) = window.get("percent").and_then(Value::as_f64) else {
+            continue;
+        };
+        if let Some(state) = window.get("status").and_then(Value::as_str) {
+            if state != "ok" && status.is_none() {
+                status = Some(format!("{key} limit {state}"));
+            }
+        }
+        windows.push(QuotaWindow {
+            label: label.to_string(),
+            used_percent: percent,
+            resets_at_ms: window
+                .get("resetsAt")
+                .and_then(Value::as_str)
+                .and_then(parse_rfc3339_ms),
+            window_minutes: Some(minutes),
+        });
+    }
+    (windows, status)
+}
+
 fn anthropic_usage_windows(body: &Value) -> (Vec<QuotaWindow>, Option<String>) {
     let resets = |window: &Value| {
         window
@@ -490,6 +530,24 @@ mod tests {
 
         assert_eq!(parse_rfc3339_ms("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse_rfc3339_ms("1970-01-01T01:00:00+01:00"), Some(0));
+    }
+
+    #[test]
+    fn opencode_go_usage_becomes_windows() {
+        let (windows, status) = opencode_go_usage_windows(&serde_json::json!({
+            "usage": {
+                "rolling": { "status": "ok", "percent": 1, "resetsAt": "1970-01-01T05:00:00.000Z" },
+                "weekly": { "status": "ok", "percent": 0, "resetsAt": "2026-11-02T00:00:00.000Z" },
+                "monthly": { "status": "exceeded", "percent": 100 }
+            }
+        }));
+        let labels: Vec<_> = windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["5h", "7d", "30d"]);
+        assert_eq!(windows[0].used_percent, 1.0);
+        assert_eq!(windows[0].resets_at_ms, Some(18_000_000));
+        assert_eq!(windows[2].window_minutes, Some(43_200));
+        assert_eq!(windows[2].resets_at_ms, None);
+        assert_eq!(status.as_deref(), Some("monthly limit exceeded"));
     }
 
     #[test]
