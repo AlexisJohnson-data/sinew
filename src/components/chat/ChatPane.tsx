@@ -2264,7 +2264,7 @@ export function ChatPane({
       return;
     }
     if (forceBrowser && value) {
-      value = `Use the browser_* tools to actually open and visually inspect what I am describing — do NOT just read the source code. Launch the browser via browser_open, then drive it with browser_screenshot / browser_dom / browser_click / browser_eval as needed. My request:\n\n${value}`;
+      value = `Use the browser_* tools to actually open and visually inspect what I am describing — do NOT just read the source code. Open it with browser_navigate, act on the element references it returns (browser_click, browser_type…), and check visuals with browser_screenshot. My request:\n\n${value}`;
     }
     if (view.status === "streaming" || isStreaming) {
       const editing =

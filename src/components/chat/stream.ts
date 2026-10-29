@@ -634,6 +634,75 @@ function basename(path: string): string {
   return idx >= 0 ? path.slice(idx + 1) : path;
 }
 
+/// "Click ref_12", "Open localhost:5173", "Find “sign in button”"…
+function browserSummary(name: string, input: unknown): string | undefined {
+  const record = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : "");
+  const clip = (value: string, max = 60) =>
+    value.length > max ? `${value.slice(0, max - 1)}…` : value;
+  const target = () => {
+    if (text("ref")) return text("ref");
+    const coordinate = record.coordinate;
+    if (Array.isArray(coordinate) && coordinate.length === 2) {
+      return `(${Math.round(Number(coordinate[0]))}, ${Math.round(Number(coordinate[1]))})`;
+    }
+    return "";
+  };
+  switch (name) {
+    case "browser_navigate": {
+      const url = text("url");
+      if (url === "back" || url === "forward" || url === "reload") {
+        return url === "reload" ? "Reload page" : `Go ${url}`;
+      }
+      return url ? `Open ${clip(url.replace(/^https?:\/\//, ""))}` : "Open page";
+    }
+    case "browser_read_page":
+      return text("ref") ? `Read ${text("ref")}` : "Read page";
+    case "browser_find":
+      return `Find “${clip(text("query"), 50)}”`;
+    case "browser_get_text":
+      return "Read page text";
+    case "browser_screenshot":
+      return Array.isArray(record.zoom) ? "Zoom screenshot" : "Screenshot";
+    case "browser_click":
+      return `Click ${target()}`.trim();
+    case "browser_type":
+      return `Type “${clip(text("text"), 40)}”${text("ref") ? ` into ${text("ref")}` : ""}`;
+    case "browser_key":
+      return `Press ${text("keys")}`;
+    case "browser_form_input":
+      return `Set ${text("ref")} to ${clip(JSON.stringify(record.value ?? ""), 40)}`;
+    case "browser_hover":
+      return `Hover ${target()}`.trim();
+    case "browser_scroll":
+      return text("direction") ? `Scroll ${text("direction")}` : `Scroll to ${target()}`;
+    case "browser_drag":
+      return "Drag";
+    case "browser_wait":
+      return text("text") ? `Wait for “${clip(text("text"), 40)}”` : "Wait";
+    case "browser_tabs":
+      return `Tabs: ${text("action")}${text("tab_id") ? ` ${text("tab_id")}` : ""}`;
+    case "browser_console":
+      return "Console";
+    case "browser_network":
+      return typeof record.id === "number" ? `Request #${record.id}` : "Network";
+    case "browser_performance":
+      return "Performance";
+    case "browser_resize":
+      return `Viewport ${record.width}×${record.height}`;
+    case "browser_record":
+      return text("action") === "stop" ? "Stop recording" : "Record";
+    case "browser_close":
+      return "Close browser";
+    case "browser_eval":
+      return `Run JS: ${clip(text("expression"), 50)}`;
+    case "browser_upload":
+      return `Upload to ${text("ref")}`;
+    default:
+      return undefined;
+  }
+}
+
 function summaryFromInput(
   name: string,
   input: unknown,
@@ -659,6 +728,10 @@ function summaryFromInput(
   if (canonicalName === "read" && input && typeof input === "object") {
     const record = input as Record<string, unknown>;
     if (typeof record.path === "string") return `Read ${record.path}`;
+  }
+  if (name.startsWith("browser_")) {
+    const summary = browserSummary(name, input);
+    if (summary) return summary;
   }
   if (canonicalName === "edit_file") {
     return editFileSummary(input);

@@ -339,6 +339,11 @@ pub struct ToolSettings {
     /// `true` so the browser stays available out of the box.
     #[serde(default = "default_browser_enabled")]
     pub browser_enabled: bool,
+    /// Adds `browser_eval` (run JavaScript in the page) and
+    /// `browser_upload` (send project files to a page). Off by default: a
+    /// hostile page could talk the agent into misusing them.
+    #[serde(default)]
+    pub browser_scripts_enabled: bool,
     /// Ponytail "lazy senior dev" ruleset — injects a YAGNI philosophy
     /// into the system prompt so the agent generates structurally less
     /// code. Opt-in, defaults to `false`.
@@ -409,6 +414,7 @@ impl Default for ToolSettings {
             shell_preference: ShellPreference::default(),
             notifications_enabled: default_notifications_enabled(),
             browser_enabled: default_browser_enabled(),
+            browser_scripts_enabled: false,
             ponytail_enabled: false,
             ponytail_prompt: String::new(),
             rtk_enabled: false,

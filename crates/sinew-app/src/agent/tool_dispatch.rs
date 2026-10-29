@@ -157,7 +157,7 @@ pub(super) async fn run_tool(
         if !tool_settings.browser_enabled {
             return ToolRunResult::err("browser tools are disabled in Settings", Vec::new());
         }
-        browser.run(name, input).await
+        browser.run(name, input, tool_settings.browser_scripts_enabled).await
     } else if canonical_name == tool_names::SKILL {
         skill.run(input).await
     } else if name.starts_with("subagent_") {

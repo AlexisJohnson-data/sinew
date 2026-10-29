@@ -235,6 +235,8 @@ const FALLBACK_TOOL_SETTINGS: ToolSettings = {
   lspServerPaths: {},
   memoryEnabled: true,
   memoryAutoSave: true,
+  browserEnabled: true,
+  browserScriptsEnabled: false,
 };
 const PROVIDERS_CHANGED_EVENT = "sinew:providers-changed";
 const TOOL_SETTINGS_CHANGED_EVENT = "sinew:tool-settings-changed";
@@ -577,6 +579,14 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
 
   const updateMemoryEnabled = useCallback((memoryEnabled: boolean) => {
     setToolSettings((current) => (current ? { ...current, memoryEnabled } : current));
+  }, []);
+
+  const updateBrowserEnabled = useCallback((browserEnabled: boolean) => {
+    setToolSettings((current) => (current ? { ...current, browserEnabled } : current));
+  }, []);
+
+  const updateBrowserScriptsEnabled = useCallback((browserScriptsEnabled: boolean) => {
+    setToolSettings((current) => (current ? { ...current, browserScriptsEnabled } : current));
   }, []);
 
   const updateMemoryAutoSave = useCallback((memoryAutoSave: boolean) => {
@@ -1927,6 +1937,8 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
             onLspEnabledChange={updateLspEnabled}
             onMemoryEnabledChange={updateMemoryEnabled}
             onMemoryAutoSaveChange={updateMemoryAutoSave}
+            onBrowserEnabledChange={updateBrowserEnabled}
+            onBrowserScriptsEnabledChange={updateBrowserScriptsEnabled}
             onLspServerPathsChange={updateLspServerPaths}
             workspacePath={workspacePath}
             onLinkupApiKeyChange={updateLinkupApiKey}
@@ -3004,6 +3016,8 @@ type ToolsSectionProps = {
   onLspEnabledChange: (value: boolean) => void;
   onMemoryEnabledChange: (value: boolean) => void;
   onMemoryAutoSaveChange: (value: boolean) => void;
+  onBrowserEnabledChange: (value: boolean) => void;
+  onBrowserScriptsEnabledChange: (value: boolean) => void;
   onLspServerPathsChange: (value: Record<string, string>) => void;
   workspacePath: string;
   onLinkupApiKeyChange: (value: string) => void;
@@ -3046,6 +3060,8 @@ function ToolsSection({
   onLspServerPathsChange,
   onMemoryEnabledChange,
   onMemoryAutoSaveChange,
+  onBrowserEnabledChange,
+  onBrowserScriptsEnabledChange,
   workspacePath,
   onLinkupApiKeyChange,
   openAiStatus,
@@ -3344,6 +3360,56 @@ function ToolsSection({
             onEnabledChange={onLspEnabledChange}
             onServerPathsChange={onLspServerPathsChange}
           />
+          <section className="settings-pane__tool-group">
+            <div className="settings-pane__tool-group-head">
+              <h2>Browser</h2>
+            </div>
+            <div className="settings-pane__tool-provider-switch" role="group" aria-label="Browser">
+              <button
+                type="button"
+                data-active={settings?.browserEnabled !== false ? "true" : "false"}
+                onClick={() => onBrowserEnabledChange(true)}
+              >
+                On
+              </button>
+              <button
+                type="button"
+                data-active={settings?.browserEnabled === false ? "true" : "false"}
+                onClick={() => onBrowserEnabledChange(false)}
+              >
+                Off
+              </button>
+            </div>
+            {settings?.browserEnabled !== false && (
+              <div
+                className="settings-pane__tool-provider-switch"
+                role="group"
+                aria-label="Page scripts and uploads"
+              >
+                <button
+                  type="button"
+                  data-active={settings?.browserScriptsEnabled !== true ? "true" : "false"}
+                  onClick={() => onBrowserScriptsEnabledChange(false)}
+                >
+                  Safe
+                </button>
+                <button
+                  type="button"
+                  data-active={settings?.browserScriptsEnabled === true ? "true" : "false"}
+                  onClick={() => onBrowserScriptsEnabledChange(true)}
+                >
+                  Scripts and uploads
+                </button>
+              </div>
+            )}
+            <p className="settings-pane__field-hint">
+              {settings?.browserEnabled === false
+                ? "The agent has no browser."
+                : settings?.browserScriptsEnabled === true
+                  ? "The agent can also run JavaScript in pages (browser_eval) and send project files to them (browser_upload). A malicious page could try to talk it into misusing them."
+                  : "The agent drives Chrome: it reads pages, clicks, types, and checks the console, network and performance. Running JavaScript in pages and uploading files are off."}
+            </p>
+          </section>
           <section className="settings-pane__tool-group">
             <div className="settings-pane__tool-group-head">
               <h2>Memory</h2>
@@ -5591,6 +5657,8 @@ function normalizeToolSettings(settings: ToolSettings): ToolSettings {
     lspServerPaths: settings.lspServerPaths ?? {},
     memoryEnabled: settings.memoryEnabled !== false,
     memoryAutoSave: settings.memoryAutoSave !== false,
+    browserEnabled: settings.browserEnabled !== false,
+    browserScriptsEnabled: settings.browserScriptsEnabled === true,
     tools: (settings.tools ?? []).flatMap((tool) => {
       const name = canonicalToolName(tool.name?.trim() ?? "");
       if (!name || seen.has(name)) return [];

@@ -83,32 +83,49 @@ daily use.
 
 ### Real browser automation (CDP / Chromium)
 
-The agent can drive a real Chromium browser over the Chrome DevTools
-Protocol — open pages, screenshot, read the DOM, click, type, eval JS,
-etc. — so it can actually *look at* a running site instead of guessing
-from source. Cherry-picked and adapted from Glamgar's work on
-[Paseru/sinew#28](https://github.com/Paseru/sinew/pull/28).
+The agent drives a real Chrome (or Edge) over the Chrome DevTools Protocol
+so it can *use* a running site instead of guessing from source. Started
+from Glamgar's work on [Paseru/sinew#28](https://github.com/Paseru/sinew/pull/28),
+then rebuilt on the model of Claude's browser toolset, Playwright MCP and
+Chrome DevTools MCP.
 
-- New crate `crates/sinew-browser/` (chromiumoxide 0.7 + tokio): session
-  management, DOM, screenshots, gif recording.
-- 18 agent tools in `crates/sinew-app/src/browser.rs`
-  (`browser_open`, `browser_screenshot`, `browser_dom`, `browser_click`,
-  `browser_eval`, …), names in `tool_names.rs` (`BROWSER_*` consts).
-- Wired into the turn in `crates/sinew-app/src/agent/turn.rs`: the
-  browser descriptors are added **only when `browser_enabled` and not in
-  Plan mode**, plus a `<browser_tools>` system-prompt block so the agent
-  knows the browser exists (otherwise it tries to `apt-get install
-  chromium` in the shell).
-- **Chrome is preferred over Edge** in `session.rs::find_browser_executable`
-  (searches per-user `%LOCALAPPDATA%` paths too).
-- **Headed by default**: chromiumoxide's builder injects `--headless`,
-  so we call `.with_head()` explicitly when `headless = false` — you
-  actually *see* Chrome navigate.
-- **Force-browser toggle** (globe button in the composer): one-shot mode
-  that prepends an instruction making the agent use the `browser_*` tools
-  instead of reading code. `src/components/chat/ChatPane.tsx`.
-- **Inline screenshots**: `browser_*` tool cards render the returned
-  screenshot directly under the card (`src/components/chat/ToolCard.tsx`).
+- **References instead of CSS selectors.** `browser_read_page` returns
+  Chrome's accessibility tree, compacted (`button "Send" [ref_12]`), across
+  same-origin iframes; `browser_find` matches elements by what they say
+  ("email field"). Actions take a `ref`. A reference names one DOM node,
+  stays the same across reads, is never reused in a tab, and a stale one
+  says so instead of hitting another element. Screenshot coordinates are
+  the fallback (canvas, video, cross-origin frames): every tab has a fixed
+  1280×800 viewport, so they match.
+- **Real input.** Clicks, typing, keys, hover, wheel and drag are Chrome
+  input events at the element's center, after scrolling it into view and
+  checking it is enabled and not covered (the result names what covers
+  it). Text goes in with `Input.insertText`, which React-style inputs
+  accept; `browser_form_input` sets selects, checkboxes, dates.
+- **Smart waiting.** After an action Sinew waits for no short request in
+  flight and no DOM mutation (5 s max) instead of a fixed sleep, then
+  reports what changed: navigation, a new tab (picked up automatically),
+  "page updated", and new console errors.
+- **Debugging.** `browser_console` (errors and uncaught exceptions with
+  stack traces; frames served by the local dev server are mapped to project
+  files), `browser_network` (list, failed only, and per request: headers
+  with secrets masked, request and response bodies), `browser_performance`
+  (TTFB, FCP, LCP with its element, CLS, INP, long tasks, slowest requests).
+- **Tabs, viewport, GIF.** `browser_tabs`, `browser_resize` for phone
+  layouts, `browser_record` for an animated GIF. JS dialogs are
+  auto-accepted and logged.
+- **Safety.** Only http(s) URLs. `browser_eval` and `browser_upload`
+  (project files only) are off unless enabled in Settings → Tools →
+  Browser. The system prompt tells the agent page text is data, not
+  instructions, and to ask before purchases, messages or deletions.
+- Code: `crates/sinew-browser/` (`cdp.rs` raw protocol calls that survive
+  newer Chrome versions, `session.rs` tabs, `snapshot.rs` tree and refs,
+  `input.rs`, `observe.rs` console/network/settle/vitals),
+  `crates/sinew-app/src/browser.rs` (the tools), the `<browser_tools>`
+  prompt in `agent/turn.rs`. `cargo test -p sinew-app --lib browser --
+  --ignored` drives a real headless Chrome through a test page.
+- **Force-browser toggle** (globe button in the composer) and **inline
+  screenshots** under the tool cards, as before.
 
 Needs Chrome or Edge installed on the host (not bundled).
 

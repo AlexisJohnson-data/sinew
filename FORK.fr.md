@@ -90,36 +90,56 @@ d'une utilisation quotidienne.
 
 ### Vraie automatisation de navigateur (CDP / Chromium)
 
-L'agent peut piloter un vrai navigateur Chromium via le protocole Chrome
-DevTools — ouvrir des pages, faire des captures d'écran, lire le DOM,
-cliquer, saisir du texte, évaluer du JS, etc. — pour qu'il puisse
-réellement *regarder* un site en cours d'exécution au lieu de deviner à
-partir du code source. Cherry-pick et adaptation des travaux de Glamgar sur
-[Paseru/sinew#28](https://github.com/Paseru/sinew/pull/28).
+L'agent pilote un vrai Chrome (ou Edge) via le protocole Chrome DevTools
+pour *utiliser* un site en cours d'exécution au lieu de deviner à partir du
+code. Parti des travaux de Glamgar sur
+[Paseru/sinew#28](https://github.com/Paseru/sinew/pull/28), puis reconstruit
+sur le modèle du toolset navigateur de Claude, de Playwright MCP et de
+Chrome DevTools MCP.
 
-- Nouvelle crate `crates/sinew-browser/` (chromiumoxide 0.7 + tokio) :
-  gestion de session, DOM, captures d'écran, enregistrement GIF.
-- 18 outils d'agent dans `crates/sinew-app/src/browser.rs`
-  (`browser_open`, `browser_screenshot`, `browser_dom`, `browser_click`,
-  `browser_eval`, …), noms dans `tool_names.rs` (constantes `BROWSER_*`).
-- Câblés dans le tour dans `crates/sinew-app/src/agent/turn.rs` : les
-  descripteurs de navigateur sont ajoutés **uniquement quand
-  `browser_enabled` et pas en mode Plan**, plus un bloc de prompt système
-  `<browser_tools>` pour que l'agent sache que le navigateur existe
-  (sinon il tente de faire `apt-get install chromium` dans le shell).
-- **Chrome est préféré à Edge** dans
-  `session.rs::find_browser_executable` (recherche aussi dans les chemins
-  `%LOCALAPPDATA%` de l'utilisateur).
-- **Avec interface par défaut** : le builder de chromiumoxide injecte
-  `--headless`, donc nous appelons `.with_head()` explicitement quand
-  `headless = false` — vous *voyez* Chrome naviguer.
-- **Bascule navigateur forcée** (bouton globe dans le rédacteur) : mode à
-  usage unique qui ajoute une instruction forçant l'agent à utiliser les
-  outils `browser_*` au lieu de lire le code.
-  `src/components/chat/ChatPane.tsx`.
-- **Captures d'écran intégrées** : les cartes d'outil `browser_*`
-  affichent la capture d'écran renvoyée directement sous la carte
-  (`src/components/chat/ToolCard.tsx`).
+- **Des références au lieu de sélecteurs CSS.** `browser_read_page` renvoie
+  l'arbre d'accessibilité de Chrome, compacté (`button "Send" [ref_12]`),
+  iframes du même site comprises ; `browser_find` trouve un élément d'après
+  ce qu'il dit (« champ email »). Les actions prennent un `ref`. Une
+  référence désigne un nœud du DOM, reste la même d'une lecture à l'autre,
+  n'est jamais réutilisée dans un onglet, et une référence périmée le dit au
+  lieu de viser un autre élément. Les coordonnées d'une capture servent de
+  secours (canvas, vidéo, iframe d'un autre site) : chaque onglet a une
+  fenêtre fixe de 1280×800, donc elles tombent juste.
+- **De vraies saisies.** Clics, frappe, touches, survol, molette et glisser
+  sont des événements d'entrée de Chrome au centre de l'élément, après
+  l'avoir fait défiler et vérifié qu'il est actif et non recouvert (le
+  résultat dit ce qui le recouvre). Le texte passe par `Input.insertText`,
+  que les champs de type React acceptent ; `browser_form_input` règle
+  listes, cases à cocher et dates.
+- **Attente intelligente.** Après une action, Sinew attend qu'aucune
+  requête courte ne soit en cours et que le DOM ne bouge plus (5 s max) au
+  lieu d'une pause fixe, puis dit ce qui a changé : navigation, nouvel
+  onglet (repris automatiquement), « page mise à jour », nouvelles erreurs
+  de console.
+- **Débogage.** `browser_console` (erreurs et exceptions avec pile
+  d'appels ; les fichiers servis par le serveur de dev local deviennent des
+  fichiers du projet), `browser_network` (liste, échecs seulement, et par
+  requête : en-têtes avec secrets masqués, corps de requête et de réponse),
+  `browser_performance` (TTFB, FCP, LCP avec son élément, CLS, INP, tâches
+  longues, requêtes les plus lentes).
+- **Onglets, taille, GIF.** `browser_tabs`, `browser_resize` pour les mises
+  en page mobiles, `browser_record` pour un GIF animé. Les boîtes de
+  dialogue JS sont acceptées automatiquement et notées.
+- **Sécurité.** Seulement des URL http(s). `browser_eval` et
+  `browser_upload` (fichiers du projet uniquement) sont désactivés tant
+  qu'ils ne sont pas activés dans Paramètres → Tools → Browser. Le prompt
+  système dit à l'agent que le texte d'une page est une donnée, pas une
+  consigne, et de demander avant un achat, un message ou une suppression.
+- Code : `crates/sinew-browser/` (`cdp.rs` appels bruts au protocole qui
+  résistent aux versions récentes de Chrome, `session.rs` onglets,
+  `snapshot.rs` arbre et références, `input.rs`, `observe.rs`
+  console/réseau/attente/Web Vitals), `crates/sinew-app/src/browser.rs`
+  (les outils), le prompt `<browser_tools>` dans `agent/turn.rs`.
+  `cargo test -p sinew-app --lib browser -- --ignored` pilote un vrai
+  Chrome sans fenêtre sur une page de test.
+- **Bascule navigateur forcée** (bouton globe dans le rédacteur) et
+  **captures intégrées** sous les cartes d'outil, comme avant.
 
 Nécessite Chrome ou Edge installé sur la machine hôte (non inclus).
 

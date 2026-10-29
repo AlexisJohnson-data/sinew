@@ -211,6 +211,8 @@ export type ToolSettings = {
   lspServerPaths: Record<string, string>;
   memoryEnabled: boolean;
   memoryAutoSave: boolean;
+  browserEnabled: boolean;
+  browserScriptsEnabled: boolean;
 };
 
 export type MemoryScope = "user" | "project";

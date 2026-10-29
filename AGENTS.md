@@ -76,6 +76,7 @@ Code map:
 │   │       │   ├── tool_summary.rs
 │   │       │   └── turn.rs
 │   │       ├── bash.rs
+│   │       ├── browser.rs
 │   │       ├── commands.rs
 │   │       ├── compact.rs
 │   │       ├── edit.rs
@@ -116,6 +117,16 @@ Code map:
 │   │       ├── web.rs
 │   │       ├── write.rs
 │   │       └── workspace.rs
+│   ├── sinew-browser
+│   │   ├── Cargo.toml
+│   │   └── src
+│   │       ├── cdp.rs
+│   │       ├── input.rs
+│   │       ├── lib.rs
+│   │       ├── observe.rs
+│   │       ├── recording.rs
+│   │       ├── session.rs
+│   │       └── snapshot.rs
 │   ├── sinew-core
 │   │   ├── Cargo.toml
 │   │   └── src
