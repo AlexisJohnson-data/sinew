@@ -313,6 +313,7 @@ Code map:
     │   ├── UpdaterLockScreen.tsx
     │   ├── UsageSection.tsx
     │   ├── Welcome.tsx
+    │   ├── WhatsNew.tsx
     │   ├── WindowControls.tsx
     │   ├── Workspace.tsx
     │   └── chat
@@ -334,6 +335,7 @@ Code map:
     │       ├── dotmatrix-hooks.ts
     │       └── stream.ts
     ├── lib
+    │   ├── changelog.ts
     │   ├── editorTabs.ts
     │   ├── fileIcon.ts
     │   ├── ipc.ts
