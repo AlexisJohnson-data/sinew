@@ -293,6 +293,7 @@ Code map:
     │   ├── InstructionsDialog.tsx
     │   ├── RemotePanel.tsx
     │   ├── SearchPane.tsx
+    │   ├── SettingsDialog.tsx
     │   ├── SettingsPane.tsx
     │   ├── SinewMark.tsx
     │   ├── Splitter.tsx

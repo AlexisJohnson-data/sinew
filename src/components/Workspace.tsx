@@ -20,6 +20,7 @@ import { ConversationList } from "./ConversationList";
 import { GitPanel, GitMark } from "./GitPanel";
 import { EditorPane } from "./EditorPane";
 import { SettingsPane } from "./SettingsPane";
+import { SettingsDialog } from "./SettingsDialog";
 import { TerminalPanel } from "./TerminalPanel";
 import { RemotePanel } from "./RemotePanel";
 import { SearchPane } from "./SearchPane";
@@ -89,6 +90,8 @@ const COMPACTION_CONTINUATION_PROMPT =
 const GOAL_COMPACTION_CONTINUATION_PROMPT =
   "Continue working toward the active goal from the compacted context. Do not repeat completed work. If the goal is now truly complete, audit it and call update_goal with status complete.";
 const IS_WINDOWS = isWindowsPlatform();
+const IS_MAC =
+  typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 
 export function Workspace({
   bootstrap,
@@ -665,32 +668,28 @@ export function Workspace({
     );
   }, []);
 
-  const openSettings = useCallback(
-    (section?: "providers") => {
-      // Settings now lives in its own dedicated Tauri window. We forward
-      // the workspace path so the pane can scope settings to it, and
-      // pass `section` so the URL parameter selects the right tab on
-      // first mount (the existing in-pane `sinew:open-settings-section`
-      // event remains supported for already-open windows).
-      void api
-        .openSecondaryWindow({
-          view: "settings",
-          workspacePath,
-          section,
-        })
-        .catch((err) =>
-          console.error("[settings-window] failed to open", err),
-        );
-      if (section) {
-        window.dispatchEvent(
-          new CustomEvent("sinew:open-settings-section", {
-            detail: { section },
-          }),
-        );
-      }
-    },
-    [workspacePath],
-  );
+  // Settings open as a window inside this one (see SettingsDialog). The
+  // key remounts the pane so a new `section` request takes effect.
+  const [settingsDialog, setSettingsDialog] = useState<{
+    section?: string;
+    key: number;
+  } | null>(null);
+  const openSettings = useCallback((section?: string) => {
+    setSettingsDialog((current) =>
+      current && !section ? current : { section, key: Date.now() },
+    );
+  }, []);
+  const closeSettingsDialog = useCallback(() => setSettingsDialog(null), []);
+
+  // Components deeper in the tree (the plan-limit pill) ask for a section.
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const section = (event as CustomEvent<{ section?: string }>).detail?.section;
+      openSettings(section);
+    };
+    window.addEventListener("sinew:open-settings", onOpen);
+    return () => window.removeEventListener("sinew:open-settings", onOpen);
+  }, [openSettings]);
 
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
@@ -2076,12 +2075,11 @@ export function Workspace({
       <div
         className="titlebar"
         data-tauri-drag-region
-        data-platform={IS_WINDOWS ? "windows" : undefined}
+        data-platform={IS_WINDOWS ? "windows" : IS_MAC ? "mac" : undefined}
       >
         <div
           className="titlebar__actions"
           data-tauri-drag-region
-          style={{ left: leftWidth, right: rightWidth }}
         >
           <button
             className="titlebar__btn titlebar__btn--remote"
@@ -2123,8 +2121,8 @@ export function Workspace({
           </button>
           <button
             className="titlebar__btn"
-            data-on={settingsActive ? "true" : "false"}
-            onClick={() => openSettings()}
+            data-on={settingsDialog ? "true" : "false"}
+            onClick={() => (settingsDialog ? closeSettingsDialog() : openSettings())}
             title="Settings"
           >
             <Icon icon="solar:settings-linear" width={12} height={12} />
@@ -2570,6 +2568,14 @@ export function Workspace({
           void openFile(entry, reveal);
         }}
       />
+      {settingsDialog && (
+        <SettingsDialog
+          key={settingsDialog.key}
+          workspacePath={workspacePath}
+          section={settingsDialog.section}
+          onClose={closeSettingsDialog}
+        />
+      )}
     </div>
   );
 }

@@ -244,6 +244,8 @@ const IS_WINDOWS = isWindowsPlatform();
 
 type Props = {
   workspacePath: string;
+  /// Section to open on; falls back to the URL's `section` parameter.
+  initialSection?: string;
 };
 
 const SECTIONS = [
@@ -259,9 +261,10 @@ const SECTIONS = [
 ] as const;
 type Section = (typeof SECTIONS)[number];
 
-export function SettingsPane({ workspacePath }: Props) {
+export function SettingsPane({ workspacePath, initialSection }: Props) {
   const [section, setSection] = useState<Section>(() => {
-    const requested = new URLSearchParams(window.location.search).get("section");
+    const requested =
+      initialSection ?? new URLSearchParams(window.location.search).get("section");
     return SECTIONS.includes(requested as Section) ? (requested as Section) : "about";
   });
   const [settings, setSettings] = useState<McpSettings>(EMPTY_SETTINGS);

@@ -1176,14 +1176,18 @@ textarea {
   font-size: var(--fs-sm);
   letter-spacing: -0.011em;
 }
+/* Top-left, like most desktop apps; on macOS after the traffic lights. */
 .titlebar__actions {
   position: absolute;
   top: 50%;
+  left: 10px;
   transform: translateY(-50%);
   display: flex;
   gap: 4px;
   align-items: center;
-  justify-content: center;
+}
+.titlebar[data-platform="mac"] .titlebar__actions {
+  left: 84px;
 }
 .titlebar__btn {
   display: inline-flex;
@@ -11937,4 +11941,70 @@ textarea {
 }
 .plan-ring__percent {
   font-variant-numeric: tabular-nums;
+}
+
+/* Settings as a window inside the app window (SettingsDialog). */
+.settings-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 9, 11, 0.55);
+  backdrop-filter: blur(2px);
+}
+.settings-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: min(780px, 100%);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-0);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.settings-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-dialog__title {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.settings-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.settings-dialog__close:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.settings-dialog__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.settings-dialog__body > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
 }

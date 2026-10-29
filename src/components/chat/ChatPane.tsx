@@ -4737,7 +4737,6 @@ export function ChatPane({
               />
               <PlanUsageRing
                 provider={modelEntry?.provider ?? activeModel.provider}
-                workspacePath={workspacePath}
                 subscribeEvents={subscribeEvents}
               />
               {/* Compaction sits next to the context meter it empties. */}

@@ -11,7 +11,8 @@ import type {
   RecentWorkspace,
   ShellPreference,
 } from "../types";
-import { InstructionsDialog } from "./InstructionsDialog";
+import { InstructionsDialog } from "./InstructionsDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import { MigrationDialog } from "./MigrationDialog";
 import { SinewMark } from "./SinewMark";
 import { WindowControls, isWindowsPlatform } from "./WindowControls";
@@ -194,16 +195,11 @@ export function Welcome({ onPick, error, deriveName }: Props) {
     }
   };
 
-  // Open the Settings window from Welcome (no workspace yet). The pane
-  // handles `workspacePath: undefined` gracefully — providers, MCP and
-  // skills don't need a workspace; tool/sub-agent panes show a hint.
-  const openSettingsWindow = () => {
-    void api
-      .openSecondaryWindow({ view: "settings" })
-      .catch((err) =>
-        console.error("[settings-window] failed to open", err),
-      );
-  };
+  // Settings open inside this window (no workspace yet). The pane handles
+  // an empty workspace path: providers, MCP and skills don't need one;
+  // tool/sub-agent panes show a hint.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openSettingsWindow = () => setSettingsOpen(true);
 
   return (
     <div className="welcome">
@@ -539,6 +535,9 @@ export function Welcome({ onPick, error, deriveName }: Props) {
         open={instructionsOpen}
         onClose={() => setInstructionsOpen(false)}
       />
+      {settingsOpen && (
+        <SettingsDialog workspacePath="" onClose={() => setSettingsOpen(false)} />
+      )}
     </div>
   );
 }

@@ -15,7 +15,6 @@ const REFRESH_MS = 5 * 60 * 1000;
 type Props = {
   /// Provider of the model selected in the composer.
   provider: string | undefined;
-  workspacePath: string;
   subscribeEvents: (
     handler: (conversationId: string, event: AgentEvent, sequence?: number) => void,
   ) => () => void;
@@ -25,7 +24,7 @@ type Props = {
 /// provider's plan is to its limit; click for every window. It is a
 /// pill with a number, not a ring, so it can't be mistaken for the
 /// context meter.
-export function PlanUsageRing({ provider, workspacePath, subscribeEvents }: Props) {
+export function PlanUsageRing({ provider, subscribeEvents }: Props) {
   const [snapshots, setSnapshots] = useState<QuotaSnapshot[]>([]);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -79,9 +78,10 @@ export function PlanUsageRing({ provider, workspacePath, subscribeEvents }: Prop
 
   const openSettings = () => {
     setOpen(false);
-    void api
-      .openSecondaryWindow({ view: "settings", workspacePath, section: "usage" })
-      .catch(() => undefined);
+    // The workspace opens its Settings window on this section.
+    window.dispatchEvent(
+      new CustomEvent("sinew:open-settings", { detail: { section: "usage" } }),
+    );
   };
 
   return (
