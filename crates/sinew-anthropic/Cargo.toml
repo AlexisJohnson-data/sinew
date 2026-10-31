@@ -4,27 +4,18 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Anthropic provider for sinew"
+description = "Claude for sinew, through the local Claude Code binary"
 
 [dependencies]
 sinew-core = { workspace = true }
 
 async-trait = { workspace = true }
-base64 = { workspace = true }
-bytes = { workspace = true }
-image = { workspace = true, features = ["jpeg"] }
 directories = { workspace = true }
-eventsource-stream = { workspace = true }
 futures = { workspace = true }
-futures-util = { workspace = true }
-rand = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-url = { workspace = true }
 
 [lints]
 workspace = true

@@ -327,11 +327,16 @@ export type OpenAiProviderStatus = {
   error?: string | null;
 };
 
+/// Claude runs through the user's own Claude Code; this mirrors its sign-in.
 export type AnthropicProviderStatus = {
   connected: boolean;
   connectionState: ProviderConnectionState;
-  expiresAtMs?: number | null;
-  lastRefreshMs?: number | null;
+  /// Claude Code is installed on this machine.
+  installed?: boolean;
+  email?: string | null;
+  /// `claude.ai` for a subscription, otherwise API billing.
+  authMethod?: string | null;
+  subscription?: string | null;
   loginId?: string | null;
   error?: string | null;
 };
@@ -343,7 +348,6 @@ export type StartOpenAiLoginOutput = {
 
 export type StartAnthropicLoginOutput = {
   loginId: string;
-  authUrl: string;
 };
 
 export type StartMcpLoginOutput = {

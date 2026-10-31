@@ -47,6 +47,7 @@ daily use.
 ## Feature index
 
 **Agent capabilities**
+- [Claude through your own Claude Code](#claude-through-your-own-claude-code)
 - [Real browser automation (CDP / Chromium)](#real-browser-automation-cdp--chromium)
 - [PDF reading: digital text + scanned pages via vision](#pdf-reading-digital-text--scanned-pages-via-vision)
 - [File → chat context: drag, right-click, clipboard paste](#file--chat-context-drag-right-click-clipboard-paste)
@@ -80,6 +81,45 @@ daily use.
 - [Open maximized + centered on Windows](#open-maximized--centered-on-windows)
 
 ---
+
+### Claude through your own Claude Code
+
+Sinew no longer signs in to Claude itself. Upstream Sinew ran its own
+claude.ai OAuth login with Claude Code's client id, kept the tokens, and
+presented itself to the API as Claude Code. Anthropic's terms forbid exactly
+that for third-party apps ([legal and
+compliance](https://code.claude.com/docs/en/legal-and-compliance)): Claude
+credentials must not be collected or stored by another app, while signing
+in to the **unmodified Claude Code binary** with your own subscription is
+allowed. It also logged you out about once a day: several parts of Sinew
+each held their own copy of a rotating refresh token.
+
+Now a turn with a Claude model is run by the `claude` command itself:
+
+- Sinew starts `claude -p` in stream-json mode, the protocol of the Agent
+  SDK, in the workspace. Claude Code runs the whole turn with its own tools,
+  agent loop and context management, and keeps and refreshes its own
+  sign-in. Sinew never sees a Claude token.
+- The stream is shown as usual: text, thinking, tool cards (Claude Code's
+  `Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `WebFetch`, `WebSearch`
+  appear as Sinew's own cards, with diffs), the todo strip from `TodoWrite`.
+- Permission prompts come back to Sinew, which answers them with its own
+  permission rules and approval cards. `AskUserQuestion` becomes Sinew's
+  question card. In Plan mode the plan is shown as the answer.
+- Sinew's browser tools are lent to Claude Code through an in-process MCP
+  server (`mcp__sinew__browser_*`).
+- The Claude Code session id is stored on the conversation, so the next
+  turn resumes it (`--resume`, at the right message after a rewind, and as a
+  copy after a fork). A conversation started with another model is replayed
+  into a new session.
+- Models and plan limits come from Claude Code too (`initialize`,
+  `get_usage`), and the plan pill is refreshed after every turn.
+- Settings → Providers → Anthropic shows Claude Code's sign-in; **Sign in**
+  opens `claude auth login`, Anthropic's own page.
+
+Needs Claude Code installed (`claude` on the PATH, or `SINEW_CLAUDE_PATH`).
+Code: `crates/sinew-anthropic/` (`cli.rs`, `process.rs`, `probe.rs`,
+`provider.rs`), `crates/sinew-app/src/agent/claude_code.rs`.
 
 ### Real browser automation (CDP / Chromium)
 
@@ -404,7 +444,7 @@ The model picker is no longer just a list baked into the code: Sinew asks
 each connected provider which models **your account** can actually use, and
 with which limits.
 
-- Anthropic → `GET /v1/models`, OpenAI (ChatGPT) → Codex `/models`
+- Anthropic → Claude Code (`initialize`), OpenAI (ChatGPT) → Codex `/models`
   (API key → filtered `/v1/models`), Google → Antigravity
   `fetchAvailableModels`, Kimi Code → `/models`, DeepSeek → `/models`.
 - A provider that answers **replaces** its static entries: known models keep

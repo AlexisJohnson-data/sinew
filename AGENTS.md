@@ -49,14 +49,13 @@ Code map:
 │   ├── sinew-anthropic
 │   │   ├── Cargo.toml
 │   │   └── src
-│   │       ├── auth.rs
-│   │       ├── cli_version.rs
-│   │       ├── client.rs
-│   │       ├── discovery.rs
+│   │       ├── cli.rs
 │   │       ├── lib.rs
 │   │       ├── model_info.rs
-│   │       ├── stream.rs
-│   │       └── wire.rs
+│   │       ├── probe.rs
+│   │       ├── process.rs
+│   │       ├── provider.rs
+│   │       └── transcript.rs
 │   ├── sinew-app
 │   │   ├── Cargo.toml
 │   │   └── src
@@ -64,6 +63,7 @@ Code map:
 │   │       ├── agent
 │   │       │   ├── assistant_message.rs
 │   │       │   ├── cancel.rs
+│   │       │   ├── claude_code.rs
 │   │       │   ├── clean_context.rs
 │   │       │   ├── compaction.rs
 │   │       │   ├── context.rs

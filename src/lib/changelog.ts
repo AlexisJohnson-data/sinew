@@ -18,6 +18,22 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.45",
+    date: "2026-10-31",
+    items: [
+      {
+        icon: "solar:shield-check-bold-duotone",
+        title: "Claude through your own Claude Code",
+        body: "Claude models now run through the official claude command, signed in with your own account. Sinew no longer handles Claude credentials, and you stay signed in.",
+      },
+      {
+        icon: "solar:check-square-bold-duotone",
+        title: "Same chat, Claude Code's tools",
+        body: "Edits, commands and searches show as usual cards with diffs; approvals, questions and the browser go through Sinew.",
+      },
+    ],
+  },
+  {
     version: "0.2.44",
     date: "2026-10-29",
     items: [

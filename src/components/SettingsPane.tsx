@@ -902,8 +902,7 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
         loginId: login.loginId,
       };
       setAnthropicStatus(connecting);
-      await api.openExternalUrl(login.authUrl);
-      setProvidersMessage("Waiting for browser confirmation...");
+      setProvidersMessage("Finish signing in to Claude Code in the window that opened…");
     } catch (err) {
       // Reload the card first: the status call resets the message, which
       // would otherwise hide why the login could not start.
@@ -932,7 +931,7 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
     setProvidersMessage(null);
     try {
       setAnthropicStatus(await api.disconnectAnthropicProvider());
-      setProvidersMessage("Disconnected");
+      setProvidersMessage("Signed out of Claude Code");
       void loadConfiguredProviders();
       window.dispatchEvent(new CustomEvent(PROVIDERS_CHANGED_EVENT));
     } catch (err) {
@@ -2190,9 +2189,20 @@ function ProvidersSection({
         <ProviderCard
           name="Anthropic"
           icon="simple-icons:anthropic"
-          description="Use OAuth to connect your Claude account for Anthropic models."
+          description={
+            anthropicStatus && anthropicStatus.installed === false
+              ? "Claude models run through Claude Code, which is not installed. Install it from claude.com/claude-code, then sign in."
+              : "Claude models run through your own Claude Code: Sinew drives the official claude command and never sees your credentials."
+          }
           status={anthropicStatus}
-          connectedMeta={["Claude OAuth"]}
+          connectedMeta={[
+            anthropicStatus?.email || "Signed in to Claude Code",
+            anthropicStatus?.subscription
+              ? `Claude ${anthropicStatus.subscription}`
+              : anthropicStatus?.authMethod && anthropicStatus.authMethod !== "claude.ai"
+                ? "API billing"
+                : null,
+          ]}
           loading={loading}
           busy={busy}
           onConnect={onConnectAnthropic}

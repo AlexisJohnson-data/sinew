@@ -100,7 +100,6 @@ pub(super) struct AnthropicLoginAttempt {
 
 #[derive(Clone)]
 pub(super) struct AnthropicLoginOutcome {
-    pub(super) success: bool,
     pub(super) error: Option<String>,
 }
 

@@ -25,14 +25,7 @@ use objc2_foundation::NSString;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sinew_anthropic::{
-    delete_default_auth as delete_default_anthropic_auth,
-    exchange_oauth_code as exchange_anthropic_oauth_code, generate_pkce as generate_anthropic_pkce,
-    generate_state as generate_anthropic_state,
-    load_default_auth_status as load_default_anthropic_auth_status,
-    oauth_authorize_url as anthropic_oauth_authorize_url, AnthropicAuthStatus, AnthropicProvider,
-    PkceCodes as AnthropicPkceCodes, MODEL_ID as ANTHROPIC_MODEL_ID,
-};
+use sinew_anthropic::{ClaudeCodeProvider, MODEL_ID as ANTHROPIC_MODEL_ID};
 use sinew_app::{
     checkpoint_from_snapshots, clean_context_descriptor, compact_conversation_history,
     copy_workspace_entries, create_installed_skill, create_workspace_directory,
@@ -172,8 +165,13 @@ pub fn run() {
     );
     let openrouter_models = store.load_openrouter_models().unwrap_or_default();
     let mut providers: HashMap<String, Arc<dyn Provider>> = HashMap::new();
-    if let Ok(provider) = AnthropicProvider::from_default_sources() {
-        providers.insert("anthropic".into(), Arc::new(provider) as Arc<dyn Provider>);
+    // Claude runs through the user's own Claude Code; its sign-in is checked
+    // when a turn starts.
+    if sinew_anthropic::claude_binary().is_some() {
+        providers.insert(
+            "anthropic".into(),
+            Arc::new(ClaudeCodeProvider::new()) as Arc<dyn Provider>,
+        );
     }
     if let Ok(provider) = OpenAiProvider::from_default_sources() {
         providers.insert("openai".into(), Arc::new(provider) as Arc<dyn Provider>);

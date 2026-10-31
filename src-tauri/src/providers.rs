@@ -67,11 +67,13 @@ pub(super) fn install_openai_provider(
 pub(super) fn install_anthropic_provider(
     providers: &Arc<StdMutex<HashMap<String, Arc<dyn Provider>>>>,
 ) -> std::result::Result<(), String> {
-    let provider = AnthropicProvider::from_default_sources().map_err(error_to_string)?;
     providers
         .lock()
         .map_err(|_| "provider registry is unavailable".to_string())?
-        .insert("anthropic".into(), Arc::new(provider) as Arc<dyn Provider>);
+        .insert(
+            "anthropic".into(),
+            Arc::new(ClaudeCodeProvider::new()) as Arc<dyn Provider>,
+        );
     Ok(())
 }
 
@@ -284,22 +286,6 @@ pub(super) fn openai_provider_status_from_auth(
     }
 }
 
-pub(super) fn anthropic_provider_status_from_auth(
-    auth: AnthropicAuthStatus,
-    connection_state: &str,
-    login_id: Option<String>,
-    error: Option<String>,
-) -> AnthropicProviderStatus {
-    AnthropicProviderStatus {
-        connected: auth.connected,
-        connection_state: connection_state.to_string(),
-        expires_at_ms: auth.expires_at_ms,
-        last_refresh_ms: auth.last_refresh_ms,
-        login_id,
-        error,
-    }
-}
-
 pub(super) fn google_provider_status_from_auth(
     auth: GoogleAuthStatus,
     connection_state: &str,
@@ -464,139 +450,6 @@ pub(super) async fn handle_openai_oauth_request(
             match exchange_oauth_code(http, code, redirect_uri, pkce).await {
                 Ok(_) => {
                     write_html_response(stream, 200, openai_login_success_html()).await?;
-                    Ok(Some(Ok(())))
-                }
-                Err(err) => {
-                    let message = err.to_string();
-                    write_html_response(stream, 500, openai_login_error_html(&message)).await?;
-                    Ok(Some(Err(anyhow::anyhow!(message))))
-                }
-            }
-        }
-        "/cancel" => {
-            write_http_response(stream, 200, "OK", "Login canceled").await?;
-            Ok(Some(Err(anyhow::anyhow!("Login canceled"))))
-        }
-        _ => {
-            write_http_response(stream, 404, "Not Found", "Not Found").await?;
-            Ok(None)
-        }
-    }
-}
-
-pub(super) async fn bind_anthropic_oauth_listener() -> Result<tokio::net::TcpListener> {
-    const CALLBACK_PORT: u16 = 53692;
-    match tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT)).await {
-        Ok(listener) => Ok(listener),
-        // Windows reserves shifting port ranges for Hyper-V / WSL / Docker
-        // (`netsh int ipv4 show excludedportrange protocol=tcp`), and 53692
-        // can land in one. The redirect URI carries the port, and loopback
-        // redirects accept any port, so let the OS pick a free one.
-        Err(fixed_err) => tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .with_context(|| {
-                format!("unable to bind an Anthropic OAuth callback port (53692: {fixed_err})")
-            }),
-    }
-}
-
-pub(super) async fn run_anthropic_oauth_server(
-    listener: tokio::net::TcpListener,
-    redirect_uri: String,
-    expected_state: String,
-    pkce: AnthropicPkceCodes,
-    cancel: Arc<Notify>,
-) -> Result<()> {
-    let http = reqwest::Client::builder()
-        .user_agent("sinew/0.1")
-        .build()
-        .context("unable to build OAuth client")?;
-
-    loop {
-        tokio::select! {
-            _ = cancel.notified() => {
-                anyhow::bail!("Login canceled");
-            }
-            accepted = listener.accept() => {
-                let (mut stream, _) = accepted.context("OAuth callback accept failed")?;
-                if let Some(result) = handle_anthropic_oauth_request(
-                    &http,
-                    &mut stream,
-                    &redirect_uri,
-                    &expected_state,
-                    &pkce,
-                ).await? {
-                    return result;
-                }
-            }
-        }
-    }
-}
-
-pub(super) async fn handle_anthropic_oauth_request(
-    http: &reqwest::Client,
-    stream: &mut tokio::net::TcpStream,
-    redirect_uri: &str,
-    expected_state: &str,
-    pkce: &AnthropicPkceCodes,
-) -> Result<Option<Result<()>>> {
-    let mut buffer = [0u8; 8192];
-    let read = stream
-        .read(&mut buffer)
-        .await
-        .context("OAuth callback read failed")?;
-    if read == 0 {
-        return Ok(None);
-    }
-
-    let request = String::from_utf8_lossy(&buffer[..read]);
-    let Some(first_line) = request.lines().next() else {
-        write_http_response(stream, 400, "Bad Request", "Bad Request").await?;
-        return Ok(None);
-    };
-    let mut parts = first_line.split_whitespace();
-    let method = parts.next().unwrap_or_default();
-    let target = parts.next().unwrap_or_default();
-    if method != "GET" {
-        write_http_response(stream, 405, "Method Not Allowed", "Method Not Allowed").await?;
-        return Ok(None);
-    }
-
-    let parsed = parse_local_oauth_url(target)?;
-    match parsed.path() {
-        "/callback" => {
-            let params = parsed
-                .query_pairs()
-                .into_owned()
-                .collect::<HashMap<String, String>>();
-            if let Some(error) = params.get("error") {
-                let message = params
-                    .get("error_description")
-                    .filter(|value| !value.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| error.clone());
-                write_html_response(stream, 400, openai_login_error_html(&message)).await?;
-                return Ok(Some(Err(anyhow::anyhow!(message))));
-            }
-            if params.get("state").map(String::as_str) != Some(expected_state) {
-                write_html_response(stream, 400, openai_login_error_html("State mismatch")).await?;
-                return Ok(Some(Err(anyhow::anyhow!("State mismatch"))));
-            }
-            let Some(code) = params.get("code").filter(|value| !value.is_empty()) else {
-                write_html_response(
-                    stream,
-                    400,
-                    openai_login_error_html("Missing authorization code"),
-                )
-                .await?;
-                return Ok(Some(Err(anyhow::anyhow!("Missing authorization code"))));
-            };
-
-            match exchange_anthropic_oauth_code(http, code, expected_state, redirect_uri, pkce)
-                .await
-            {
-                Ok(_) => {
-                    write_html_response(stream, 200, anthropic_login_success_html()).await?;
                     Ok(Some(Ok(())))
                 }
                 Err(err) => {
@@ -805,24 +658,6 @@ pub(super) fn openai_login_success_html() -> String {
         .to_string()
 }
 
-pub(super) fn anthropic_login_success_html() -> String {
-    r#"<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Sinew connected</title>
-    <style>
-      body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0a0b0d;color:#f4f4f5;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-      main{max-width:420px;padding:32px;text-align:center}
-      h1{font-size:22px;margin:0 0 10px}
-      p{margin:0;color:#a1a1aa;line-height:1.5}
-    </style>
-  </head>
-  <body><main><h1>Anthropic is connected</h1><p>You can close this tab and return to Sinew.</p></main></body>
-</html>"#
-        .to_string()
-}
-
 pub(super) fn google_login_success_html() -> String {
     r#"<!doctype html>
 <html>
@@ -1023,51 +858,67 @@ pub(super) async fn get_anthropic_provider_status(
     state: State<'_, DesktopState>,
 ) -> std::result::Result<AnthropicProviderStatus, String> {
     let mut active_login = state.anthropic_login.lock().await;
-    let attempt = active_login.clone();
-    if let Some(attempt) = attempt {
+    if let Some(attempt) = active_login.clone() {
         let outcome = attempt
             .outcome
             .lock()
             .map_err(|_| "login state is unavailable".to_string())?
             .clone();
-
-        if let Some(outcome) = outcome {
-            *active_login = None;
-            let auth = load_default_anthropic_auth_status().map_err(error_to_string)?;
-            if outcome.success {
-                return Ok(anthropic_provider_status_from_auth(
-                    auth,
-                    "connected",
+        match outcome {
+            None => {
+                return Ok(claude_code_status(
+                    sinew_anthropic::status().await,
+                    Some(attempt.id),
                     None,
-                    None,
-                ));
+                ))
             }
-            return Ok(anthropic_provider_status_from_auth(
-                auth,
-                "error",
-                None,
-                outcome.error,
-            ));
+            Some(outcome) => {
+                *active_login = None;
+                let status = sinew_anthropic::status().await;
+                if status.logged_in {
+                    install_anthropic_provider(&state.providers)?;
+                }
+                return Ok(claude_code_status(status, None, outcome.error));
+            }
         }
-
-        let auth = load_default_anthropic_auth_status().map_err(error_to_string)?;
-        return Ok(anthropic_provider_status_from_auth(
-            auth,
-            "connecting",
-            Some(attempt.id),
-            None,
-        ));
     }
+    drop(active_login);
+    let status = sinew_anthropic::status().await;
+    if status.installed {
+        install_anthropic_provider(&state.providers)?;
+    }
+    Ok(claude_code_status(status, None, None))
+}
 
-    let auth = load_default_anthropic_auth_status().map_err(error_to_string)?;
-    let state = if auth.connected {
+/// The provider card's state, from Claude Code's own sign-in.
+fn claude_code_status(
+    status: sinew_anthropic::ClaudeCodeStatus,
+    login_id: Option<String>,
+    error: Option<String>,
+) -> AnthropicProviderStatus {
+    let connection_state = if login_id.is_some() {
+        "connecting"
+    } else if error.is_some() {
+        "error"
+    } else if status.logged_in {
         "connected"
     } else {
         "disconnected"
     };
-    Ok(anthropic_provider_status_from_auth(auth, state, None, None))
+    AnthropicProviderStatus {
+        connected: status.logged_in,
+        connection_state: connection_state.into(),
+        installed: status.installed,
+        email: status.email,
+        auth_method: status.auth_method,
+        subscription: status.subscription,
+        login_id,
+        error,
+    }
 }
 
+/// Opens Claude Code's own sign-in (`claude auth login`). Sinew never sees
+/// the credentials: Claude Code stores and refreshes them.
 #[tauri::command]
 pub(super) async fn start_anthropic_oauth_login(
     state: State<'_, DesktopState>,
@@ -1075,54 +926,44 @@ pub(super) async fn start_anthropic_oauth_login(
     if let Some(existing) = state.anthropic_login.lock().await.take() {
         existing.cancel.notify_one();
     }
-
-    let listener = bind_anthropic_oauth_listener()
-        .await
-        .map_err(error_to_string)?;
-    let port = listener.local_addr().map_err(error_to_string)?.port();
-    let redirect_uri = format!("http://localhost:{port}/callback");
-    let pkce = generate_anthropic_pkce();
-    let oauth_state = pkce.code_verifier.clone();
-    let auth_url = anthropic_oauth_authorize_url(&redirect_uri, &pkce, &oauth_state);
-    let login_id = generate_anthropic_state();
+    let mut child = sinew_anthropic::start_login().map_err(error_to_string)?;
+    let login_id = format!(
+        "claude-login-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or_default()
+    );
     let cancel = Arc::new(Notify::new());
     let outcome = Arc::new(StdMutex::new(None));
+    *state.anthropic_login.lock().await = Some(AnthropicLoginAttempt {
+        id: login_id.clone(),
+        cancel: cancel.clone(),
+        outcome: outcome.clone(),
+    });
 
-    {
-        let mut active_login = state.anthropic_login.lock().await;
-        *active_login = Some(AnthropicLoginAttempt {
-            id: login_id.clone(),
-            cancel: cancel.clone(),
-            outcome: outcome.clone(),
-        });
-    }
-
-    let providers = state.providers.clone();
     tauri::async_runtime::spawn(async move {
-        let result =
-            run_anthropic_oauth_server(listener, redirect_uri, oauth_state, pkce, cancel).await;
-        let login_outcome = match result {
-            Ok(()) => match install_anthropic_provider(&providers) {
-                Ok(()) => AnthropicLoginOutcome {
-                    success: true,
-                    error: None,
-                },
-                Err(err) => AnthropicLoginOutcome {
-                    success: false,
-                    error: Some(err),
-                },
-            },
-            Err(err) => AnthropicLoginOutcome {
-                success: false,
-                error: Some(err.to_string()),
-            },
+        let login_outcome = tokio::select! {
+            _ = cancel.notified() => {
+                let _ = child.kill().await;
+                AnthropicLoginOutcome { error: None }
+            }
+            _ = child.wait() => {
+                if sinew_anthropic::status().await.logged_in {
+                    AnthropicLoginOutcome { error: None }
+                } else {
+                    AnthropicLoginOutcome {
+                        error: Some("Claude Code sign-in was not completed.".into()),
+                    }
+                }
+            }
         };
         if let Ok(mut slot) = outcome.lock() {
             *slot = Some(login_outcome);
         }
     });
 
-    Ok(StartAnthropicLoginOutput { login_id, auth_url })
+    Ok(StartAnthropicLoginOutput { login_id })
 }
 
 #[tauri::command]
@@ -1132,15 +973,11 @@ pub(super) async fn cancel_anthropic_oauth_login(
     if let Some(attempt) = state.anthropic_login.lock().await.take() {
         attempt.cancel.notify_one();
     }
-    let auth = load_default_anthropic_auth_status().map_err(error_to_string)?;
-    let state = if auth.connected {
-        "connected"
-    } else {
-        "disconnected"
-    };
-    Ok(anthropic_provider_status_from_auth(auth, state, None, None))
+    Ok(claude_code_status(sinew_anthropic::status().await, None, None))
 }
 
+/// Signs Claude Code out (`claude auth logout`), which also signs out the
+/// `claude` command line.
 #[tauri::command]
 pub(super) async fn disconnect_anthropic_provider(
     state: State<'_, DesktopState>,
@@ -1148,14 +985,15 @@ pub(super) async fn disconnect_anthropic_provider(
     if let Some(attempt) = state.anthropic_login.lock().await.take() {
         attempt.cancel.notify_one();
     }
-    delete_default_anthropic_auth().map_err(error_to_string)?;
+    if let Some(binary) = sinew_anthropic::claude_binary() {
+        let mut command = tokio::process::Command::new(binary);
+        command.args(["auth", "logout"]).kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+        let _ = command.output().await;
+    }
     remove_anthropic_provider(&state.providers)?;
-    Ok(anthropic_provider_status_from_auth(
-        AnthropicAuthStatus::disconnected(),
-        "disconnected",
-        None,
-        None,
-    ))
+    Ok(claude_code_status(sinew_anthropic::status().await, None, None))
 }
 
 #[tauri::command]

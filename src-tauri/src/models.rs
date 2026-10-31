@@ -41,8 +41,12 @@ pub(super) struct McpLoginStatus {
 pub(super) struct AnthropicProviderStatus {
     pub(super) connected: bool,
     pub(super) connection_state: String,
-    pub(super) expires_at_ms: Option<i64>,
-    pub(super) last_refresh_ms: Option<i64>,
+    /// Claude Code is installed on this machine.
+    pub(super) installed: bool,
+    pub(super) email: Option<String>,
+    /// `claude.ai` for a subscription, else API billing.
+    pub(super) auth_method: Option<String>,
+    pub(super) subscription: Option<String>,
     pub(super) login_id: Option<String>,
     pub(super) error: Option<String>,
 }
@@ -51,7 +55,6 @@ pub(super) struct AnthropicProviderStatus {
 #[serde(rename_all = "camelCase")]
 pub(super) struct StartAnthropicLoginOutput {
     pub(super) login_id: String,
-    pub(super) auth_url: String,
 }
 
 #[derive(Debug, Serialize)]

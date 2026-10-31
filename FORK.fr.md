@@ -54,6 +54,7 @@ d'une utilisation quotidienne.
 ## Index des fonctionnalités
 
 **Capacités de l'agent**
+- [Claude via ton propre Claude Code](#claude-via-ton-propre-claude-code)
 - [Vraie automatisation de navigateur (CDP / Chromium)](#vraie-automatisation-de-navigateur-cdp--chromium)
 - [Lecture de PDF : texte numérique + pages scannées via la vision](#lecture-de-pdf--texte-numérique--pages-scannées-via-la-vision)
 - [Fichier → contexte de chat : glisser-déposer, clic droit, collage](#fichier--contexte-de-chat-glisser-déposer-clic-droit-collage)
@@ -87,6 +88,50 @@ d'une utilisation quotidienne.
 - [Ouverture maximisée + centrée sous Windows](#ouverture-maximisée--centrée-sous-windows)
 
 ---
+
+### Claude via ton propre Claude Code
+
+Sinew ne se connecte plus lui-même à Claude. Le Sinew d'origine faisait son
+propre login OAuth claude.ai avec l'identifiant client de Claude Code,
+gardait les jetons et se présentait à l'API comme Claude Code. Les
+conditions d'Anthropic interdisent exactement cela à une app tierce ([legal
+and compliance](https://code.claude.com/docs/en/legal-and-compliance)) : une
+autre app ne doit ni collecter ni stocker des identifiants Claude, alors que
+se connecter au **binaire Claude Code non modifié** avec son propre
+abonnement est autorisé. En prime, tu étais déconnecté environ une fois par
+jour : plusieurs morceaux de Sinew gardaient chacun leur copie d'un jeton de
+rafraîchissement qui change à chaque usage.
+
+Désormais, un tour avec un modèle Claude est exécuté par la commande
+`claude` elle-même :
+
+- Sinew lance `claude -p` en mode stream-json, le protocole du SDK Agent,
+  dans l'espace de travail. Claude Code exécute tout le tour avec ses
+  propres outils, sa boucle d'agent et sa gestion du contexte, et garde et
+  rafraîchit sa propre connexion. Sinew ne voit jamais de jeton Claude.
+- Le flux s'affiche comme d'habitude : texte, réflexion, cartes d'outils
+  (`Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `WebFetch`, `WebSearch`
+  de Claude Code s'affichent comme les cartes de Sinew, avec les diffs), et
+  la liste de tâches à partir de `TodoWrite`.
+- Les demandes de permission reviennent à Sinew, qui y répond avec ses
+  propres règles et cartes d'approbation. `AskUserQuestion` devient la
+  carte de question de Sinew. En mode Plan, le plan s'affiche comme réponse.
+- Les outils navigateur de Sinew sont prêtés à Claude Code par un serveur
+  MCP interne (`mcp__sinew__browser_*`).
+- L'identifiant de session Claude Code est gardé dans la conversation, donc
+  le tour suivant la reprend (`--resume`, au bon message après un retour en
+  arrière, et en copie après un fork). Une conversation commencée avec un
+  autre modèle est rejouée dans une nouvelle session.
+- Les modèles et les limites du forfait viennent aussi de Claude Code
+  (`initialize`, `get_usage`), et la pastille de forfait se met à jour
+  après chaque tour.
+- Paramètres → Providers → Anthropic montre la connexion de Claude Code ;
+  **Sign in** ouvre `claude auth login`, la page d'Anthropic.
+
+Nécessite Claude Code installé (`claude` dans le PATH, ou
+`SINEW_CLAUDE_PATH`). Code : `crates/sinew-anthropic/` (`cli.rs`,
+`process.rs`, `probe.rs`, `provider.rs`),
+`crates/sinew-app/src/agent/claude_code.rs`.
 
 ### Vraie automatisation de navigateur (CDP / Chromium)
 
@@ -454,7 +499,7 @@ Le sélecteur de modèles n'est plus seulement une liste figée dans le code :
 Sinew demande à chaque provider connecté quels modèles **votre compte** peut
 réellement utiliser, et avec quelles limites.
 
-- Anthropic → `GET /v1/models`, OpenAI (ChatGPT) → endpoint Codex `/models`
+- Anthropic → Claude Code (`initialize`), OpenAI (ChatGPT) → endpoint Codex `/models`
   (clé API → `/v1/models` filtré), Google → Antigravity
   `fetchAvailableModels`, Kimi Code → `/models`, DeepSeek → `/models`.
 - Un provider qui répond **remplace** ses entrées statiques : les modèles

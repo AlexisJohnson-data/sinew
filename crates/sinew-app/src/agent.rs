@@ -1,5 +1,6 @@
 mod assistant_message;
 mod cancel;
+mod claude_code;
 mod clean_context;
 mod compaction;
 mod context;
