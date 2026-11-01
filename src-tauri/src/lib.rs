@@ -154,6 +154,7 @@ pub fn run() {
         .try_init();
 
     let store = AppStore::open_default().expect("unable to open app store");
+    sinew_app::mcp_oauth::install_token_store(store.clone());
     // Sync the agent core's shell-preference cache from persisted settings so
     // the very first turn (system prompt + bash tool) already reflects the
     // user's choice (PowerShell vs WSL on Windows).
@@ -457,6 +458,7 @@ pub fn run() {
             mcp_oauth::poll_mcp_oauth_login,
             mcp_oauth::cancel_mcp_oauth_login,
             mcp_oauth::disconnect_mcp_oauth,
+            mcp_oauth::delete_mcp_server,
             conversations::list_tool_settings,
             conversations::save_tool_settings,
             conversations::list_sub_agent_settings,

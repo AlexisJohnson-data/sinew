@@ -9,6 +9,7 @@ import {
   type RefObject,
   useRef,
   useState,
+  Fragment,
 } from "react";
 import { Icon } from "@iconify/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -47,8 +48,10 @@ import {
   PROVIDERS,
   THINKING_LEVELS,
   availableModelsForProviders,
+  goFamilyLabel,
   modelIdFromRef,
   modelRefFromId,
+  modelsForPicker,
   modelsWithOpenRouter,
   selectionFromRef,
   selectionsFromSettings,
@@ -57,6 +60,7 @@ import {
   type ModeModelSelection,
   type ModeModelSelections,
   type ModelId,
+  useEnabledEarlierModels,
 } from "../../lib/models";
 import type {
   AgentMode,
@@ -909,6 +913,8 @@ export function ChatPane({
   const model = currentSelection.model;
   const thinking = currentSelection.thinking;
   const modelEntry = availableModels.find((m) => m.value === model) ?? null;
+  const enabledEarlierModels = useEnabledEarlierModels();
+  const pickerModels = modelsForPicker(visibleModels, enabledEarlierModels, model);
   const displayModelEntry =
     modelEntry ?? allModels.find((m) => m.value === model) ?? null;
   const availableThinking = modelEntry
@@ -4606,35 +4612,46 @@ export function ChatPane({
                         </button>
                       </div>
                     )}
-                    {visibleModels.map((m) => {
+                    {pickerModels.map((m, index) => {
                       const selected = m.value === model;
                       const providerIcon =
                         PROVIDERS.find((p) => p.value === m.provider)?.icon;
+                      const family =
+                        m.provider === "opencode-go" ? goFamilyLabel(m) : null;
+                      const previous = pickerModels[index - 1];
+                      const startsFamily =
+                        family !== null &&
+                        (previous?.provider !== "opencode-go" ||
+                          goFamilyLabel(previous) !== family);
                       return (
-                        <button
-                          key={m.value}
-                          type="button"
-                          className="composer__popover-row"
-                          data-selected={selected ? "true" : "false"}
-                          onClick={() => {
-                            handleModelSelect(m.value);
-                          }}
-                        >
-                          <span className="composer__popover-label">
-                            {providerIcon && (
-                              <Icon icon={providerIcon} width={13} height={13} />
-                            )}
-                            <span>{m.label}</span>
-                          </span>
-                          {selected && (
-                            <Icon
-                              icon="solar:check-read-linear"
-                              width={13}
-                              height={13}
-                              className="composer__popover-check"
-                            />
+                        <Fragment key={m.value}>
+                          {startsFamily && (
+                            <div className="composer__popover-group">{family}</div>
                           )}
-                        </button>
+                          <button
+                            type="button"
+                            className="composer__popover-row"
+                            data-selected={selected ? "true" : "false"}
+                            onClick={() => {
+                              handleModelSelect(m.value);
+                            }}
+                          >
+                            <span className="composer__popover-label">
+                              {providerIcon && (
+                                <Icon icon={providerIcon} width={13} height={13} />
+                              )}
+                              <span>{m.label}</span>
+                            </span>
+                            {selected && (
+                              <Icon
+                                icon="solar:check-read-linear"
+                                width={13}
+                                height={13}
+                                className="composer__popover-check"
+                              />
+                            )}
+                          </button>
+                        </Fragment>
                       );
                     })}
                   </div>

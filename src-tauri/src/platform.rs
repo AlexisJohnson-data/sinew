@@ -508,6 +508,9 @@ pub(super) fn home_dir() -> Option<PathBuf> {
 
 pub(super) fn open_external_url(raw_url: &str) -> Result<()> {
     let url = raw_url.trim();
+    if url.len() > MAX_EXTERNAL_URL_LEN {
+        anyhow::bail!("this link is too long to open ({} characters)", url.len());
+    }
     if !is_safe_external_url(url) {
         anyhow::bail!("only http and https links can be opened");
     }
@@ -599,8 +602,10 @@ pub(super) fn open_with_default_app(path: &Path) -> Result<()> {
     Ok(())
 }
 
+const MAX_EXTERNAL_URL_LEN: usize = 4096;
+
 pub(super) fn is_safe_external_url(url: &str) -> bool {
-    if url.len() > 4096 || url.chars().any(char::is_control) {
+    if url.len() > MAX_EXTERNAL_URL_LEN || url.chars().any(char::is_control) {
         return false;
     }
     let lower = url.to_ascii_lowercase();

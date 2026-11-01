@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use eventsource_stream::Eventsource;
-use futures_util::{stream::BoxStream, StreamExt};
+use futures_util::{future::join_all, stream::BoxStream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sinew_core::{ChatMessage, Part, ToolDescriptor};
@@ -30,6 +30,8 @@ use crate::tool_run::{ToolRunImage, ToolRunResult};
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// One slow server must not hold up the others when listing tools.
+const CATALOG_TIMEOUT: Duration = Duration::from_secs(60);
 const TOOL_OUTPUT_LIMIT: usize = 128 * 1024;
 const TOOL_NAME_LIMIT: usize = 64;
 const LOAD_MCP_TOOL_NAME: &str = tool_names::LOAD_MCP_TOOL;
@@ -175,19 +177,22 @@ impl McpToolRegistry {
     pub async fn refresh_catalog(&self, history: &[ChatMessage]) -> Vec<ToolDescriptor> {
         let mut next_bindings = HashMap::new();
 
-        for server in enabled_servers(&self.settings) {
-            let mut client = match McpClient::connect(server).await {
-                Ok(client) => client,
-                Err(err) => {
-                    warn!("unable to connect MCP server {}: {err}", server.name);
+        let servers: Vec<&McpServerConfig> = enabled_servers(&self.settings).collect();
+        let listed = join_all(
+            servers
+                .iter()
+                .map(|server| timeout(CATALOG_TIMEOUT, list_server_tools(server))),
+        )
+        .await;
+        for (server, outcome) in servers.into_iter().zip(listed) {
+            let tools = match outcome {
+                Ok(Ok(tools)) => tools,
+                Ok(Err(err)) => {
+                    warn!("unable to list MCP tools for {}: {err}", server.name);
                     continue;
                 }
-            };
-
-            let tools = match client.list_tools().await {
-                Ok(tools) => tools,
-                Err(err) => {
-                    warn!("unable to list MCP tools for {}: {err}", server.name);
+                Err(_) => {
+                    warn!("MCP server {} did not answer in time", server.name);
                     continue;
                 }
             };
@@ -262,6 +267,28 @@ impl McpToolRegistry {
                 Vec::new(),
             ));
         }
+        Some(call_mcp_tool(binding, input).await)
+    }
+
+    /// Every tool of the last catalog, without the load step: for a harness
+    /// with its own tool search (Claude Code).
+    pub async fn all_tools(&self) -> Vec<ToolDescriptor> {
+        let bindings = self.bindings.read().await;
+        let mut tools: Vec<ToolDescriptor> = bindings
+            .iter()
+            .map(|(name, binding)| ToolDescriptor {
+                name: name.clone(),
+                description: binding.description.clone(),
+                input_schema: binding.input_schema.clone(),
+            })
+            .collect();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        tools
+    }
+
+    /// Calls a tool of the catalog, loaded or not.
+    pub async fn call_tool(&self, name: &str, input: Value) -> Option<ToolRunResult> {
+        let binding = self.bindings.read().await.get(name).cloned()?;
         Some(call_mcp_tool(binding, input).await)
     }
 
@@ -474,23 +501,29 @@ fn is_mcp_generated_name(name: &str) -> bool {
 pub async fn probe_mcp_servers(settings: &McpSettings) -> Vec<McpServerProbe> {
     let mut probes = Vec::new();
     let mut known_names: HashMap<String, McpToolBinding> = HashMap::new();
-
-    for server in &settings.servers {
-        if !server.enabled {
-            probes.push(McpServerProbe {
-                server_id: server.id.clone(),
-                server_name: server.name.clone(),
-                enabled: false,
-                ok: true,
-                tools: Vec::new(),
-                error: None,
-            });
-            continue;
+    let listed = join_all(settings.servers.iter().map(|server| async move {
+        if server.enabled {
+            Some(list_server_tools(server).await)
+        } else {
+            None
         }
+    }))
+    .await;
 
-        let mut client = match McpClient::connect(server).await {
-            Ok(client) => client,
-            Err(err) => {
+    for (server, outcome) in settings.servers.iter().zip(listed) {
+        let tools = match outcome {
+            None => {
+                probes.push(McpServerProbe {
+                    server_id: server.id.clone(),
+                    server_name: server.name.clone(),
+                    enabled: false,
+                    ok: true,
+                    tools: Vec::new(),
+                    error: None,
+                });
+                continue;
+            }
+            Some(Err(err)) => {
                 probes.push(McpServerProbe {
                     server_id: server.id.clone(),
                     server_name: server.name.clone(),
@@ -501,54 +534,96 @@ pub async fn probe_mcp_servers(settings: &McpSettings) -> Vec<McpServerProbe> {
                 });
                 continue;
             }
+            Some(Ok(tools)) => tools,
         };
 
-        match client.list_tools().await {
-            Ok(tools) => {
-                let mut infos = Vec::with_capacity(tools.len());
-                for tool in tools {
-                    let tool_name = unique_tool_name(server, &tool.name, &known_names);
-                    let display_name = mcp_tool_display_name(&tool);
-                    known_names.insert(
-                        tool_name.clone(),
-                        McpToolBinding {
-                            server: server.clone(),
-                            original_name: tool.name.clone(),
-                            display_name,
-                            description: mcp_tool_description(server, &tool),
-                            input_schema: normalize_input_schema(tool.input_schema.clone()),
-                        },
-                    );
-                    infos.push(McpToolInfo {
-                        server_id: server.id.clone(),
-                        server_name: server.name.clone(),
-                        name: tool.name,
-                        tool_name,
-                        title: tool.title,
-                        description: tool.description,
-                    });
-                }
-                probes.push(McpServerProbe {
-                    server_id: server.id.clone(),
-                    server_name: server.name.clone(),
-                    enabled: true,
-                    ok: true,
-                    tools: infos,
-                    error: None,
-                });
-            }
-            Err(err) => probes.push(McpServerProbe {
+        let mut infos = Vec::with_capacity(tools.len());
+        for tool in tools {
+            let tool_name = unique_tool_name(server, &tool.name, &known_names);
+            let display_name = mcp_tool_display_name(&tool);
+            known_names.insert(
+                tool_name.clone(),
+                McpToolBinding {
+                    server: server.clone(),
+                    original_name: tool.name.clone(),
+                    display_name,
+                    description: mcp_tool_description(server, &tool),
+                    input_schema: normalize_input_schema(tool.input_schema.clone()),
+                },
+            );
+            infos.push(McpToolInfo {
                 server_id: server.id.clone(),
                 server_name: server.name.clone(),
-                enabled: true,
-                ok: false,
-                tools: Vec::new(),
-                error: Some(err.to_string()),
-            }),
+                name: tool.name,
+                tool_name,
+                title: tool.title,
+                description: tool.description,
+            });
         }
+        probes.push(McpServerProbe {
+            server_id: server.id.clone(),
+            server_name: server.name.clone(),
+            enabled: true,
+            ok: true,
+            tools: infos,
+            error: None,
+        });
     }
 
     probes
+}
+
+/// Connects and lists the server's tools. A token the server rejects is
+/// renewed once.
+async fn list_server_tools(server: &McpServerConfig) -> Result<Vec<McpServerTool>> {
+    async fn attempt(server: &McpServerConfig) -> Result<Vec<McpServerTool>> {
+        McpClient::connect(server).await?.list_tools().await
+    }
+    let err = match attempt(server).await {
+        Err(err) if is_unauthorized(server, &err) => err,
+        outcome => return outcome,
+    };
+    match server_with_new_token(server).await? {
+        Some(renewed) => attempt(&renewed)
+            .await
+            .map_err(|err| readable_auth_error(server, err)),
+        None => Err(readable_auth_error(server, err)),
+    }
+}
+
+fn is_unauthorized(server: &McpServerConfig, err: &anyhow::Error) -> bool {
+    is_remote_server(server) && format!("{err:#}").contains("returned 401")
+}
+
+fn readable_auth_error(server: &McpServerConfig, err: anyhow::Error) -> anyhow::Error {
+    if is_unauthorized(server, &err) {
+        anyhow!("This server needs you to sign in (401). Use Sign in with OAuth, or check its Authorization header.")
+    } else {
+        err
+    }
+}
+
+/// `server` with a fresh OAuth token, or `None` if it has no OAuth sign-in.
+async fn server_with_new_token(server: &McpServerConfig) -> Result<Option<McpServerConfig>> {
+    let is_auth = |header: &&McpEnvVar| header.key.trim().eq_ignore_ascii_case("authorization");
+    let rejected = server
+        .headers
+        .iter()
+        .find(is_auth)
+        .map(|header| header.value.trim().trim_start_matches("Bearer ").to_string())
+        .unwrap_or_default();
+    let Some(token) = crate::mcp_oauth::renew_rejected_token(&server.id, &rejected).await? else {
+        return Ok(None);
+    };
+    let mut renewed = server.clone();
+    renewed
+        .headers
+        .retain(|header| !header.key.trim().eq_ignore_ascii_case("authorization"));
+    renewed.headers.push(McpEnvVar {
+        key: "Authorization".to_string(),
+        value: format!("Bearer {token}"),
+    });
+    Ok(Some(renewed))
 }
 
 fn enabled_servers(settings: &McpSettings) -> impl Iterator<Item = &McpServerConfig> {
@@ -565,8 +640,27 @@ async fn call_mcp_tool(binding: McpToolBinding, input: Value) -> ToolRunResult {
 }
 
 async fn call_mcp_tool_inner(binding: McpToolBinding, input: Value) -> Result<ToolRunResult> {
-    let mut client = McpClient::connect_with_timeout(&binding.server, CALL_TIMEOUT).await?;
-    let result = client.call_tool(&binding.original_name, input).await?;
+    async fn attempt(
+        server: &McpServerConfig,
+        name: &str,
+        input: Value,
+    ) -> Result<McpCallToolResult> {
+        let mut client = McpClient::connect_with_timeout(server, CALL_TIMEOUT).await?;
+        client.call_tool(name, input).await
+    }
+    // A token can expire mid-turn. A 401 means the call did not run, so it is
+    // safe to repeat.
+    let server = &binding.server;
+    let name = &binding.original_name;
+    let result = match attempt(server, name, input.clone()).await {
+        Err(err) if is_unauthorized(server, &err) => match server_with_new_token(server).await? {
+            Some(renewed) => attempt(&renewed, name, input)
+                .await
+                .map_err(|err| readable_auth_error(server, err))?,
+            None => return Err(readable_auth_error(server, err)),
+        },
+        outcome => outcome?,
+    };
     Ok(format_call_result(result))
 }
 
@@ -810,7 +904,7 @@ fn truncate_chars(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
 }
 
-fn short_hash<T: Hash>(value: &T) -> String {
+pub(crate) fn short_hash<T: Hash>(value: &T) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
     format!("{:x}", hasher.finish())[..8].to_string()

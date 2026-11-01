@@ -116,8 +116,8 @@ Désormais, un tour avec un modèle Claude est exécuté par la commande
 - Les demandes de permission reviennent à Sinew, qui y répond avec ses
   propres règles et cartes d'approbation. `AskUserQuestion` devient la
   carte de question de Sinew. En mode Plan, le plan s'affiche comme réponse.
-- Les outils navigateur de Sinew sont prêtés à Claude Code par un serveur
-  MCP interne (`mcp__sinew__browser_*`).
+- Les outils navigateur de Sinew et tes serveurs MCP sont prêtés à Claude
+  Code par un serveur MCP interne (`mcp__sinew__*`).
 - L'identifiant de session Claude Code est gardé dans la conversation, donc
   le tour suivant la reprend (`--resume`, au bon message après un retour en
   arrière, et en copie après un fork). Une conversation commencée avec un
@@ -517,6 +517,12 @@ Code : `crates/sinew-core/src/discovered.rs` (registre + surcharge des
 capacités), `crates/sinew-*/src/discovery.rs` (une liste par provider),
 commande `list_discovered_models` dans `src-tauri/src/providers.rs`, fusion
 dans `src/lib/models.ts` (`catalogWithDiscovered`).
+
+Le sélecteur affiche les modèles les plus puissants en premier et masque un
+modèle quand ton compte en a une version plus récente de la même gamme : un
+forfait sans les meilleurs modèles garde donc le meilleur auquel il a accès.
+OpenCode Go est groupé par famille. Les versions masquées se réactivent dans
+Paramètres → Providers → Earlier model versions.
 
 ### Prise en charge du shell WSL / Ubuntu
 

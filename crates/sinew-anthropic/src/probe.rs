@@ -95,15 +95,12 @@ pub fn record_usage(response: &Value) -> bool {
 fn discovered_models(init: &Value) -> Vec<DiscoveredModel> {
     let mut models: Vec<DiscoveredModel> = Vec::new();
     for model in init["models"].as_array().into_iter().flatten() {
-        let id = model["resolvedModel"]
+        let resolved = model["resolvedModel"]
             .as_str()
             .or_else(|| model["value"].as_str())
-            .unwrap_or_default()
-            // `claude-opus-5-5[1m]` names the 1M-context variant.
-            .split('[')
-            .next()
-            .unwrap_or_default()
-            .to_string();
+            .unwrap_or_default();
+        // `claude-opus-5-5[1m]` names the 1M-context variant.
+        let id = without_date(resolved.split('[').next().unwrap_or_default()).to_string();
         if !id.starts_with("claude-") || models.iter().any(|known| known.id == id) {
             continue;
         }
@@ -115,9 +112,7 @@ fn discovered_models(init: &Value) -> Vec<DiscoveredModel> {
             .map(str::to_string)
             .collect();
         models.push(DiscoveredModel {
-            label: model["displayName"]
-                .as_str()
-                .map(|name| name.trim_start_matches("Claude ").to_string()),
+            label: model_label(model),
             supports_images: Some(true),
             reasoning_levels,
             id,
@@ -125,6 +120,29 @@ fn discovered_models(init: &Value) -> Vec<DiscoveredModel> {
         });
     }
     models
+}
+
+/// A real model name, or `None` to derive one from the id. Depending on the
+/// Claude Code version, it is in `displayName` ("Opus 5.5") or starts the
+/// `description` ("Opus 5 · Best for…"); both can also hold something else
+/// ("Default (recommended)", "Best for everyday, complex tasks"). Names have
+/// a version number.
+fn model_label(model: &Value) -> Option<String> {
+    let description = model["description"].as_str().and_then(|text| text.split('·').next());
+    [model["displayName"].as_str(), description]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|name| name.len() <= 24 && name.contains(|c: char| c.is_ascii_digit()))
+        .map(|name| name.trim_start_matches("Claude ").to_string())
+}
+
+/// `claude-haiku-4-5-20251001` as the `claude-haiku-4-5` Sinew knows.
+fn without_date(id: &str) -> &str {
+    match id.rsplit_once('-') {
+        Some((base, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => base,
+        _ => id,
+    }
 }
 
 #[cfg(test)]
@@ -135,15 +153,20 @@ mod tests {
     fn reads_models_from_initialize() {
         let init = json!({
             "models": [
-                { "value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5", "supportedEffortLevels": ["low", "high", "max"] },
-                { "value": "opus[1m]", "resolvedModel": "claude-opus-5-5[1m]", "displayName": "Opus 5.5 (1M)" },
+                { "value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)", "description": "Opus 5.5 · Best for complex tasks", "supportedEffortLevels": ["low", "high", "max"] },
+                { "value": "opus[1m]", "resolvedModel": "claude-opus-5-5[1m]", "displayName": "Opus (1M context)", "description": "Opus 5.5 with 1M context · Best" },
                 { "value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5" },
+                { "value": "haiku", "resolvedModel": "claude-haiku-4-5-20251001", "displayName": "Haiku", "description": "Haiku 4.5 · Fastest" },
                 { "value": "custom", "displayName": "Something else" }
             ]
         });
         let models = discovered_models(&init);
         let ids: Vec<_> = models.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, ["claude-opus-5-5", "claude-sonnet-5-5"]);
+        assert_eq!(ids, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"]);
+        assert_eq!(models[0].label.as_deref(), Some("Opus 5.5"));
+        assert_eq!(models[2].label.as_deref(), Some("Haiku 4.5"));
+        let newer = json!({ "displayName": "Opus", "description": "Best for everyday, complex tasks" });
+        assert_eq!(model_label(&newer), None);
         assert_eq!(models[0].reasoning_levels, ["low", "high", "max"]);
         assert_eq!(models[1].label.as_deref(), Some("Sonnet 5.5"));
     }

@@ -2,7 +2,7 @@ use crate::*;
 
 use sinew_app::{
     mcp_oauth_authorize_url, mcp_oauth_discover, mcp_oauth_exchange_code, mcp_oauth_generate_pkce,
-    mcp_oauth_generate_state, mcp_oauth_refresh, mcp_oauth_register_client, McpOAuthMetadata,
+    mcp_oauth_generate_state, mcp_oauth_register_client, McpOAuthMetadata,
     McpOAuthRecord, McpPkcePair, McpRegisteredClient, McpServerConfig, McpSettings, McpTransport,
 };
 
@@ -23,11 +23,6 @@ pub(super) async fn resolve_mcp_oauth_settings(
         return settings;
     }
 
-    let http = match reqwest::Client::builder().user_agent("sinew/0.1").build() {
-        Ok(client) => client,
-        Err(_) => return settings,
-    };
-
     for server in &mut settings.servers {
         let is_remote = server
             .url
@@ -42,20 +37,16 @@ pub(super) async fn resolve_mcp_oauth_settings(
             continue;
         };
 
-        let mut record = record.clone();
-        if record.needs_refresh() && record.refresh_token.is_some() {
-            match mcp_oauth_refresh(&http, &record).await {
-                Ok(refreshed) => {
-                    let _ = store.save_mcp_oauth_token(&server.id, &refreshed);
-                    record = refreshed;
-                }
-                Err(err) => {
-                    tracing::warn!("MCP OAuth refresh failed for {}: {err}", server.name);
-                }
+        let mut access_token = record.access_token.clone();
+        if record.needs_refresh() {
+            match sinew_app::mcp_oauth::current_access_token(store, &server.id).await {
+                Ok(Some(token)) => access_token = token,
+                Ok(None) => {}
+                Err(err) => tracing::warn!("MCP OAuth refresh failed for {}: {err}", server.name),
             }
         }
 
-        set_bearer_header(server, &record.access_token);
+        set_bearer_header(server, &access_token);
     }
 
     settings
@@ -266,6 +257,33 @@ pub(super) async fn disconnect_mcp_oauth(
         .save_mcp_settings(&settings)
         .map_err(error_to_string)?;
     Ok(())
+}
+
+/// Removes an MCP server and its OAuth sign-in.
+#[tauri::command]
+pub(super) async fn delete_mcp_server(
+    state: State<'_, DesktopState>,
+    server_id: String,
+) -> std::result::Result<McpSettings, String> {
+    {
+        let mut active = state.mcp_login.lock().await;
+        if active.as_ref().is_some_and(|attempt| attempt.server_id == server_id) {
+            if let Some(attempt) = active.take() {
+                attempt.cancel.notify_one();
+            }
+        }
+    }
+    let mut settings = state.store.load_mcp_settings().map_err(error_to_string)?;
+    settings.servers.retain(|server| server.id != server_id);
+    state
+        .store
+        .save_mcp_settings(&settings)
+        .map_err(error_to_string)?;
+    state
+        .store
+        .delete_mcp_oauth_token(&server_id)
+        .map_err(error_to_string)?;
+    Ok(settings)
 }
 
 struct McpOAuthServerCtx {

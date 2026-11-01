@@ -28,6 +28,9 @@ const DEFAULT_CONVERSATION_TITLE: &str = "New conversation";
 const MODE_MODEL_SETTINGS_KEY: &str = "mode_model_settings";
 const MCP_SETTINGS_KEY: &str = "mcp_settings";
 const MCP_OAUTH_TOKENS_KEY: &str = "mcp_oauth_tokens";
+/// All servers' tokens are one JSON value: writes are read-modify-write, and
+/// two at once would drop one server's sign-in.
+static MCP_OAUTH_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const SUB_AGENT_SETTINGS_KEY: &str = "sub_agent_settings";
 const TOOL_SETTINGS_KEY: &str = "tool_settings";
 const SKILL_SETTINGS_KEY: &str = "skill_settings";
@@ -1493,12 +1496,14 @@ impl AppStore {
     }
 
     pub fn save_mcp_oauth_token(&self, server_id: &str, record: &McpOAuthRecord) -> Result<()> {
+        let _guard = MCP_OAUTH_WRITE.lock().unwrap_or_else(|err| err.into_inner());
         let mut tokens = self.load_mcp_oauth_tokens()?;
         tokens.insert(server_id.to_string(), record.clone());
         self.write_mcp_oauth_tokens(&tokens)
     }
 
     pub fn delete_mcp_oauth_token(&self, server_id: &str) -> Result<()> {
+        let _guard = MCP_OAUTH_WRITE.lock().unwrap_or_else(|err| err.into_inner());
         let mut tokens = self.load_mcp_oauth_tokens()?;
         if tokens.remove(server_id).is_some() {
             self.write_mcp_oauth_tokens(&tokens)?;

@@ -4,8 +4,8 @@
 //! SDK protocol) and Claude Code runs the whole turn with its own tools and
 //! its own sign-in. Sinew renders the stream, answers Claude Code's
 //! permission prompts with its approval cards and permission rules, shows
-//! `AskUserQuestion` as its question card, and lends its browser through an
-//! in-process MCP server. The Claude Code session id is kept on the turn's
+//! `AskUserQuestion` as its question card, and lends its browser and the
+//! user's MCP servers through an in-process MCP server. The Claude Code session id is kept on the turn's
 //! last assistant message so the next turn resumes it.
 
 use std::path::Path;
@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use crate::permissions::{self, Decision};
 use crate::todo::{TodoStatus, TodoTask};
 use crate::tool_run::{DiffLine, DiffLineKind, FileChange, FileChangeKind, ToolRunImage};
-use crate::{tool_names, BrowserTools, QuestionTool, TodoListState, ToolSettings};
+use crate::{tool_names, BrowserTools, McpToolRegistry, QuestionTool, TodoListState, ToolSettings};
 
 use super::cancel::{ApprovalReply, EngineCommand, TurnCancel};
 use super::context::{AgentMode, TurnContext, TurnOutput};
@@ -56,6 +56,7 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
         goal_workflow,
         bash,
         browser,
+        mcp,
         question,
         tool_settings,
         event_scope,
@@ -72,6 +73,8 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
     let (record, prompt_start) = resume_point(&history);
     let content = user_content(&history, record.is_none().then_some(prompt_start), prompt_start);
     let browser_on = tool_settings.browser_enabled && mode != AgentMode::Plan;
+    mcp.refresh_catalog(&history).await;
+    let sinew_server = browser_on || !mcp.all_tools().await.is_empty();
 
     let mut args = vec![
         "--include-partial-messages".to_string(),
@@ -96,11 +99,15 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
             args.push("--fork-session".into());
         }
     }
-    if browser_on {
+    if sinew_server {
         args.extend([
             "--mcp-config".into(),
             json!({ "mcpServers": { SINEW_MCP: { "type": "sdk", "name": SINEW_MCP } } })
                 .to_string(),
+        ]);
+    }
+    if browser_on {
+        args.extend([
             "--append-system-prompt".into(),
             super::turn::BROWSER_TOOLS_PROMPT
                 .replace("browser_* tools", "mcp__sinew__browser_* tools")
@@ -132,7 +139,7 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
         }
     };
     let sender = process.sender();
-    let init = if browser_on {
+    let init = if sinew_server {
         json!({ "sdkMcpServers": [SINEW_MCP] })
     } else {
         json!({})
@@ -163,7 +170,12 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
         root: root.clone(),
         tool_settings: tool_settings.clone(),
         question: question.clone(),
-        browser: browser.clone(),
+        tools: SinewTools {
+            browser: browser.clone(),
+            browser_on,
+            scripts: tool_settings.browser_scripts_enabled,
+            mcp: mcp.clone(),
+        },
     };
 
     let mut interrupted = false;
@@ -759,6 +771,12 @@ fn describe_error(kind: &str, detail: &str) -> String {
             "Claude Code is not signed in. Run `claude auth login` in a terminal (or Settings > Providers > Anthropic > Sign in), then send your message again.\n{detail}"
         );
     }
+    if detail.contains("unrecognized_model") {
+        return format!(
+            "Your Claude Code does not know this model. Update it with `claude update`, or pick another model.
+{detail}"
+        );
+    }
     if detail.is_empty() {
         format!("Claude Code error: {kind}")
     } else {
@@ -809,7 +827,12 @@ fn map_tool(name: &str, input: &Value) -> (String, Value) {
         Value::Object(out)
     };
     if let Some(sinew) = name.strip_prefix(SINEW_MCP_PREFIX) {
-        return (sinew.to_string(), input.clone());
+        let name = if sinew.starts_with("browser_") {
+            sinew.to_string()
+        } else {
+            format!("mcp__{sinew}")
+        };
+        return (name, input.clone());
     }
     match name {
         "Bash" | "PowerShell" => (
@@ -980,7 +1003,31 @@ struct Helpers {
     root: std::path::PathBuf,
     tool_settings: ToolSettings,
     question: Option<Arc<QuestionTool>>,
+    tools: SinewTools,
+}
+
+/// What Sinew's in-process MCP server offers.
+#[derive(Clone)]
+struct SinewTools {
     browser: Arc<BrowserTools>,
+    browser_on: bool,
+    scripts: bool,
+    mcp: Arc<McpToolRegistry>,
+}
+
+/// A user MCP tool's name on Sinew's server: `mcp__10kdesign__search` becomes
+/// `10kdesign__search`, and Claude Code shows it as
+/// `mcp__sinew__10kdesign__search`, which must fit the 64 characters of a
+/// tool name.
+fn exposed_mcp_name(name: &str) -> String {
+    let short = name.strip_prefix("mcp__").unwrap_or(name);
+    let limit = 64 - SINEW_MCP_PREFIX.len();
+    if short.len() <= limit {
+        return short.to_string();
+    }
+    let hash = crate::mcp::short_hash(&name);
+    let kept: String = short.chars().take(limit - hash.len() - 1).collect();
+    format!("{kept}_{hash}")
 }
 
 impl Helpers {
@@ -1002,10 +1049,9 @@ impl Helpers {
                 });
             }
             Some("mcp_message") if request["server_name"] == SINEW_MCP => {
-                let browser = self.browser.clone();
-                let scripts = self.tool_settings.browser_scripts_enabled;
+                let tools = self.tools.clone();
                 tokio::spawn(async move {
-                    let response = mcp_message(&request["message"], &browser, scripts).await;
+                    let response = mcp_message(&request["message"], &tools).await;
                     sender.respond(&request_id, json!({ "mcp_response": response }));
                 });
             }
@@ -1125,8 +1171,8 @@ async fn permission(
     }
 }
 
-/// Sinew's in-process MCP server: the browser tools.
-async fn mcp_message(message: &Value, browser: &BrowserTools, scripts: bool) -> Value {
+/// Sinew's in-process MCP server: the browser tools and the user's MCP servers.
+async fn mcp_message(message: &Value, tools: &SinewTools) -> Value {
     let id = message.get("id").cloned();
     let Some(id) = id.filter(|id| !id.is_null()) else {
         // A notification: nothing to answer, but the control request is.
@@ -1139,21 +1185,40 @@ async fn mcp_message(message: &Value, browser: &BrowserTools, scripts: bool) -> 
             "capabilities": { "tools": {} },
             "serverInfo": { "name": SINEW_MCP, "version": env!("CARGO_PKG_VERSION") },
         }),
-        Some("tools/list") => json!({
-            "tools": browser
-                .all_descriptors(scripts)
-                .into_iter()
-                .map(|tool| json!({
-                    "name": tool.name,
+        Some("tools/list") => {
+            let mut listed = Vec::new();
+            if tools.browser_on {
+                listed.extend(tools.browser.all_descriptors(tools.scripts).into_iter().map(|tool| {
+                    json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "inputSchema": tool.input_schema,
+                    })
+                }));
+            }
+            listed.extend(tools.mcp.all_tools().await.into_iter().map(|tool| {
+                json!({
+                    "name": exposed_mcp_name(&tool.name),
                     "description": tool.description,
                     "inputSchema": tool.input_schema,
-                }))
-                .collect::<Vec<_>>(),
-        }),
+                })
+            }));
+            json!({ "tools": listed })
+        }
         Some("tools/call") => {
             let name = params["name"].as_str().unwrap_or_default();
             let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let result = browser.run(name, arguments, scripts).await;
+            let result = if tools.browser_on && name.starts_with("browser_") {
+                Some(tools.browser.run(name, arguments, tools.scripts).await)
+            } else {
+                let catalog = tools.mcp.all_tools().await;
+                match catalog.iter().find(|tool| exposed_mcp_name(&tool.name) == name) {
+                    Some(tool) => tools.mcp.call_tool(&tool.name, arguments).await,
+                    None => None,
+                }
+            };
+            let result = result
+                .unwrap_or_else(|| crate::tool_run::ToolRunResult::err(format!("unknown tool: {name}"), Vec::new()));
             let mut content = vec![json!({ "type": "text", "text": result.content })];
             content.extend(result.images.iter().map(|image| {
                 json!({ "type": "image", "data": image.data, "mimeType": image.media_type })
@@ -1235,6 +1300,7 @@ mod tests {
         assert_eq!(input["files"][0]["edits"][0]["newContent"], "b");
         assert_eq!(map_tool("Bash", &json!({ "command": "ls" })).1, json!({ "command": "ls" }));
         assert_eq!(map_tool("mcp__sinew__browser_click", &json!({})).0, "browser_click");
+        assert_eq!(map_tool("mcp__sinew__10kdesign__search", &json!({})).0, "mcp__10kdesign__search");
         let (name, input) = map_tool(
             "AskUserQuestion",
             &json!({ "questions": [{ "question": "Which?", "header": "Pick", "multiSelect": true, "options": [{ "label": "A", "description": "a" }] }] }),
@@ -1265,10 +1331,15 @@ mod tests {
     #[ignore = "starts the local Claude Code"]
     async fn talks_to_the_local_claude_code() {
         let root = std::env::temp_dir();
-        let browser = BrowserTools::new(
-            root.to_string_lossy().into_owned(),
-            sinew_browser::BrowserSessions::new(),
-        );
+        let sinew = SinewTools {
+            browser: Arc::new(BrowserTools::new(
+                root.to_string_lossy().into_owned(),
+                sinew_browser::BrowserSessions::new(),
+            )),
+            browser_on: true,
+            scripts: false,
+            mcp: Arc::new(McpToolRegistry::new(crate::McpSettings { servers: Vec::new() })),
+        };
         let args = vec![
             "--include-partial-messages".to_string(),
             "--permission-prompt-tool".into(),
@@ -1305,7 +1376,7 @@ mod tests {
                 Some("control_request") if message["request"]["subtype"] == "mcp_message" => {
                     let rpc = &message["request"]["message"];
                     mcp_calls.push(rpc["method"].as_str().unwrap_or_default().to_string());
-                    let response = mcp_message(rpc, &browser, false).await;
+                    let response = mcp_message(rpc, &sinew).await;
                     sender.respond(message["request_id"].as_str().unwrap(), json!({ "mcp_response": response }));
                 }
                 Some("system") if message["subtype"] == "init" => {
@@ -1331,6 +1402,15 @@ mod tests {
         let outcome = outcome.expect("a result");
         eprintln!("result: {}", outcome["result"]);
         process.shutdown(Duration::from_secs(2)).await;
+    }
+
+    #[test]
+    fn user_mcp_tool_names_fit_claude_codes_limit() {
+        assert_eq!(exposed_mcp_name("mcp__10kdesign__search"), "10kdesign__search");
+        let long = format!("mcp__server__{}", "x".repeat(60));
+        let exposed = exposed_mcp_name(&long);
+        assert!(SINEW_MCP_PREFIX.len() + exposed.len() <= 64, "{exposed}");
+        assert_ne!(exposed, exposed_mcp_name(&format!("{long}y")));
     }
 
     #[test]

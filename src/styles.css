@@ -3933,6 +3933,37 @@ textarea {
   background: var(--bg-1);
 }
 
+.settings-pane__earlier-models {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.settings-pane__earlier-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-pane__earlier-provider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.settings-pane__earlier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-1);
+}
+
 .settings-pane__provider-main {
   min-width: 0;
   display: flex;
@@ -5707,6 +5738,35 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.settings-pane__server-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  min-width: 24px;
+  justify-content: center;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-pane__server-delete:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.settings-pane__server-delete[data-armed="true"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+.settings-pane__server-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Settings picker (matte popover, opens downward) */
@@ -10231,6 +10291,12 @@ textarea {
   border-color: var(--line-strong);
   color: var(--text-0);
 }
+.composer__popover-group {
+  padding: 8px 10px 3px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 .composer__popover-row {
   display: flex;
   align-items: center;

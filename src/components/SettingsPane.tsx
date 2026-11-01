@@ -16,6 +16,10 @@ import {
   PROVIDERS,
   THINKING_LEVELS,
   availableModelsForProviders,
+  earlierModels,
+  modelsForPicker,
+  setEarlierModelEnabled,
+  useEnabledEarlierModels,
   modelIdFromRef,
   modelRefFromId,
   modelRefWithThinking,
@@ -1215,6 +1219,34 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
     [parseError, saving, settings],
   );
 
+  const deleteServer = useCallback(
+    async (id: string) => {
+      if (saving) return;
+      setSaving(true);
+      setStatus(null);
+      try {
+        const position = settings.servers.findIndex((server) => server.id === id);
+        const removedName = settings.servers[position]?.name ?? "Server";
+        const saved = normalizeSettings(await api.deleteMcpServer(id));
+        const nextJson = settingsToJson(saved);
+        setSettings(saved);
+        setSavedJson(nextJson);
+        setJsonText(nextJson);
+        setParseError(null);
+        setProbes((current) => current.filter((probe) => probe.serverId !== id));
+        setSelectedServerId(
+          saved.servers[Math.min(position, saved.servers.length - 1)]?.id ?? null,
+        );
+        setStatus(`${removedName} deleted`);
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [saving, settings],
+  );
+
   // Append one or more servers coming from the "Add server" modal (guided
   // form or pasted config). Merges into the current set, skipping any whose
   // name already exists, then persists + re-probes exactly like toggle/save
@@ -1879,6 +1911,7 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
             openCodeGoStatus={openCodeGoStatus}
             openRouterStatus={openRouterStatus}
             openRouterModels={openRouterModels}
+            availableModels={availableModels}
             loading={providersLoading}
             busy={providersBusy}
             message={providersMessage}
@@ -1966,6 +1999,7 @@ export function SettingsPane({ workspacePath, initialSection }: Props) {
             selectedProbe={selectedProbe}
             knownToolCounts={knownToolCounts}
             onToggleEnabled={toggleEnabled}
+            onDeleteServer={(id) => void deleteServer(id)}
             onMount={handleEditorMount}
             onImport={() => void importMcpFromFile()}
             onAdd={() => setAddServerOpen(true)}
@@ -2095,6 +2129,7 @@ type ProvidersSectionProps = {
   openCodeGoStatus: OpenCodeGoProviderStatus | null;
   openRouterStatus: OpenRouterProviderStatus | null;
   openRouterModels: OpenRouterModel[];
+  availableModels: readonly ModelEntry[];
   loading: boolean;
   busy: boolean;
   message: string | null;
@@ -2128,6 +2163,7 @@ function ProvidersSection({
   kimiStatus,
   openRouterStatus,
   openRouterModels,
+  availableModels,
   loading,
   busy,
   message,
@@ -2276,8 +2312,55 @@ function ProvidersSection({
           onModelsChange={onOpenRouterModelsChange}
           onChanged={onOpenRouterChanged}
         />
+        <EarlierModelsCard models={availableModels} />
       </div>
     </>
+  );
+}
+
+/// Switches for the older model versions the picker hides by default.
+function EarlierModelsCard({ models }: { models: readonly ModelEntry[] }) {
+  const enabled = useEnabledEarlierModels();
+  const earlier = earlierModels(models);
+  if (earlier.length === 0) return null;
+  return (
+    <section className="settings-pane__provider-card settings-pane__earlier-models">
+      <div className="settings-pane__provider-copy">
+        <h2>Earlier model versions</h2>
+        <p>Hidden from the model picker. Turn on the ones you still want to use.</p>
+      </div>
+      {PROVIDERS.filter((provider) =>
+        earlier.some((model) => model.provider === provider.value),
+      ).map((provider) => (
+        <div key={provider.value} className="settings-pane__earlier-group">
+          <div className="settings-pane__earlier-provider">
+            <Icon icon={provider.icon} width={13} height={13} />
+            {provider.label}
+          </div>
+          {earlier
+            .filter((model) => model.provider === provider.value)
+            .map((model) => {
+              const on = enabled.includes(model.value);
+              return (
+                <div key={model.value} className="settings-pane__earlier-row">
+                  <span>{model.label}</span>
+                  <button
+                    type="button"
+                    className="settings-pane__switch"
+                    role="switch"
+                    aria-checked={on}
+                    aria-label={`${on ? "Hide" : "Show"} ${model.label}`}
+                    data-on={on ? "true" : "false"}
+                    onClick={() => setEarlierModelEnabled(model.value, !on)}
+                  >
+                    <span className="settings-pane__switch-thumb" />
+                  </button>
+                </div>
+              );
+            })}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -3736,6 +3819,7 @@ type McpSectionProps = {
   selectedProbe: McpServerProbe | null;
   knownToolCounts: Record<string, number>;
   onToggleEnabled: (id: string) => void;
+  onDeleteServer: (id: string) => void;
   onMount: OnMount;
   onImport: () => void;
   onAdd: () => void;
@@ -3761,6 +3845,7 @@ function McpSection({
   selectedProbe,
   knownToolCounts,
   onToggleEnabled,
+  onDeleteServer,
   onMount,
   onImport,
   onAdd,
@@ -3983,6 +4068,8 @@ function McpSection({
               probing={probing}
               knownToolCount={knownToolCounts[selectedServer.id]}
               onReprobe={onReprobe}
+              deleteBlocked={dirty ? "Save or discard your raw config changes first" : saving ? "Saving…" : null}
+              onDelete={() => onDeleteServer(selectedServer.id)}
             />
           ) : (
             <div className="settings-pane__empty-state">
@@ -4007,9 +4094,30 @@ type ServerDetailProps = {
   probing: boolean;
   knownToolCount: number | undefined;
   onReprobe: () => void;
+  /// Why the server cannot be deleted right now.
+  deleteBlocked: string | null;
+  onDelete: () => void;
 };
 
-function ServerDetail({ server, probe, probing, knownToolCount, onReprobe }: ServerDetailProps) {
+function ServerDetail({
+  server,
+  probe,
+  probing,
+  knownToolCount,
+  onReprobe,
+  deleteBlocked,
+  onDelete,
+}: ServerDetailProps) {
+  // Two clicks: the first arms the button for a few seconds.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => {
+    setConfirmDelete(false);
+  }, [server.id]);
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const id = window.setTimeout(() => setConfirmDelete(false), 3000);
+    return () => window.clearTimeout(id);
+  }, [confirmDelete]);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(
     () => new Set<string>(),
   );
@@ -4095,10 +4203,27 @@ function ServerDetail({ server, probe, probing, knownToolCount, onReprobe }: Ser
     <div className="settings-pane__detail">
       <div className="settings-pane__detail-head">
         <span className="settings-pane__detail-title">{server.name}</span>
-        <span className="settings-pane__chip" data-tone={tone}>
-          <span className="settings-pane__chip-dot" />
-          {statusLabel}
-        </span>
+        <div className="settings-pane__detail-head-actions">
+          <span className="settings-pane__chip" data-tone={tone}>
+            <span className="settings-pane__chip-dot" />
+            {statusLabel}
+          </span>
+          <button
+            type="button"
+            className="settings-pane__server-delete"
+            data-armed={confirmDelete ? "true" : "false"}
+            disabled={deleteBlocked !== null}
+            title={deleteBlocked ?? `Delete ${server.name}`}
+            aria-label={confirmDelete ? `Confirm deleting ${server.name}` : `Delete ${server.name}`}
+            onClick={() => {
+              if (confirmDelete) onDelete();
+              else setConfirmDelete(true);
+            }}
+          >
+            <Icon icon="solar:trash-bin-minimalistic-linear" width={14} height={14} />
+            {confirmDelete && <span>Confirm</span>}
+          </button>
+        </div>
       </div>
 
       <div className="settings-pane__detail-body">
@@ -4648,6 +4773,7 @@ function SubAgentPreview({
   onDelete: () => void;
   onReveal: () => void;
 }) {
+  const enabledEarlierModels = useEnabledEarlierModels();
   const rawModelId = modelIdFromRef(agent.model);
   const thinking = thinkingFromRef(agent.model);
   const modelEntry =
@@ -4770,7 +4896,7 @@ function SubAgentPreview({
             <span>Model</span>
             <SettingsPicker
               value={modelId}
-              options={availableModels.map((model) => ({
+              options={modelsForPicker(availableModels, enabledEarlierModels, rawModelId).map((model) => ({
                 value: model.value,
                 label: model.label,
                 icon: PROVIDERS.find((p) => p.value === model.provider)?.icon,

@@ -612,6 +612,9 @@ export const api = {
   disconnectMcpOAuth(serverId: string) {
     return invoke<void>("disconnect_mcp_oauth", { serverId });
   },
+  deleteMcpServer(serverId: string) {
+    return invoke<McpSettings>("delete_mcp_server", { serverId });
+  },
   listInstalledSkills(workspacePath: string) {
     return invoke<InstalledSkill[]>("list_installed_skills_command", {
       input: { workspacePath },

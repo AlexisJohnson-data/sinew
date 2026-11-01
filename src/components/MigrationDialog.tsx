@@ -4,6 +4,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
 import {
   availableModelsForProviders,
+  modelsForPicker,
+  useEnabledEarlierModels,
   labelForModelRef,
   modelIdFromRef,
   modelRefFromId,
@@ -169,6 +171,7 @@ export function MigrationDialog({
     [configuredProviders, openRouterModels, opencodeGoModels, discoveredModels],
   );
 
+  const enabledEarlierModels = useEnabledEarlierModels();
   const selectedEntry = useMemo(
     () => availableModels.find((m) => m.value === selectedModelId) ?? null,
     [availableModels, selectedModelId],
@@ -352,7 +355,7 @@ export function MigrationDialog({
               onChange={(event) => setSelectedModelId(event.target.value)}
               disabled={busy}
             >
-              {availableModels.map((entry) => (
+              {modelsForPicker(availableModels, enabledEarlierModels, selectedModelId).map((entry) => (
                 <option key={entry.value} value={entry.value}>
                   {entry.label}
                 </option>

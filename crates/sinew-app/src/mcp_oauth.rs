@@ -14,8 +14,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::store::AppStore;
+
 /// Clock skew we subtract when deciding whether an access token is still good.
-const EXPIRY_SKEW_MS: i64 = 60_000;
+const EXPIRY_SKEW_MS: i64 = 120_000;
+/// Longest `scope` value sent to the browser. Some servers advertise every
+/// scope they have (Cloudflare: 403 of them, 8 KB), too long for a URL.
+const MAX_SCOPE_CHARS: usize = 2_000;
+const OFFLINE_ACCESS: &str = "offline_access";
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const SIGN_IN_EXPIRED: &str =
+    "The sign-in for this server has expired. Use Re-authenticate (OAuth) to sign in again.";
 
 /// Persisted OAuth state for one MCP server (keyed by server id in the store).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +68,8 @@ pub struct OAuthMetadata {
     pub authorization_endpoint: String,
     pub token_endpoint: String,
     pub registration_endpoint: Option<String>,
+    /// Scopes to ask for: what the server's 401 or resource metadata asks,
+    /// else what its authorization server advertises.
     pub scopes_supported: Vec<String>,
     pub token_endpoint_auth_methods_supported: Vec<String>,
     /// Canonical resource indicator (RFC 8707) — the MCP server URL.
@@ -105,18 +116,20 @@ pub fn generate_state() -> String {
 pub async fn discover(http: &reqwest::Client, server_url: &str) -> Result<OAuthMetadata> {
     let base = url::Url::parse(server_url)
         .with_context(|| format!("invalid MCP server url `{server_url}`"))?;
-    let auth_server = auth_server_from_www_authenticate(http, server_url).await;
-    if auth_server.is_some() {
-        return discover_with_auth_server(http, &base, server_url, auth_server).await;
-    }
-    discover_with_auth_server(http, &base, server_url, None).await
+    let challenge = read_auth_challenge(http, server_url).await;
+    discover_with_auth_server(http, &base, server_url, challenge).await
 }
 
-async fn auth_server_from_www_authenticate(
-    http: &reqwest::Client,
-    server_url: &str,
-) -> Option<String> {
-    let resp = http
+/// What a server's `401` says about how to sign in to it.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AuthChallenge {
+    auth_server: Option<String>,
+    resource_metadata: Option<String>,
+    scope: Option<String>,
+}
+
+async fn read_auth_challenge(http: &reqwest::Client, server_url: &str) -> AuthChallenge {
+    let response = http
         .post(server_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
@@ -131,33 +144,94 @@ async fn auth_server_from_www_authenticate(
             }
         }))
         .send()
-        .await
-        .ok()?;
-    let header = resp
-        .headers()
-        .get(reqwest::header::WWW_AUTHENTICATE)
-        .and_then(|v| v.to_str().ok())?;
-    header_parameter(header, "authorization_uri")
-        .or_else(|| header_parameter(header, "authorization_url"))
-        .or_else(|| header_parameter(header, "authorization_server"))
+        .await;
+    response
+        .ok()
+        .and_then(|response| {
+            response
+                .headers()
+                .get(reqwest::header::WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok())
+                .map(parse_auth_challenge)
+        })
+        .unwrap_or_default()
 }
 
-fn header_parameter(header: &str, key: &str) -> Option<String> {
-    for part in header.split(',') {
-        let part = part.trim();
-        let (name, value) = part.split_once('=')?;
-        if name.trim().eq_ignore_ascii_case(key) {
-            return Some(value.trim().trim_matches('"').to_string());
+fn parse_auth_challenge(header: &str) -> AuthChallenge {
+    let params = challenge_parameters(header);
+    let get = |key: &str| {
+        params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key))
+            .map(|(_, value)| value.clone())
+            .filter(|value| !value.trim().is_empty())
+    };
+    AuthChallenge {
+        auth_server: get("authorization_uri")
+            .or_else(|| get("authorization_url"))
+            .or_else(|| get("authorization_server")),
+        resource_metadata: get("resource_metadata"),
+        scope: get("scope"),
+    }
+}
+
+/// The `name="value"` pairs of a `WWW-Authenticate` header; quoted values may
+/// hold commas and spaces.
+fn challenge_parameters(header: &str) -> Vec<(String, String)> {
+    let mut rest = header.trim();
+    if let Some((scheme, after)) = rest.split_once(char::is_whitespace) {
+        if !scheme.contains('=') {
+            rest = after;
         }
     }
-    None
+    let mut params = Vec::new();
+    while let Some((name, after)) = rest.split_once('=') {
+        let name = name.trim().trim_start_matches(',').trim().to_string();
+        let after = after.trim_start();
+        let (value, remainder) = if let Some(quoted) = after.strip_prefix('"') {
+            match quoted.split_once('"') {
+                Some((value, remainder)) => (value, remainder),
+                None => (quoted, ""),
+            }
+        } else {
+            after.split_once(',').unwrap_or((after, ""))
+        };
+        params.push((name, value.trim().to_string()));
+        rest = remainder.trim_start().trim_start_matches(',');
+    }
+    params
+}
+
+/// The scopes to ask for. Asking for everything an authorization server
+/// advertises is wrong (the MCP spec starts from the server's 401, then its
+/// resource metadata) and can make the URL too long to open. `offline_access`
+/// is added when advertised: without it, some servers give no refresh token
+/// and the connection dies when the access token expires.
+fn scopes_to_request(
+    challenge: Option<&str>,
+    resource: Vec<String>,
+    advertised: Vec<String>,
+) -> Vec<String> {
+    let offline = advertised.iter().any(|scope| scope == OFFLINE_ACCESS);
+    let mut scopes = match challenge {
+        Some(scope) => scope.split_whitespace().map(str::to_string).collect(),
+        None if !resource.is_empty() => resource,
+        None => advertised,
+    };
+    if scopes.join(" ").len() > MAX_SCOPE_CHARS {
+        scopes.clear();
+    }
+    if offline && !scopes.iter().any(|scope| scope == OFFLINE_ACCESS) {
+        scopes.push(OFFLINE_ACCESS.to_string());
+    }
+    scopes
 }
 
 async fn discover_with_auth_server(
     http: &reqwest::Client,
     base: &url::Url,
     server_url: &str,
-    forced_auth_server: Option<String>,
+    challenge: AuthChallenge,
 ) -> Result<OAuthMetadata> {
     let origin = format!(
         "{}://{}",
@@ -172,10 +246,13 @@ async fn discover_with_auth_server(
     let path = base.path().trim_end_matches('/');
 
     // 1. Protected Resource Metadata → authorization_servers
-    let mut auth_server: Option<String> = forced_auth_server;
+    let mut auth_server: Option<String> = challenge.auth_server.clone();
     let mut resource = server_url.to_string();
     let mut resource_scopes_supported = Vec::new();
-    for candidate in well_known_urls(&origin, path, "oauth-protected-resource") {
+    let mut resource_candidates: Vec<String> =
+        challenge.resource_metadata.iter().cloned().collect();
+    resource_candidates.extend(well_known_urls(&origin, path, "oauth-protected-resource"));
+    for candidate in resource_candidates {
         if let Some(doc) = fetch_json(http, &candidate).await {
             if auth_server.is_none() {
                 if let Some(servers) = doc.get("authorization_servers").and_then(Value::as_array) {
@@ -226,7 +303,7 @@ async fn discover_with_auth_server(
         authorization_endpoint,
         token_endpoint,
         registration_endpoint,
-        mut scopes_supported,
+        advertised_scopes,
         token_endpoint_auth_methods_supported,
     ) = match metadata_doc {
         Some(doc) => (
@@ -260,9 +337,11 @@ async fn discover_with_auth_server(
         ),
     };
 
-    if scopes_supported.is_empty() {
-        scopes_supported = resource_scopes_supported;
-    }
+    let scopes_supported = scopes_to_request(
+        challenge.scope.as_deref(),
+        resource_scopes_supported,
+        advertised_scopes,
+    );
 
     Ok(OAuthMetadata {
         authorization_endpoint,
@@ -567,10 +646,157 @@ fn apply_client_auth(
     }
 }
 
+static TOKEN_STORE: std::sync::OnceLock<AppStore> = std::sync::OnceLock::new();
+
+/// Lets MCP calls renew a rejected OAuth token mid-turn. Set once at startup.
+pub fn install_token_store(store: AppStore) {
+    let _ = TOKEN_STORE.set(store);
+}
+
+/// One refresh at a time across the whole app. Many servers rotate refresh
+/// tokens: two callers refreshing with the same one get the second rejected,
+/// and some servers then revoke the whole session. Each caller reads the
+/// record inside the lock, so it sees what the previous one just saved.
+fn refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// The access token for `server_id`, refreshed if it is about to expire.
+/// `None` when the server has no OAuth sign-in.
+pub async fn current_access_token(store: &AppStore, server_id: &str) -> Result<Option<String>> {
+    token_for(store, server_id, None).await
+}
+
+/// A new access token after the server rejected `rejected`. `None` when
+/// there is no OAuth sign-in to renew.
+pub async fn renew_rejected_token(server_id: &str, rejected: &str) -> Result<Option<String>> {
+    let Some(store) = TOKEN_STORE.get() else {
+        return Ok(None);
+    };
+    token_for(store, server_id, Some(rejected)).await
+}
+
+async fn token_for(
+    store: &AppStore,
+    server_id: &str,
+    rejected: Option<&str>,
+) -> Result<Option<String>> {
+    let _guard = refresh_lock().lock().await;
+    let Some(record) = store.load_mcp_oauth_tokens()?.remove(server_id) else {
+        return Ok(None);
+    };
+    match rejected {
+        // Someone else already replaced the rejected token.
+        Some(rejected) if record.access_token != rejected => {
+            return Ok(Some(record.access_token));
+        }
+        None if !record.needs_refresh() => return Ok(Some(record.access_token)),
+        _ => {}
+    }
+    if record.refresh_token.is_none() {
+        return match rejected {
+            Some(_) => Err(anyhow!(SIGN_IN_EXPIRED)),
+            None => Ok(Some(record.access_token)),
+        };
+    }
+    let http = reqwest::Client::builder()
+        .user_agent("sinew/0.1")
+        .timeout(REFRESH_TIMEOUT)
+        .build()
+        .context("unable to build OAuth client")?;
+    match refresh(&http, &record).await {
+        Ok(refreshed) => {
+            store.save_mcp_oauth_token(server_id, &refreshed)?;
+            Ok(Some(refreshed.access_token))
+        }
+        Err(err) => {
+            // Another Sinew process may have used this refresh token first.
+            if let Some(latest) = store.load_mcp_oauth_tokens()?.remove(server_id) {
+                if latest.refresh_token != record.refresh_token {
+                    return Ok(Some(latest.access_token));
+                }
+            }
+            if refresh_was_refused(&err.to_string()) {
+                return Err(anyhow!(SIGN_IN_EXPIRED));
+            }
+            match rejected {
+                Some(_) => Err(err),
+                // A network blip: the token may still work.
+                None => Ok(Some(record.access_token)),
+            }
+        }
+    }
+}
+
+/// The server said no, as opposed to being unreachable.
+fn refresh_was_refused(error: &str) -> bool {
+    error.contains("invalid_grant")
+        || error.contains("returned 400")
+        || error.contains("returned 401")
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_quoted_challenge_parameters() {
+        let challenge = parse_auth_challenge(
+            "Bearer realm=\"OAuth\", resource_metadata=\"https://x.dev/.well-known/oauth-protected-resource/mcp\", scope=\"user:read account:read\"",
+        );
+        assert_eq!(
+            challenge.resource_metadata.as_deref(),
+            Some("https://x.dev/.well-known/oauth-protected-resource/mcp")
+        );
+        assert_eq!(challenge.scope.as_deref(), Some("user:read account:read"));
+        assert_eq!(challenge.auth_server, None);
+        let comma = parse_auth_challenge("Bearer error=\"a, b\", scope=\"c\"");
+        assert_eq!(comma.scope.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn asks_for_the_scopes_the_server_needs_not_all_it_has() {
+        let advertised: Vec<String> = (0..403)
+            .map(|i| format!("scope-number-{i}.read"))
+            .chain([OFFLINE_ACCESS.to_string()])
+            .collect();
+        assert_eq!(
+            scopes_to_request(Some("user:read account:read"), vec!["x".into()], advertised.clone()),
+            ["user:read", "account:read", OFFLINE_ACCESS]
+        );
+        assert_eq!(scopes_to_request(None, vec!["mcp".into()], vec![]), ["mcp"]);
+        // Nothing narrower and too long for a URL: let the server decide.
+        assert_eq!(scopes_to_request(None, vec![], advertised), [OFFLINE_ACCESS]);
+    }
+
+    /// Against the real servers; signs nothing in.
+    #[tokio::test]
+    #[ignore = "needs the network"]
+    async fn real_servers_give_a_url_short_enough_to_open() {
+        let http = reqwest::Client::new();
+        for server in ["https://mcp.cloudflare.com/mcp", "https://10kdesign.xyz/api/mcp"] {
+            let meta = discover(&http, server).await.unwrap();
+            let url = build_authorize_url(&meta, "client", "http://localhost:1/callback", "c", "s", None);
+            eprintln!("{server}: {} chars, scopes {:?}", url.len(), meta.scopes_supported);
+            assert!(url.len() < 4096);
+        }
+    }
+
+    #[test]
+    fn tells_a_refused_refresh_from_a_network_failure() {
+        assert!(refresh_was_refused(
+            "OAuth token endpoint returned 400 Bad Request: {\"error\":\"invalid_grant\"}"
+        ));
+        assert!(!refresh_was_refused("token refresh request failed"));
+        assert!(!refresh_was_refused("OAuth token endpoint returned 503 Service Unavailable: "));
+    }
 }

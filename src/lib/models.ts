@@ -1,3 +1,4 @@
+import { useMemo, useSyncExternalStore } from "react";
 import type {
   AgentMode,
   DiscoveredModel,
@@ -555,6 +556,285 @@ export function sanitizeOpenRouterName(name: string | null | undefined): string 
   return tail || raw;
 }
 
+/// Per provider: `order` lists models most powerful first, and each of `lines`
+/// lists one product line newest first. A model is an older version only when
+/// the account can use a newer one of its line, so a plan without the top
+/// models keeps the best it has. OpenCode Go works it out from its labels (see
+/// `earlierModels`) and OpenRouter is left as listed. A model missing from
+/// here (released after this build) counts as current and comes first.
+const MODEL_RANKING: Partial<
+  Record<ProviderId, { order: readonly string[]; lines: readonly (readonly string[])[] }>
+> = {
+  anthropic: {
+    order: [
+      "claude-fable-5-1",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-fable-5",
+      "claude-opus-5",
+      "claude-opus-4-8",
+      "claude-opus-4-7",
+      "claude-opus-4-6",
+      "claude-sonnet-5",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+    ],
+    lines: [
+      ["claude-fable-5-1", "claude-fable-5"],
+      ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
+      ["claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6"],
+      ["claude-haiku-5-5", "claude-haiku-4-5"],
+    ],
+  },
+  openai: {
+    order: [
+      "gpt-6-astra",
+      "gpt-6.1-sol",
+      "gpt-6.1-terra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.3-codex",
+      "gpt-5.2",
+      "gpt-5.4-mini",
+      "gpt-5.3-codex-spark",
+    ],
+    lines: [
+      ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2"],
+      ["gpt-6.1-terra", "gpt-5.6-terra"],
+      ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.3-codex-spark"],
+    ],
+  },
+  google: {
+    order: [
+      "gemini-4-argon",
+      "gemini-3.1-pro",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3-flash",
+      "gemini-3.5-flash-lite",
+    ],
+    lines: [
+      ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash"],
+    ],
+  },
+  kimi: {
+    order: [
+      "kimi-k3.1-pro",
+      "kimi-k3.1-pro-highspeed",
+      "kimi-k3",
+      "kimi-k2.7-code",
+      "kimi-k2.7-code-highspeed",
+      "kimi-for-coding",
+    ],
+    lines: [
+      ["kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code", "kimi-for-coding"],
+      ["kimi-k3.1-pro-highspeed", "kimi-k2.7-code-highspeed"],
+    ],
+  },
+  deepseek: {
+    order: ["deepseek-v4-pro", "deepseek-flash", "deepseek-v4-flash"],
+    lines: [["deepseek-flash", "deepseek-v4-flash"]],
+  },
+};
+
+function modelName(model: ModelEntry): string {
+  return model.value.slice(model.provider.length + 1);
+}
+
+function modelRank(model: ModelEntry): number {
+  const ranking = MODEL_RANKING[model.provider];
+  if (!ranking) return -1;
+  return ranking.order.indexOf(modelName(model));
+}
+
+/// OpenCode Go's vendors, in the order the picker groups them. Others follow
+/// alphabetically.
+const GO_FAMILIES: readonly (readonly [prefix: string, label: string])[] = [
+  ["gpt", "GPT"],
+  ["kimi", "Kimi"],
+  ["deepseek", "DeepSeek"],
+  ["qwen", "Qwen"],
+  ["glm", "GLM"],
+  ["grok", "Grok"],
+  ["minimax", "MiniMax"],
+  ["mimo", "MiMo"],
+  ["hy", "Hy"],
+];
+/// Strongest first, for models of one family and version.
+const GO_VARIANTS = ["max", "pro", "plus", "sol", "terra", "", "code", "flash", "luna", "lite", "mini"];
+
+type GoModelParts = { family: string; version: number[]; variant: string };
+
+/// `Qwen3.7 Max` as family `qwen`, version 3.7, variant `max`. It reads the
+/// label because some ids hide the version (`deepseek-flash` is V4.1 Flash).
+function goModelParts(model: ModelEntry): GoModelParts {
+  const family = modelName(model).match(/^[a-z]+/i)?.[0].toLowerCase() ?? modelName(model);
+  const label = model.label.toLowerCase();
+  const rest = label.startsWith(family) ? label.slice(family.length) : label;
+  const version = rest.match(/[a-z]*(\d+(?:\.\d+)*)/);
+  const variant = rest
+    .replace(version?.[0] ?? "", "")
+    .replace(/\(.*?\)/g, "")
+    .replace(/[^a-z0-9]/g, "");
+  return {
+    family,
+    version: (version?.[1] ?? "0").split(".").map(Number),
+    variant,
+  };
+}
+
+function compareVersions(left: number[], right: number[]): number {
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function goFamilyIndex(family: string): number {
+  const index = GO_FAMILIES.findIndex(([prefix]) => prefix === family);
+  return index < 0 ? GO_FAMILIES.length : index;
+}
+
+/// By family, then newest version, then strongest variant.
+function compareGoModels(left: ModelEntry, right: ModelEntry): number {
+  const a = goModelParts(left);
+  const b = goModelParts(right);
+  const variantIndex = (variant: string) => {
+    const index = GO_VARIANTS.indexOf(variant);
+    return index < 0 ? GO_VARIANTS.length : index;
+  };
+  return (
+    goFamilyIndex(a.family) - goFamilyIndex(b.family) ||
+    a.family.localeCompare(b.family) ||
+    compareVersions(b.version, a.version) ||
+    variantIndex(a.variant) - variantIndex(b.variant) ||
+    a.variant.localeCompare(b.variant)
+  );
+}
+
+/// The vendor heading of an OpenCode Go model in the picker.
+export function goFamilyLabel(model: ModelEntry): string {
+  const { family } = goModelParts(model);
+  return (
+    GO_FAMILIES.find(([prefix]) => prefix === family)?.[1] ??
+    family.charAt(0).toUpperCase() + family.slice(1)
+  );
+}
+
+/// Most powerful first within each provider; providers keep their order.
+function rankedModels(models: readonly ModelEntry[]): ModelEntry[] {
+  const providers = [...new Set(models.map((model) => model.provider))];
+  return providers.flatMap((provider) =>
+    models
+      .filter((model) => model.provider === provider)
+      .sort(
+        provider === "opencode-go"
+          ? compareGoModels
+          : (left, right) => modelRank(left) - modelRank(right),
+      ),
+  );
+}
+
+/// The older versions in `models`, which pickers hide: those with a newer one
+/// of their line in the same list. OpenCode Go's list changes with the
+/// gateway, so its lines are the family and variant (Qwen 3.7 Max next to
+/// Qwen 3.8 Max, but not Qwen 3.7 Plus).
+export function earlierModels(models: readonly ModelEntry[]): ModelEntry[] {
+  const go = models.filter((model) => model.provider === "opencode-go").map(goModelParts);
+  const listed = new Set(models.map((model) => model.value));
+  return models.filter((model) => {
+    if (model.provider !== "opencode-go") {
+      const name = modelName(model);
+      const line = MODEL_RANKING[model.provider]?.lines.find((line) => line.includes(name));
+      return (line ?? [])
+        .slice(0, line?.indexOf(name) ?? 0)
+        .some((newer) => listed.has(`${model.provider}:${newer}`));
+    }
+    const parts = goModelParts(model);
+    return go.some(
+      (other) =>
+        other.family === parts.family &&
+        other.variant === parts.variant &&
+        compareVersions(other.version, parts.version) > 0,
+    );
+  });
+}
+
+const ENABLED_EARLIER_KEY = "sinew.enabledEarlierModels";
+const EARLIER_CHANGED_EVENT = "sinew:earlier-models-changed";
+
+function readEnabledEarlierRaw(): string {
+  try {
+    return localStorage.getItem(ENABLED_EARLIER_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
+function parseEnabledEarlier(raw: string): ModelId[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setEarlierModelEnabled(id: ModelId, enabled: boolean) {
+  const others = parseEnabledEarlier(readEnabledEarlierRaw()).filter((value) => value !== id);
+  try {
+    localStorage.setItem(
+      ENABLED_EARLIER_KEY,
+      JSON.stringify(enabled ? [...others, id] : others),
+    );
+  } catch {
+    // Without storage the switch simply does not stick.
+  }
+  window.dispatchEvent(new CustomEvent(EARLIER_CHANGED_EVENT));
+}
+
+function subscribeEarlierModels(onChange: () => void) {
+  window.addEventListener(EARLIER_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(EARLIER_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/// The earlier versions the user turned on in Settings, kept in sync.
+export function useEnabledEarlierModels(): readonly ModelId[] {
+  const raw = useSyncExternalStore(subscribeEarlierModels, readEnabledEarlierRaw);
+  return useMemo(() => parseEnabledEarlier(raw), [raw]);
+}
+
+/// What a model picker lists: no earlier versions, except the ones enabled
+/// and the one in use (a selection must stay visible).
+export function modelsForPicker(
+  models: readonly ModelEntry[],
+  enabledEarlier: readonly ModelId[],
+  selected: ModelId | null | undefined,
+): ModelEntry[] {
+  const earlier = new Set(earlierModels(models).map((model) => model.value));
+  return models.filter(
+    (model) =>
+      !earlier.has(model.value) ||
+      enabledEarlier.includes(model.value) ||
+      model.value === selected,
+  );
+}
+
 export function modelsWithOpenRouter(
   openRouterModels: readonly OpenRouterModel[] = [],
   opencodeGoModels: readonly string[] = [],
@@ -580,7 +860,7 @@ export function availableModelsForProviders(
   // When we have a live OpenCode Go model list, it replaces the static entries
   // (fresh ids + correct windows) instead of stacking duplicates.
   const useDynamicGo = opencodeGoModels.length > 0;
-  return [
+  return rankedModels([
     ...catalogWithDiscovered(discoveredModels).filter(
       (model) =>
         configured.has(model.provider) &&
@@ -590,7 +870,7 @@ export function availableModelsForProviders(
       ? opencodeGoModelEntries(opencodeGoModels)
       : []),
     ...(configured.has("openrouter") ? openRouterModelEntries(openRouterModels) : []),
-  ];
+  ]);
 }
 
 const THINKING_ORDER: readonly ThinkingLevel[] = [

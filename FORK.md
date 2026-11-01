@@ -106,8 +106,8 @@ Now a turn with a Claude model is run by the `claude` command itself:
 - Permission prompts come back to Sinew, which answers them with its own
   permission rules and approval cards. `AskUserQuestion` becomes Sinew's
   question card. In Plan mode the plan is shown as the answer.
-- Sinew's browser tools are lent to Claude Code through an in-process MCP
-  server (`mcp__sinew__browser_*`).
+- Sinew's browser tools and your MCP servers are lent to Claude Code through
+  an in-process MCP server (`mcp__sinew__*`).
 - The Claude Code session id is stored on the conversation, so the next
   turn resumes it (`--resume`, at the right message after a rewind, and as a
   copy after a fork). A conversation started with another model is replayed
@@ -462,6 +462,11 @@ Code: `crates/sinew-core/src/discovered.rs` (registry + capability
 override), `crates/sinew-*/src/discovery.rs` (one listing per provider),
 `list_discovered_models` command in `src-tauri/src/providers.rs`, merge in
 `src/lib/models.ts` (`catalogWithDiscovered`).
+
+The picker lists the most powerful models first and hides a model when your
+account has a newer one of its line, so a plan without the top models keeps
+the best it has. OpenCode Go is grouped by family. Hidden versions can be
+turned back on in Settings → Providers → Earlier model versions.
 
 ### WSL / Ubuntu shell support
 

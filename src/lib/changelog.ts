@@ -18,6 +18,27 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.46",
+    date: "2026-11-01",
+    items: [
+      {
+        icon: "solar:server-bold-duotone",
+        title: "MCP servers stay connected",
+        body: "Expired sign-ins renew on their own, even mid-turn, Cloudflare can sign in again, and your MCP servers work with Claude models.",
+      },
+      {
+        icon: "solar:trash-bin-minimalistic-bold-duotone",
+        title: "Delete an MCP server",
+        body: "A trash button on each server removes it and its sign-in.",
+      },
+      {
+        icon: "solar:sort-from-top-to-bottom-bold-duotone",
+        title: "A tidier model picker",
+        body: "Most powerful first, OpenCode models grouped by family. Older versions are hidden; turn them back on in Settings > Providers.",
+      },
+    ],
+  },
+  {
     version: "0.2.45",
     date: "2026-10-31",
     items: [
