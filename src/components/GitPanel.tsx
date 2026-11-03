@@ -722,9 +722,23 @@ export function GitPanel({
             {busyKey === "init" ? "Initializing…" : "Initialize repository"}
           </span>
         </button>
+        <button
+          type="button"
+          className="git-panel__state-link"
+          onClick={() => setGithubRenameOpen(true)}
+        >
+          <Icon icon="solar:user-id-linear" width={13} height={13} />
+          <span>Changed your GitHub username?</span>
+        </button>
         {snapshot.error && (
           <span className="git-panel__state-error">{snapshot.error}</span>
         )}
+        {/* This folder may be the parent of the user's projects: search it. */}
+        <GithubRenameDialog
+          open={githubRenameOpen}
+          onClose={() => setGithubRenameOpen(false)}
+          scanFolder={workspacePath}
+        />
       </div>
     );
   }
@@ -1750,7 +1764,16 @@ function remoteKey(change: { repoPath: string; remote: string }): string {
 
 /// After a GitHub username change: finds the remotes still on the old name in
 /// the recent projects (and any scanned folder), then rewrites the chosen ones.
-function GithubRenameDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function GithubRenameDialog({
+  open,
+  onClose,
+  scanFolder: initialFolder,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /// Searched along with the recent projects.
+  scanFolder?: string;
+}) {
   const [oldOwner, setOldOwner] = useState("");
   const [newOwner, setNewOwner] = useState("");
   const [scanFolders, setScanFolders] = useState<string[]>([]);
@@ -1765,9 +1788,9 @@ function GithubRenameDialog({ open, onClose }: { open: boolean; onClose: () => v
     setChanges(null);
     setOutcomes(null);
     setUnchecked(new Set());
-    setScanFolders([]);
+    setScanFolders(initialFolder ? [initialFolder] : []);
     setError(null);
-  }, [open]);
+  }, [open, initialFolder]);
 
   const oldName = oldOwner.trim();
   const newName = newOwner.trim();
@@ -1829,7 +1852,9 @@ function GithubRenameDialog({ open, onClose }: { open: boolean; onClose: () => v
       open={open}
       onClose={onClose}
       title="GitHub username changed"
-      description="Points your local remotes at your new username. Only remotes on the old name change; nothing is pushed."
+      description={`Points your local remotes at your new username. Searches your recent projects${
+        scanFolders.length > 0 ? ` and ${scanFolders.join(", ")}` : ""
+      }. Only remotes on the old name change; nothing is pushed.`}
       primaryLabel={
         outcomes
           ? "Close"

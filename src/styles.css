@@ -3166,6 +3166,23 @@ textarea {
   resize: vertical;
 }
 
+.git-panel__state-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.git-panel__state-link:hover {
+  color: var(--text-0);
+}
+
 .git-panel__rename-list {
   display: flex;
   flex-direction: column;

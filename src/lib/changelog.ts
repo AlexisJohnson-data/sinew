@@ -24,7 +24,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         icon: "solar:user-id-bold-duotone",
         title: "Changed your GitHub username?",
-        body: "A button in the Git panel finds the remotes still on your old name, across recent projects and any folder you scan, and updates the ones you pick.",
+        body: "A button in the Git panel finds the remotes still on your old name, across recent projects and any folder you scan, and updates the ones you pick. It also opens from a folder that is not a repository, and searches that folder.",
       },
     ],
   },
