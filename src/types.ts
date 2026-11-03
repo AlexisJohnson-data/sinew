@@ -658,6 +658,20 @@ export type GitRepositorySnapshot = {
   error?: string | null;
 };
 
+/// A remote pointing at an old GitHub username. URLs have tokens masked.
+export type GithubRemoteChange = {
+  repoPath: string;
+  remote: string;
+  oldUrl: string;
+  newUrl: string;
+};
+
+export type GithubRenameOutcome = {
+  repoPath: string;
+  remote: string;
+  error?: string | null;
+};
+
 export type GitOperationResult = {
   message: string;
   stdout?: string | null;

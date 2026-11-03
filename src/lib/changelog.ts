@@ -18,6 +18,17 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.47",
+    date: "2026-11-03",
+    items: [
+      {
+        icon: "solar:user-id-bold-duotone",
+        title: "Changed your GitHub username?",
+        body: "A button in the Git panel finds the remotes still on your old name, across recent projects and any folder you scan, and updates the ones you pick.",
+      },
+    ],
+  },
+  {
     version: "0.2.46",
     date: "2026-11-01",
     items: [

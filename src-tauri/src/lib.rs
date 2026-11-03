@@ -538,6 +538,8 @@ pub fn run() {
             terminal::kill_terminal,
             git::git_repository_snapshot_command,
             git::git_init_command,
+            git::git_find_github_remotes_command,
+            git::git_apply_github_rename_command,
             git::git_create_worktree_command,
             git::git_remove_worktree_command,
             git::git_create_branch_command,

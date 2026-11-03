@@ -28,6 +28,304 @@ fn hide_subprocess_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_subprocess_console(_command: &mut Command) {}
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FindGithubRemotesInput {
+    old_owner: String,
+    new_owner: String,
+    /// Projects to check: Sinew's recent workspaces.
+    #[serde(default)]
+    paths: Vec<String>,
+    /// Folders searched for more repositories.
+    #[serde(default)]
+    scan_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GithubRemoteChange {
+    repo_path: String,
+    remote: String,
+    /// Shown to the user, with any token in the URL masked.
+    old_url: String,
+    new_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GithubRemoteTarget {
+    repo_path: String,
+    remote: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ApplyGithubRenameInput {
+    old_owner: String,
+    new_owner: String,
+    targets: Vec<GithubRemoteTarget>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GithubRenameOutcome {
+    repo_path: String,
+    remote: String,
+    error: Option<String>,
+}
+
+/// Remotes that point at the old GitHub username, for the user to review.
+#[tauri::command]
+pub(super) async fn git_find_github_remotes_command(
+    input: FindGithubRemotesInput,
+) -> std::result::Result<Vec<GithubRemoteChange>, String> {
+    validate_github_owner(&input.old_owner)?;
+    validate_github_owner(&input.new_owner)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut candidates: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
+        for folder in &input.scan_folders {
+            candidates.extend(scan_git_repositories(Path::new(folder)));
+        }
+        find_github_remote_changes(&candidates, &input.old_owner, &input.new_owner)
+    })
+    .await
+    .map_err(error_to_string)
+}
+
+/// Rewrites the chosen remotes. The URLs are read again from the repository
+/// rather than taken from the preview, which has its tokens masked.
+#[tauri::command]
+pub(super) async fn git_apply_github_rename_command(
+    input: ApplyGithubRenameInput,
+) -> std::result::Result<Vec<GithubRenameOutcome>, String> {
+    validate_github_owner(&input.old_owner)?;
+    validate_github_owner(&input.new_owner)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        input
+            .targets
+            .iter()
+            .map(|target| GithubRenameOutcome {
+                repo_path: target.repo_path.clone(),
+                remote: target.remote.clone(),
+                error: apply_github_rename(
+                    Path::new(&target.repo_path),
+                    &target.remote,
+                    &input.old_owner,
+                    &input.new_owner,
+                )
+                .err(),
+            })
+            .collect()
+    })
+    .await
+    .map_err(error_to_string)
+}
+
+fn validate_github_owner(owner: &str) -> std::result::Result<(), String> {
+    let valid = !owner.is_empty()
+        && owner.len() <= 39
+        && owner.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("`{owner}` is not a GitHub username"))
+    }
+}
+
+/// `url` with its GitHub owner replaced, or `None` when it is not a GitHub
+/// URL of `old_owner`. Keeps the form (HTTPS, SSH) and any credentials.
+fn rewrite_github_url(url: &str, old_owner: &str, new_owner: &str) -> Option<String> {
+    let is_github = |host: &str| {
+        ["github.com", "www.github.com", "ssh.github.com"]
+            .iter()
+            .any(|known| host.eq_ignore_ascii_case(known))
+    };
+    let owner_start = if let Some((scheme, after)) = url.split_once("://") {
+        let (authority, _) = after.split_once('/')?;
+        let host = authority.rsplit('@').next()?;
+        let host = host.split(':').next()?;
+        if !is_github(host) {
+            return None;
+        }
+        scheme.len() + "://".len() + authority.len() + 1
+    } else {
+        // scp form: git@github.com:owner/repo.git
+        let (left, _) = url.split_once(':')?;
+        if left.contains('/') || !is_github(left.rsplit('@').next()?) {
+            return None;
+        }
+        left.len() + 1
+    };
+    let (owner, repo) = url[owner_start..].split_once('/')?;
+    if !owner.eq_ignore_ascii_case(old_owner) || repo.is_empty() {
+        return None;
+    }
+    Some(format!("{}{new_owner}/{repo}", &url[..owner_start]))
+}
+
+/// Hides credentials in an http(s) URL. `git@` is a fixed SSH user, not a
+/// secret, so it stays.
+fn mask_url_credentials(url: &str) -> String {
+    let Some((scheme, after)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return url.to_string();
+    }
+    let authority = after.split('/').next().unwrap_or_default();
+    match authority.rsplit_once('@') {
+        Some((_, host)) => {
+            format!("{scheme}://***@{host}{}", &after[authority.len()..])
+        }
+        None => url.to_string(),
+    }
+}
+
+/// Fetch and push URLs per remote, from `git remote -v`.
+fn parse_remote_urls(raw: &str) -> Vec<(String, Option<String>, Option<String>)> {
+    let mut remotes: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    for line in raw.lines() {
+        let Some((name, rest)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some((url, kind)) = rest.rsplit_once(' ') else {
+            continue;
+        };
+        let index = match remotes.iter().position(|remote| remote.0 == name) {
+            Some(index) => index,
+            None => {
+                remotes.push((name.to_string(), None, None));
+                remotes.len() - 1
+            }
+        };
+        match kind {
+            "(fetch)" => remotes[index].1 = Some(url.to_string()),
+            "(push)" => remotes[index].2 = Some(url.to_string()),
+            _ => {}
+        }
+    }
+    remotes
+}
+
+/// Repositories under `root`, not looking inside a repository or in heavy
+/// generated folders. Bounded: this can run on a whole home folder.
+fn scan_git_repositories(root: &Path) -> Vec<PathBuf> {
+    const MAX_DEPTH: usize = 5;
+    const MAX_FOLDERS: usize = 20_000;
+    const SKIPPED: &[&str] = &["node_modules", "target", "dist", "build", "vendor", "__pycache__"];
+    let mut found = Vec::new();
+    let mut visited = 0usize;
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((folder, depth)) = stack.pop() {
+        visited += 1;
+        if visited > MAX_FOLDERS {
+            break;
+        }
+        if folder.join(".git").exists() {
+            found.push(folder);
+            continue;
+        }
+        if depth == MAX_DEPTH {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            if is_folder && !name.starts_with('.') && !SKIPPED.contains(&name.as_ref()) {
+                stack.push((entry.path(), depth + 1));
+            }
+        }
+    }
+    found
+}
+
+fn find_github_remote_changes(
+    candidates: &[PathBuf],
+    old_owner: &str,
+    new_owner: &str,
+) -> Vec<GithubRemoteChange> {
+    let mut changes = Vec::new();
+    // Worktrees of one repository share their remotes.
+    let mut seen = HashSet::new();
+    for candidate in candidates {
+        if !candidate.exists() {
+            continue;
+        }
+        let Ok(root) = repo_root(candidate) else {
+            continue;
+        };
+        let common_dir = git_output(&root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            .ok()
+            .filter(|output| output.success)
+            .map(|output| output.stdout.trim().to_string())
+            .unwrap_or_else(|| root.to_string_lossy().into_owned());
+        if !seen.insert(common_dir) {
+            continue;
+        }
+        let Ok(output) = git_output(&root, &["remote", "-v"]) else {
+            continue;
+        };
+        for (remote, fetch, push) in parse_remote_urls(&output.stdout) {
+            let rewritten = [fetch.as_deref(), push.as_deref()]
+                .into_iter()
+                .flatten()
+                .find_map(|url| Some((url, rewrite_github_url(url, old_owner, new_owner)?)));
+            if let Some((old_url, new_url)) = rewritten {
+                changes.push(GithubRemoteChange {
+                    repo_path: root.to_string_lossy().into_owned(),
+                    remote,
+                    old_url: mask_url_credentials(old_url),
+                    new_url: mask_url_credentials(&new_url),
+                });
+            }
+        }
+    }
+    changes
+}
+
+fn apply_github_rename(
+    repo: &Path,
+    remote: &str,
+    old_owner: &str,
+    new_owner: &str,
+) -> std::result::Result<(), String> {
+    let output = git_output(repo, &["remote", "-v"]).map_err(error_to_string)?;
+    let (_, fetch, push) = parse_remote_urls(&output.stdout)
+        .into_iter()
+        .find(|(name, _, _)| name == remote)
+        .ok_or_else(|| format!("remote `{remote}` no longer exists"))?;
+    let new_fetch = fetch.as_deref().and_then(|url| rewrite_github_url(url, old_owner, new_owner));
+    let new_push = push.as_deref().and_then(|url| rewrite_github_url(url, old_owner, new_owner));
+    // A separate push URL exists only if it differs from the fetch URL.
+    let separate_push = push != fetch;
+    let mut commands = Vec::new();
+    if let Some(url) = &new_fetch {
+        commands.push(vec!["remote", "set-url", remote, url.as_str()]);
+    }
+    if let Some(url) = new_push.as_ref().filter(|_| separate_push) {
+        commands.push(vec!["remote", "set-url", "--push", remote, url.as_str()]);
+    }
+    if commands.is_empty() {
+        return Err("this remote no longer points at the old username".into());
+    }
+    for args in commands {
+        let output = git_output(repo, &args).map_err(error_to_string)?;
+        if !output.success {
+            // Never echo the URL: it can hold a token.
+            let mut detail = output.stderr.trim().to_string();
+            for url in [&new_fetch, &new_push, &fetch, &push].into_iter().flatten() {
+                detail = detail.replace(url.as_str(), &mask_url_credentials(url));
+            }
+            return Err(format!("git remote set-url failed: {detail}"));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct GitRepositorySnapshot {
@@ -1597,6 +1895,119 @@ fn same_path(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rewrites_only_github_urls_of_the_old_owner() {
+        let rewrite = |url| rewrite_github_url(url, "Old-Name", "new-name");
+        assert_eq!(
+            rewrite("https://github.com/Old-Name/repo.git").as_deref(),
+            Some("https://github.com/new-name/repo.git")
+        );
+        assert_eq!(
+            rewrite("https://github.com/old-name/repo").as_deref(),
+            Some("https://github.com/new-name/repo")
+        );
+        assert_eq!(
+            rewrite("https://user:tok@github.com/Old-Name/repo.git").as_deref(),
+            Some("https://user:tok@github.com/new-name/repo.git")
+        );
+        assert_eq!(
+            rewrite("git@github.com:Old-Name/repo.git").as_deref(),
+            Some("git@github.com:new-name/repo.git")
+        );
+        assert_eq!(
+            rewrite("ssh://git@github.com/Old-Name/repo.git").as_deref(),
+            Some("ssh://git@github.com/new-name/repo.git")
+        );
+        assert_eq!(
+            rewrite("ssh://git@ssh.github.com:443/Old-Name/repo.git").as_deref(),
+            Some("ssh://git@ssh.github.com:443/new-name/repo.git")
+        );
+        // Another owner, a longer name, another host, or a local path.
+        assert_eq!(rewrite("https://github.com/Paseru/sinew.git"), None);
+        assert_eq!(rewrite("https://github.com/Old-Name-2/repo.git"), None);
+        assert_eq!(rewrite("https://gitlab.com/Old-Name/repo.git"), None);
+        assert_eq!(rewrite("https://github.com.evil.dev/Old-Name/repo.git"), None);
+        assert_eq!(rewrite("git@gitlab.com:Old-Name/repo.git"), None);
+        assert_eq!(rewrite("https://github.com/Old-Name"), None);
+        assert_eq!(rewrite("C:/code/Old-Name/repo"), None);
+        assert_eq!(rewrite("/home/me/github.com:Old-Name/repo"), None);
+    }
+
+    #[test]
+    fn masks_tokens_but_not_the_ssh_user() {
+        assert_eq!(
+            mask_url_credentials("https://user:secret@github.com/a/b.git"),
+            "https://***@github.com/a/b.git"
+        );
+        assert_eq!(mask_url_credentials("git@github.com:a/b.git"), "git@github.com:a/b.git");
+        assert_eq!(mask_url_credentials("https://github.com/a/b"), "https://github.com/a/b");
+    }
+
+    #[test]
+    fn refuses_a_name_that_is_not_a_github_username() {
+        assert!(validate_github_owner("MisterJ-a").is_ok());
+        assert!(validate_github_owner("").is_err());
+        assert!(validate_github_owner("a/b").is_err());
+        assert!(validate_github_owner("a b").is_err());
+    }
+
+    /// With real repositories: a scan finds them, `upstream` stays untouched,
+    /// SSH and token URLs keep their form and a separate push URL follows.
+    #[test]
+    fn changes_the_remotes_of_real_repositories() {
+        let root = std::env::temp_dir().join(format!("sinew-gh-rename-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let git = |repo: &Path, args: &[&str]| {
+            let output = git_output(repo, args).unwrap();
+            assert!(output.success, "{args:?}: {}", output.stderr);
+            output.stdout
+        };
+        let https = root.join("code").join("https");
+        let ssh = root.join("code").join("nested").join("ssh");
+        let other = root.join("code").join("other");
+        let hidden = root.join("code").join("node_modules").join("dep");
+        for repo in [&https, &ssh, &other, &hidden] {
+            fs::create_dir_all(repo).unwrap();
+            git(repo, &["init", "-q"]);
+        }
+        git(&https, &["remote", "add", "origin", "https://me:secret@github.com/old-me/a.git"]);
+        git(&https, &["remote", "add", "upstream", "https://github.com/Paseru/sinew.git"]);
+        git(&ssh, &["remote", "add", "origin", "git@github.com:old-me/b.git"]);
+        git(&ssh, &["remote", "set-url", "--push", "origin", "git@github.com:old-me/b-push.git"]);
+        git(&other, &["remote", "add", "origin", "https://github.com/someone/c.git"]);
+        git(&hidden, &["remote", "add", "origin", "https://github.com/old-me/dep.git"]);
+
+        let found = scan_git_repositories(&root);
+        assert_eq!(found.len(), 3, "{found:?}");
+        // The same project twice, as recents plus a scan can list it.
+        let mut candidates = found;
+        candidates.push(https.clone());
+        candidates.push(root.join("missing"));
+        let changes = find_github_remote_changes(&candidates, "old-me", "new-me");
+        let mut listed: Vec<_> = changes.iter().map(|c| c.new_url.as_str()).collect();
+        listed.sort_unstable();
+        assert_eq!(
+            listed,
+            ["git@github.com:new-me/b.git", "https://***@github.com/new-me/a.git"]
+        );
+        assert!(!format!("{changes:?}").contains("secret"));
+
+        for change in &changes {
+            apply_github_rename(Path::new(&change.repo_path), &change.remote, "old-me", "new-me")
+                .unwrap();
+        }
+        let urls = |repo: &Path| git(repo, &["remote", "-v"]);
+        let https_urls = urls(&https);
+        assert!(https_urls.contains("https://me:secret@github.com/new-me/a.git"), "{https_urls}");
+        assert!(https_urls.contains("https://github.com/Paseru/sinew.git"), "{https_urls}");
+        let ssh_urls = urls(&ssh);
+        assert!(ssh_urls.contains("git@github.com:new-me/b.git (fetch)"), "{ssh_urls}");
+        assert!(ssh_urls.contains("git@github.com:new-me/b-push.git (push)"), "{ssh_urls}");
+        assert!(urls(&other).contains("https://github.com/someone/c.git"));
+        assert!(apply_github_rename(&https, "origin", "old-me", "new-me").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[cfg(not(target_os = "windows"))]
     #[test]

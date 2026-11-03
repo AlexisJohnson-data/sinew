@@ -9,9 +9,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "@iconify/react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../lib/ipc";
+import { loadRecents } from "../lib/recents";
 import type {
   GitBranch,
+  GithubRemoteChange,
+  GithubRenameOutcome,
   GitPullRequestOutput,
   GitRepositorySnapshot,
   GitStatusFile,
@@ -105,6 +109,7 @@ export function GitPanel({
   const [commitMessage, setCommitMessage] = useState("");
 
   // Worktree composer (modal)
+  const [githubRenameOpen, setGithubRenameOpen] = useState(false);
   const [createWtOpen, setCreateWtOpen] = useState(false);
   const [wtBranchName, setWtBranchName] = useState("");
   const [wtBaseBranch, setWtBaseBranch] = useState("");
@@ -793,6 +798,15 @@ export function GitPanel({
           <button
             type="button"
             className="git-panel__head-btn"
+            onClick={() => setGithubRenameOpen(true)}
+            title="Changed your GitHub username? Update your remotes"
+            aria-label="Update remotes after a GitHub username change"
+          >
+            <Icon icon="solar:user-id-linear" width={14} height={14} />
+          </button>
+          <button
+            type="button"
+            className="git-panel__head-btn"
             onClick={() => void refresh(true)}
             disabled={anyBusy}
             title="Refresh"
@@ -1166,6 +1180,11 @@ export function GitPanel({
           <span>Push the new branch to its remote immediately</span>
         </label>
       </GitDialog>
+
+      <GithubRenameDialog
+        open={githubRenameOpen}
+        onClose={() => setGithubRenameOpen(false)}
+      />
 
       <GitDialog
         open={createBranchOpen}
@@ -1724,6 +1743,198 @@ function DialogField({
 // ----------------------------------------------------------------------
 // Dialog primitive
 // ----------------------------------------------------------------------
+
+function remoteKey(change: { repoPath: string; remote: string }): string {
+  return `${change.repoPath}\n${change.remote}`;
+}
+
+/// After a GitHub username change: finds the remotes still on the old name in
+/// the recent projects (and any scanned folder), then rewrites the chosen ones.
+function GithubRenameDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [oldOwner, setOldOwner] = useState("");
+  const [newOwner, setNewOwner] = useState("");
+  const [scanFolders, setScanFolders] = useState<string[]>([]);
+  const [changes, setChanges] = useState<GithubRemoteChange[] | null>(null);
+  const [unchecked, setUnchecked] = useState<Set<string>>(() => new Set());
+  const [outcomes, setOutcomes] = useState<GithubRenameOutcome[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setChanges(null);
+    setOutcomes(null);
+    setUnchecked(new Set());
+    setScanFolders([]);
+    setError(null);
+  }, [open]);
+
+  const oldName = oldOwner.trim();
+  const newName = newOwner.trim();
+  const selected = (changes ?? []).filter((change) => !unchecked.has(remoteKey(change)));
+  const failures = (outcomes ?? []).filter((outcome) => outcome.error);
+
+  const find = async (folders: string[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setChanges(
+        await api.gitFindGithubRemotes({
+          oldOwner: oldName,
+          newOwner: newName,
+          paths: loadRecents().map((recent) => recent.path),
+          scanFolders: folders,
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const scanFolder = async () => {
+    const folder = await openDialog({
+      directory: true,
+      multiple: false,
+      title: "Pick a folder to search for repositories",
+    });
+    if (typeof folder !== "string") return;
+    const folders = [...scanFolders, folder];
+    setScanFolders(folders);
+    await find(folders);
+  };
+
+  const apply = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setOutcomes(
+        await api.gitApplyGithubRename({
+          oldOwner: oldName,
+          newOwner: newName,
+          targets: selected.map(({ repoPath, remote }) => ({ repoPath, remote })),
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const namesReady = oldName !== "" && newName !== "" && oldName !== newName;
+  return (
+    <GitDialog
+      open={open}
+      onClose={onClose}
+      title="GitHub username changed"
+      description="Points your local remotes at your new username. Only remotes on the old name change; nothing is pushed."
+      primaryLabel={
+        outcomes
+          ? "Close"
+          : changes
+            ? `Update ${selected.length} remote${selected.length === 1 ? "" : "s"}`
+            : "Find remotes"
+      }
+      primaryDisabled={!outcomes && (changes ? selected.length === 0 : !namesReady)}
+      primaryBusy={busy}
+      onPrimary={() => {
+        if (outcomes) onClose();
+        else if (changes) void apply();
+        else void find(scanFolders);
+      }}
+      secondaryLabel={outcomes ? "Done" : "Cancel"}
+    >
+      {!changes && (
+        <>
+          <DialogField label="Old username" htmlFor="git-panel-gh-old">
+            <input
+              id="git-panel-gh-old"
+              type="text"
+              className="git-panel__dialog-input"
+              spellCheck={false}
+              value={oldOwner}
+              onChange={(e) => setOldOwner(e.target.value)}
+            />
+          </DialogField>
+          <DialogField label="New username" htmlFor="git-panel-gh-new">
+            <input
+              id="git-panel-gh-new"
+              type="text"
+              className="git-panel__dialog-input"
+              spellCheck={false}
+              value={newOwner}
+              onChange={(e) => setNewOwner(e.target.value)}
+            />
+          </DialogField>
+        </>
+      )}
+      {changes && !outcomes && (
+        <>
+          {changes.length === 0 && (
+            <p className="git-panel__rename-empty">
+              No remote on {oldName} in your recent projects
+              {scanFolders.length > 0 ? " or the scanned folders" : ""}.
+            </p>
+          )}
+          <div className="git-panel__rename-list">
+            {changes.map((change) => {
+              const key = remoteKey(change);
+              return (
+                <label key={key} className="git-panel__rename-row">
+                  <input
+                    type="checkbox"
+                    checked={!unchecked.has(key)}
+                    onChange={(e) =>
+                      setUnchecked((current) => {
+                        const next = new Set(current);
+                        if (e.target.checked) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="git-panel__rename-copy">
+                    <span className="git-panel__rename-repo" title={change.repoPath}>
+                      {change.repoPath.split(/[\\/]/).filter(Boolean).pop()} · {change.remote}
+                    </span>
+                    <span className="git-panel__rename-url">{change.oldUrl}</span>
+                    <span className="git-panel__rename-url">→ {change.newUrl}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="git-panel__head-action"
+            onClick={() => void scanFolder()}
+            disabled={busy}
+          >
+            <Icon icon="solar:folder-open-linear" width={13} height={13} />
+            <span>Scan a folder</span>
+          </button>
+        </>
+      )}
+      {outcomes && (
+        <>
+          <p className="git-panel__rename-empty">
+            {outcomes.length - failures.length} remote
+            {outcomes.length - failures.length === 1 ? "" : "s"} updated
+            {failures.length > 0 ? `, ${failures.length} failed` : ""}.
+          </p>
+          {failures.map((failure) => (
+            <p key={remoteKey(failure)} className="git-panel__rename-error">
+              {failure.repoPath} · {failure.remote}: {failure.error}
+            </p>
+          ))}
+        </>
+      )}
+      {error && <p className="git-panel__rename-error">{error}</p>}
+    </GitDialog>
+  );
+}
 
 function GitDialog({
   open,

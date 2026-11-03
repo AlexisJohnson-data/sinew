@@ -3166,6 +3166,61 @@ textarea {
   resize: vertical;
 }
 
+.git-panel__rename-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.git-panel__rename-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.git-panel__rename-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  accent-color: var(--text-1);
+}
+
+.git-panel__rename-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.git-panel__rename-repo {
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+}
+
+.git-panel__rename-url {
+  overflow-wrap: anywhere;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.git-panel__rename-empty {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.git-panel__rename-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
 .git-panel__dialog-check {
   display: inline-flex;
   align-items: center;

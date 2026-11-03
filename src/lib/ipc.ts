@@ -5,6 +5,8 @@ import type {
   ActiveTurnSummary,
   AgentMode,
   AnthropicProviderStatus,
+  GithubRemoteChange,
+  GithubRenameOutcome,
   ChatMessage,
   ClipboardImageAttachment,
   ContextEstimate,
@@ -145,6 +147,21 @@ export const api = {
     return invoke<GitOperationResult>("git_commit_command", {
       input: { workspacePath, message, paths },
     });
+  },
+  gitFindGithubRemotes(input: {
+    oldOwner: string;
+    newOwner: string;
+    paths: string[];
+    scanFolders: string[];
+  }) {
+    return invoke<GithubRemoteChange[]>("git_find_github_remotes_command", { input });
+  },
+  gitApplyGithubRename(input: {
+    oldOwner: string;
+    newOwner: string;
+    targets: { repoPath: string; remote: string }[];
+  }) {
+    return invoke<GithubRenameOutcome[]>("git_apply_github_rename_command", { input });
   },
   gitPush(workspacePath: string) {
     return invoke<GitOperationResult>("git_push_command", {
