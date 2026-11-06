@@ -32,6 +32,8 @@ pub(super) const PROVIDER: &str = "anthropic";
 const SESSION_META: &str = "claude_code";
 const SINEW_MCP: &str = "sinew";
 const SINEW_MCP_PREFIX: &str = "mcp__sinew__";
+/// Card name for Claude Code's `Agent` (formerly `Task`) tool.
+const CLAUDE_SUBAGENT: &str = "claude_subagent";
 /// Longest earlier conversation replayed into a new Claude Code session.
 const TRANSCRIPT_LIMIT: usize = 400_000;
 /// How long an interrupted turn may take to wind down before it is killed.
@@ -564,7 +566,7 @@ impl Turn {
         }
         self.emit(AgentEvent::ToolReady {
             id: id.clone(),
-            summary: summarize_tool(&name, &mapped),
+            summary: tool_summary(&name, &mapped),
             args_pretty: serde_json::to_string_pretty(&mapped).unwrap_or_default(),
         });
         self.push_part(Part::ToolCall {
@@ -874,9 +876,26 @@ fn map_tool(name: &str, input: &Value) -> (String, Value) {
         "WebSearch" | "web_search" => (tool_names::WEB_SEARCH.into(), pick(&[("query", "query")])),
         "WebFetch" => (tool_names::WEB_FETCH.into(), pick(&[("url", "url"), ("prompt", "prompt")])),
         "TodoWrite" => (tool_names::TODO_LIST.into(), input.clone()),
+        // Claude Code's subagent. Not Sinew's `agent`, which is a team
+        // teammate shown as a chat of its own: this one runs inside Claude
+        // Code and only its final report comes back, as the card's result.
+        "Agent" | "Task" => (CLAUDE_SUBAGENT.into(), input.clone()),
         "AskUserQuestion" => (tool_names::QUESTION.into(), question_input(input)),
         _ => (name.to_string(), input.clone()),
     }
+}
+
+/// The card title. Claude Code's subagent is not a Sinew tool, so it is
+/// named here from its task description.
+fn tool_summary(name: &str, input: &Value) -> String {
+    if name == CLAUDE_SUBAGENT {
+        let task = input["description"].as_str().unwrap_or("working");
+        return match input["subagent_type"].as_str().filter(|kind| !kind.is_empty()) {
+            Some(kind) => format!("Subagent ({kind}) · {task}"),
+            None => format!("Subagent · {task}"),
+        };
+    }
+    summarize_tool(name, input)
 }
 
 /// `AskUserQuestion` input in the shape of Sinew's question tool.
@@ -1402,6 +1421,16 @@ mod tests {
         let outcome = outcome.expect("a result");
         eprintln!("result: {}", outcome["result"]);
         process.shutdown(Duration::from_secs(2)).await;
+    }
+
+    #[test]
+    fn claude_subagents_are_plain_cards_not_team_chats() {
+        let input = json!({ "description": "Find the bug", "subagent_type": "Explore", "prompt": "…" });
+        let (name, mapped) = map_tool("Agent", &input);
+        assert_eq!(name, CLAUDE_SUBAGENT);
+        assert_ne!(tool_names::canonical_tool_name(&name), tool_names::AGENT);
+        assert_eq!(tool_summary(&name, &mapped), "Subagent (Explore) · Find the bug");
+        assert_eq!(map_tool("Task", &input).0, CLAUDE_SUBAGENT);
     }
 
     #[test]

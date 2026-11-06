@@ -71,8 +71,20 @@ export function PlanUsageRing({ provider, subscribeEvents }: Props) {
   const snapshot = snapshots.find((item) => item.provider === target);
   if (!target || !snapshot || snapshot.windows.length === 0) return null;
 
-  // The ring shows whichever window is closest to its limit.
-  const tightest = snapshot.windows.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a));
+  // The pill shows the shortest window (the 5-hour one, the limit you hit
+  // first), unless a longer one is nearly used up: then that one is what
+  // will stop you.
+  const shortest = snapshot.windows.reduce((a, b) =>
+    (b.windowMinutes ?? Infinity) < (a.windowMinutes ?? Infinity) ? b : a,
+  );
+  const nearlyFull = snapshot.windows
+    .filter((window) => quotaLevel(window.usedPercent) === "danger")
+    .reduce<typeof shortest | null>(
+      (a, b) => (a === null || b.usedPercent > a.usedPercent ? b : a),
+      null,
+    );
+  const tightest =
+    nearlyFull && nearlyFull.usedPercent > shortest.usedPercent ? nearlyFull : shortest;
   const percent = Math.round(tightest.usedPercent);
   const level = quotaLevel(tightest.usedPercent);
 

@@ -115,7 +115,11 @@ impl ClaudeProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env_remove("NODE_OPTIONS");
+            .env_remove("NODE_OPTIONS")
+            // A background task would report back after the turn, once Sinew
+            // has closed the session: Claude would promise to "let you know"
+            // and never could. Run everything in the foreground instead.
+            .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1");
         let mut child = command
             .spawn()
             .map_err(|err| AppError::Provider(format!("unable to start Claude Code: {err}")))?;

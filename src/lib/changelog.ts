@@ -18,6 +18,27 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.49",
+    date: "2026-11-06",
+    items: [
+      {
+        icon: "solar:speedometer-middle-bold-duotone",
+        title: "The 5-hour limit comes first",
+        body: "The plan pill shows the 5-hour window, unless a longer one is nearly used up.",
+      },
+      {
+        icon: "solar:users-group-rounded-bold-duotone",
+        title: "Claude's subagents, readable",
+        body: "When Claude delegates to a subagent, you get a card with its task and report instead of an empty chat.",
+      },
+      {
+        icon: "solar:play-circle-bold-duotone",
+        title: "No more promises to report back",
+        body: "Claude runs commands in the foreground and waits for them. A dev server that never ends now stops at Claude Code's time limit: start it in the terminal and ask Claude to check the page.",
+      },
+    ],
+  },
+  {
     version: "0.2.48",
     date: "2026-11-06",
     items: [
