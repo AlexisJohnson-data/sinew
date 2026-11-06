@@ -817,7 +817,13 @@ export function ChatPane({
       const settings = await api.listToolSettings(workspacePath);
       const current = settings.permissionMode ?? "auto";
       const next: PermissionMode =
-        current === "auto" ? "ask_shell" : current === "ask_shell" ? "ask_all" : "auto";
+        current === "full_access"
+          ? "auto"
+          : current === "auto"
+            ? "ask_shell"
+            : current === "ask_shell"
+              ? "ask_all"
+              : "full_access";
       const saved = await api.saveToolSettings(workspacePath, {
         ...settings,
         permissionMode: next,
@@ -4458,17 +4464,21 @@ export function ChatPane({
                 data-active={permissionMode === "auto" ? "false" : "true"}
                 onClick={() => void cyclePermissionMode()}
                 title={
-                  permissionMode === "auto"
+                  permissionMode === "full_access"
+                    ? "Permissions: Full access — nothing asks; machine-wiping commands and your deny rules still block. Click for Auto."
+                    : permissionMode === "auto"
                     ? "Permissions: Auto — dangerous commands are blocked, risky ones ask. Click to ask before every shell command."
                     : permissionMode === "ask_shell"
                       ? "Permissions: ask before shell commands. Click to also ask before file edits and MCP tools."
-                      : "Permissions: ask before shell commands, file edits and MCP tools. Click to go back to Auto."
+                      : "Permissions: ask before shell commands, file edits and MCP tools. Click for Full access."
                 }
                 aria-label="Permission mode"
               >
                 <Icon
                   icon={
-                    permissionMode === "auto"
+                    permissionMode === "full_access"
+                      ? "solar:bolt-linear"
+                      : permissionMode === "auto"
                       ? "solar:shield-check-linear"
                       : permissionMode === "ask_shell"
                         ? "solar:shield-warning-linear"

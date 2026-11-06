@@ -178,7 +178,7 @@ export type ShellPreference = "auto" | "powershell" | "wsl";
 
 /// How much the agent may run without asking (mirrors
 /// `sinew_app::permissions::PermissionMode`).
-export type PermissionMode = "auto" | "ask_shell" | "ask_all";
+export type PermissionMode = "full_access" | "auto" | "ask_shell" | "ask_all";
 
 /// `<kind>: <pattern>` rules, kind = bash | edit | mcp, `*` = wildcard.
 export type PermissionRules = {

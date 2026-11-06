@@ -3564,6 +3564,13 @@ function ToolsSection({
             >
               <button
                 type="button"
+                data-active={permissionMode === "full_access" ? "true" : "false"}
+                onClick={() => onPermissionModeChange("full_access")}
+              >
+                Full access
+              </button>
+              <button
+                type="button"
                 data-active={permissionMode === "auto" ? "true" : "false"}
                 onClick={() => onPermissionModeChange("auto")}
               >
@@ -3585,8 +3592,10 @@ function ToolsSection({
               </button>
             </div>
             <p className="settings-pane__field-hint">
-              {permissionMode === "auto"
-                ? "The agent runs freely. Machine-wiping commands (rm -rf /, format C:, mkfs…) are always blocked, and risky ones (git push --force, rm -rf outside the project, curl | sh…) ask first."
+              {permissionMode === "full_access"
+                ? "Nothing asks for approval. Machine-wiping commands (rm -rf /, format C:, mkfs…) and your deny rules still block, and your ask rules still ask."
+                : permissionMode === "auto"
+                ? "The agent runs freely. Machine-wiping commands (rm -rf /, format C:, mkfs…) are always blocked, and risky ones (git push --force, rm -rf outside the project and temp folders, curl | sh…) ask first."
                 : permissionMode === "ask_shell"
                   ? "Every shell command asks for approval unless an allow rule covers it. File edits stay automatic."
                   : "Shell commands, file edits and MCP tools all ask for approval unless an allow rule covers them."}

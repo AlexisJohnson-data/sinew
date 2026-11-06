@@ -18,6 +18,22 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.50",
+    date: "2026-11-06",
+    items: [
+      {
+        icon: "solar:bolt-bold-duotone",
+        title: "Full access mode",
+        body: "A permission mode that never asks. Machine-wiping commands and your deny rules still block.",
+      },
+      {
+        icon: "solar:trash-bin-minimalistic-bold-duotone",
+        title: "Temp files without asking",
+        body: "In Auto, deleting inside a temporary folder (/tmp, %TEMP%…) no longer asks for approval.",
+      },
+    ],
+  },
+  {
     version: "0.2.49",
     date: "2026-11-06",
     items: [
