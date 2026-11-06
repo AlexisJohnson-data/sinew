@@ -86,63 +86,78 @@ pub(super) fn normalize_tool_call_input(input: Value) -> Value {
     }
 }
 
+/// Makes every tool call answered right away, as all providers require: the
+/// message after an assistant message with tool calls holds exactly their
+/// results, in call order. Results spread over several messages or placed
+/// after a user's text are moved up, a missing one gets an "interrupted"
+/// result, and a result with no call before it is dropped. A history mixes
+/// turns from several harnesses (Claude Code, other models, interrupted
+/// runs), so this runs before every request, not only when a turn starts.
 pub(super) fn repair_missing_tool_results(history: &mut Vec<ChatMessage>) {
+    let mut repaired = Vec::with_capacity(history.len());
     let mut index = 0usize;
     while index < history.len() {
-        if !matches!(history[index].role, Role::Assistant) {
-            index += 1;
+        let message = &history[index];
+        index += 1;
+        if message.role == Role::User {
+            // Results here have no call right before them.
+            let mut message = message.clone();
+            message.parts.retain(|part| !matches!(part, Part::ToolResult { .. }));
+            if !message.parts.is_empty() {
+                repaired.push(message);
+            }
             continue;
         }
-        let tool_call_ids = tool_call_ids(&history[index]);
-        if tool_call_ids.is_empty() {
-            index += 1;
+        repaired.push(message.clone());
+        let ids = tool_call_ids(message);
+        if ids.is_empty() {
             continue;
         }
-
-        let next_user_tool_results = history
-            .get(index + 1)
-            .filter(|message| matches!(message.role, Role::User))
-            .map(tool_result_ids)
-            .unwrap_or_default();
-        let missing = tool_call_ids
-            .into_iter()
-            .filter(|id| !next_user_tool_results.contains(id))
-            .collect::<Vec<_>>();
-        if missing.is_empty() {
+        // The user messages up to the next assistant message answer it.
+        let mut results: HashMap<String, Part> = HashMap::new();
+        let mut followers = Vec::new();
+        while let Some(next) = history.get(index).filter(|next| next.role == Role::User) {
+            let mut rest = next.clone();
+            rest.parts.retain(|part| match part {
+                Part::ToolResult { tool_call_id, .. } if ids.contains(tool_call_id) => {
+                    results.entry(tool_call_id.clone()).or_insert_with(|| part.clone());
+                    false
+                }
+                // A result for no call of this message is invalid anywhere.
+                Part::ToolResult { .. } => false,
+                _ => true,
+            });
+            if !rest.parts.is_empty() {
+                followers.push(rest);
+            }
             index += 1;
-            continue;
         }
-
-        let missing_parts = missing
-            .into_iter()
-            .map(|id| {
-                interrupted_tool_result(id, "tool call was interrupted before a result was saved")
-            })
-            .collect::<Vec<_>>();
-        let next_is_tool_result_message = history
-            .get(index + 1)
-            .filter(|message| matches!(message.role, Role::User))
-            .map(|message| {
-                !message.parts.is_empty()
-                    && message
-                        .parts
-                        .iter()
-                        .all(|part| matches!(part, Part::ToolResult { .. }))
-            })
-            .unwrap_or(false);
-        if next_is_tool_result_message {
-            history[index + 1].parts.extend(missing_parts);
-        } else {
-            history.insert(
-                index + 1,
-                ChatMessage {
-                    role: Role::User,
-                    parts: missing_parts,
-                },
-            );
-        }
-        index += 2;
+        repaired.push(ChatMessage {
+            role: Role::User,
+            parts: ids
+                .into_iter()
+                .map(|id| {
+                    results.remove(&id).unwrap_or_else(|| {
+                        interrupted_tool_result(id, "tool call was interrupted before a result was saved")
+                    })
+                })
+                .collect(),
+        });
+        repaired.extend(followers);
     }
+    if repaired.len() != history.len()
+        || repaired
+            .iter()
+            .zip(history.iter())
+            .any(|(left, right)| !same_message(left, right))
+    {
+        *history = repaired;
+    }
+}
+
+fn same_message(left: &ChatMessage, right: &ChatMessage) -> bool {
+    left.role == right.role
+        && serde_json::to_value(&left.parts).ok() == serde_json::to_value(&right.parts).ok()
 }
 
 pub(super) fn append_interrupted_tool_results(

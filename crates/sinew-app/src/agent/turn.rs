@@ -263,6 +263,7 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
             }
         }
 
+        repair_missing_tool_results(&mut history);
         let request_history =
             history_with_current_tool_result_ids(&history, &current_turn_tool_result_ids);
         let request = ProviderRequest::new(model.clone(), request_history)
@@ -773,7 +774,9 @@ pub async fn run_turn(ctx: TurnContext) -> TurnOutput {
                                 abort_eager_tool_results(&mut eager_tool_results);
                                 ToolRunResult::err("tool call interrupted by user", Vec::new())
                             } else {
-                                continue;
+                                // Skipping the call would leave it without a
+                                // result, which every provider rejects.
+                                ToolRunResult::err("tool call was not run", Vec::new())
                             }
                         }
                         result = run_tool(

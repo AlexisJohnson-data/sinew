@@ -352,3 +352,119 @@ fn tool_call_inputs_are_normalized_for_provider_replay() {
     assert_eq!(json_input, &json!({ "agent": "ui" }));
     assert_eq!(string_input, &json!({ "value": "ls" }));
 }
+
+mod repair_tool_results {
+    use serde_json::json;
+    use sinew_core::{ChatMessage, Part, Role};
+
+    use super::super::history::repair_missing_tool_results;
+
+    fn call(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: Role::Assistant,
+            parts: ids
+                .iter()
+                .map(|id| Part::ToolCall {
+                    id: (*id).into(),
+                    name: "read".into(),
+                    input: json!({}),
+                    meta: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn result(id: &str) -> Part {
+        Part::ToolResult {
+            tool_call_id: id.into(),
+            content: format!("result {id}"),
+            images: Vec::new(),
+            is_error: false,
+            meta: None,
+        }
+    }
+
+    fn text(value: &str) -> Part {
+        Part::Text {
+            text: value.into(),
+            meta: None,
+        }
+    }
+
+    fn user(parts: Vec<Part>) -> ChatMessage {
+        ChatMessage {
+            role: Role::User,
+            parts,
+        }
+    }
+
+    /// Role and, per part, the tool id or text, for compact assertions.
+    fn shape(history: &[ChatMessage]) -> Vec<String> {
+        history
+            .iter()
+            .map(|message| {
+                let parts: Vec<String> = message
+                    .parts
+                    .iter()
+                    .map(|part| match part {
+                        Part::ToolCall { id, .. } => format!("call:{id}"),
+                        Part::ToolResult { tool_call_id, is_error, .. } => {
+                            format!("{}:{tool_call_id}", if *is_error { "missing" } else { "result" })
+                        }
+                        Part::Text { text, .. } => format!("text:{text}"),
+                        _ => "other".into(),
+                    })
+                    .collect();
+                format!("{:?} {}", message.role, parts.join(","))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn leaves_a_valid_history_alone() {
+        let mut history = vec![
+            user(vec![text("go")]),
+            call(&["a", "b"]),
+            user(vec![result("a"), result("b")]),
+        ];
+        let before = shape(&history);
+        repair_missing_tool_results(&mut history);
+        assert_eq!(shape(&history), before);
+    }
+
+    #[test]
+    fn gathers_results_split_over_messages_or_after_text() {
+        let mut history = vec![
+            call(&["a", "b", "c"]),
+            user(vec![result("a")]),
+            user(vec![text("note"), result("c")]),
+            user(vec![result("b")]),
+            call(&["d"]),
+        ];
+        repair_missing_tool_results(&mut history);
+        assert_eq!(
+            shape(&history),
+            [
+                "Assistant call:a,call:b,call:c",
+                "User result:a,result:b,result:c",
+                "User text:note",
+                "Assistant call:d",
+                "User missing:d",
+            ]
+        );
+    }
+
+    #[test]
+    fn drops_results_without_a_call() {
+        let mut history = vec![
+            user(vec![text("hi"), result("ghost")]),
+            call(&["a"]),
+            user(vec![result("a"), result("other")]),
+        ];
+        repair_missing_tool_results(&mut history);
+        assert_eq!(
+            shape(&history),
+            ["User text:hi", "Assistant call:a", "User result:a"]
+        );
+    }
+}

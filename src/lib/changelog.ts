@@ -18,6 +18,17 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.48",
+    date: "2026-11-06",
+    items: [
+      {
+        icon: "solar:shield-check-bold-duotone",
+        title: "Long sessions no longer get stuck",
+        body: "A tool call left without a result (\"tool_calls must be followed by tool messages\") is now repaired before every request. Send a message in a blocked conversation to continue it.",
+      },
+    ],
+  },
+  {
     version: "0.2.47",
     date: "2026-11-03",
     items: [
