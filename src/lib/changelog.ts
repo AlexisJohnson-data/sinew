@@ -18,6 +18,17 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.51",
+    date: "2026-11-07",
+    items: [
+      {
+        icon: "solar:gallery-add-bold-duotone",
+        title: "Claude can create images",
+        body: "Claude models now get Sinew's image tool, with your ChatGPT subscription, an OpenAI key or Nano Banana, instead of asking for an API key.",
+      },
+    ],
+  },
+  {
     version: "0.2.50",
     date: "2026-11-06",
     items: [

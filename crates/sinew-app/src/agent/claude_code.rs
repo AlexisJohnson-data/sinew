@@ -4,8 +4,8 @@
 //! SDK protocol) and Claude Code runs the whole turn with its own tools and
 //! its own sign-in. Sinew renders the stream, answers Claude Code's
 //! permission prompts with its approval cards and permission rules, shows
-//! `AskUserQuestion` as its question card, and lends its browser and the
-//! user's MCP servers through an in-process MCP server. The Claude Code session id is kept on the turn's
+//! `AskUserQuestion` as its question card, and lends its browser, its image
+//! generation and the user's MCP servers through an in-process MCP server. The Claude Code session id is kept on the turn's
 //! last assistant message so the next turn resumes it.
 
 use std::path::Path;
@@ -20,7 +20,10 @@ use tokio::sync::mpsc;
 use crate::permissions::{self, Decision};
 use crate::todo::{TodoStatus, TodoTask};
 use crate::tool_run::{DiffLine, DiffLineKind, FileChange, FileChangeKind, ToolRunImage};
-use crate::{tool_names, BrowserTools, McpToolRegistry, QuestionTool, TodoListState, ToolSettings};
+use crate::{
+    tool_names, BrowserTools, CreateImageTool, McpToolRegistry, QuestionTool, TodoListState,
+    ToolSettings,
+};
 
 use super::cancel::{ApprovalReply, EngineCommand, TurnCancel};
 use super::context::{AgentMode, TurnContext, TurnOutput};
@@ -58,6 +61,7 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
         goal_workflow,
         bash,
         browser,
+        create_image,
         mcp,
         question,
         tool_settings,
@@ -76,7 +80,11 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
     let content = user_content(&history, record.is_none().then_some(prompt_start), prompt_start);
     let browser_on = tool_settings.browser_enabled && mode != AgentMode::Plan;
     mcp.refresh_catalog(&history).await;
-    let sinew_server = browser_on || !mcp.all_tools().await.is_empty();
+    // Claude Code has no image tool: lend Sinew's (GPT Image with the ChatGPT
+    // subscription or an API key, or Nano Banana).
+    let image = (mode != AgentMode::Plan && tool_settings.is_enabled(tool_names::CREATE_IMAGE))
+        .then(|| create_image.clone());
+    let sinew_server = browser_on || image.is_some() || !mcp.all_tools().await.is_empty();
 
     let mut args = vec![
         "--include-partial-messages".to_string(),
@@ -176,6 +184,7 @@ pub(super) async fn run_claude_code_turn(ctx: TurnContext) -> TurnOutput {
             browser: browser.clone(),
             browser_on,
             scripts: tool_settings.browser_scripts_enabled,
+            image,
             mcp: mcp.clone(),
         },
     };
@@ -829,7 +838,7 @@ fn map_tool(name: &str, input: &Value) -> (String, Value) {
         Value::Object(out)
     };
     if let Some(sinew) = name.strip_prefix(SINEW_MCP_PREFIX) {
-        let name = if sinew.starts_with("browser_") {
+        let name = if sinew.starts_with("browser_") || sinew == tool_names::CREATE_IMAGE {
             sinew.to_string()
         } else {
             format!("mcp__{sinew}")
@@ -1031,6 +1040,7 @@ struct SinewTools {
     browser: Arc<BrowserTools>,
     browser_on: bool,
     scripts: bool,
+    image: Option<Arc<CreateImageTool>>,
     mcp: Arc<McpToolRegistry>,
 }
 
@@ -1215,6 +1225,14 @@ async fn mcp_message(message: &Value, tools: &SinewTools) -> Value {
                     })
                 }));
             }
+            if let Some(image) = &tools.image {
+                let tool = image.descriptor();
+                listed.push(json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                }));
+            }
             listed.extend(tools.mcp.all_tools().await.into_iter().map(|tool| {
                 json!({
                     "name": exposed_mcp_name(&tool.name),
@@ -1229,6 +1247,8 @@ async fn mcp_message(message: &Value, tools: &SinewTools) -> Value {
             let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
             let result = if tools.browser_on && name.starts_with("browser_") {
                 Some(tools.browser.run(name, arguments, tools.scripts).await)
+            } else if let Some(image) = tools.image.as_ref().filter(|_| name == tool_names::CREATE_IMAGE) {
+                Some(image.run(arguments).await)
             } else {
                 let catalog = tools.mcp.all_tools().await;
                 match catalog.iter().find(|tool| exposed_mcp_name(&tool.name) == name) {
@@ -1320,6 +1340,7 @@ mod tests {
         assert_eq!(map_tool("Bash", &json!({ "command": "ls" })).1, json!({ "command": "ls" }));
         assert_eq!(map_tool("mcp__sinew__browser_click", &json!({})).0, "browser_click");
         assert_eq!(map_tool("mcp__sinew__10kdesign__search", &json!({})).0, "mcp__10kdesign__search");
+        assert_eq!(map_tool("mcp__sinew__create_image", &json!({})).0, "create_image");
         let (name, input) = map_tool(
             "AskUserQuestion",
             &json!({ "questions": [{ "question": "Which?", "header": "Pick", "multiSelect": true, "options": [{ "label": "A", "description": "a" }] }] }),
@@ -1357,6 +1378,7 @@ mod tests {
             )),
             browser_on: true,
             scripts: false,
+            image: Some(Arc::new(CreateImageTool::new(&root))),
             mcp: Arc::new(McpToolRegistry::new(crate::McpSettings { servers: Vec::new() })),
         };
         let args = vec![
@@ -1418,6 +1440,7 @@ mod tests {
         assert!(init["models"].is_array(), "initialize lists models: {init}");
         assert!(mcp_calls.iter().any(|method| method == "tools/list"), "MCP calls: {mcp_calls:?}");
         assert!(tools.iter().any(|tool| tool == "mcp__sinew__browser_navigate"), "tools: {tools:?}");
+        assert!(tools.iter().any(|tool| tool == "mcp__sinew__create_image"), "tools: {tools:?}");
         let outcome = outcome.expect("a result");
         eprintln!("result: {}", outcome["result"]);
         process.shutdown(Duration::from_secs(2)).await;
