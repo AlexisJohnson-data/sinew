@@ -672,6 +672,35 @@ export type GithubRenameOutcome = {
   error?: string | null;
 };
 
+/// A frame of the browser panel's live view (base64 JPEG). `width` and
+/// `height` are the page's CSS size, the space input coordinates use.
+export type BrowserViewFrame = {
+  workspacePath: string;
+  tab: string;
+  data: string;
+  width: number;
+  height: number;
+};
+
+export type BrowserViewTab = {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+};
+
+/// An element the user pointed at in the browser panel.
+export type BrowserPick = {
+  element: {
+    label: string;
+    selector: string;
+    text: string;
+    url: string;
+    rect: [number, number, number, number];
+  };
+  imagePath?: string | null;
+};
+
 export type GitOperationResult = {
   message: string;
   stdout?: string | null;

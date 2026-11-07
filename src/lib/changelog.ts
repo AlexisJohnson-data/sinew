@@ -18,6 +18,22 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.2.52",
+    date: "2026-11-07",
+    items: [
+      {
+        icon: "solar:global-bold-duotone",
+        title: "A browser inside Sinew",
+        body: "Watch the agent browse live in a Browser tab next to the chat, no separate Chrome window. Click, type, scroll and change the address yourself.",
+      },
+      {
+        icon: "solar:cursor-square-bold-duotone",
+        title: "Point at an element",
+        body: "Pick highlights what is under the pointer; a click sends it to the chat with its selector, the page and a picture of it.",
+      },
+    ],
+  },
+  {
     version: "0.2.51",
     date: "2026-11-07",
     items: [

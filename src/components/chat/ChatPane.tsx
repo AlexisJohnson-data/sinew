@@ -15,6 +15,7 @@ import { Icon } from "@iconify/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { BROWSER_PICK_EVENT } from "../BrowserPanel";
 import { AIThinkingBlock } from "./AIThinkingBlock";
 import { FileChangeBlock } from "./FileChangeBlock";
 import { FileLinkedText, Markdown } from "./Markdown";
@@ -64,6 +65,7 @@ import {
 } from "../../lib/models";
 import type {
   AgentMode,
+  BrowserPick,
   AttachmentInput,
   ChatMessage,
   ContextEstimate,
@@ -1890,6 +1892,37 @@ export function ChatPane({
     window.addEventListener("sinew:add-files-to-chat", handler);
     return () => {
       window.removeEventListener("sinew:add-files-to-chat", handler);
+    };
+  }, [activeSubAgentId]);
+
+  // Browser panel → chat: the element the user pointed at, described for the
+  // agent, with a picture of it attached.
+  useEffect(() => {
+    if (activeSubAgentId !== null) return;
+    const handler = (event: Event) => {
+      const picked = (event as CustomEvent<BrowserPick>).detail;
+      if (!picked) return;
+      const { element } = picked;
+      const lines = [
+        `[Browser element] ${element.label}`,
+        `selector: ${element.selector}`,
+        `page: ${element.url}`,
+      ];
+      const snippet = lines.join("\n");
+      setText((current) => (current.trim() ? `${current.trimEnd()}\n\n${snippet}\n` : `${snippet}\n`));
+      if (picked.imagePath) {
+        const imagePath = picked.imagePath;
+        setAttachments((prev) =>
+          mergeAttachments(prev, [
+            { path: imagePath, name: basename(imagePath), origin: "manual" },
+          ]),
+        );
+      }
+      textareaRef.current?.focus();
+    };
+    window.addEventListener(BROWSER_PICK_EVENT, handler);
+    return () => {
+      window.removeEventListener(BROWSER_PICK_EVENT, handler);
     };
   }, [activeSubAgentId]);
 

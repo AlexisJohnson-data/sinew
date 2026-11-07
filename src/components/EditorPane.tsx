@@ -61,6 +61,11 @@ type Props = {
   remoteView?: ReactNode;
   onRemoteActivate?: () => void;
   onRemoteClose?: () => void;
+  browserOpen?: boolean;
+  browserActive?: boolean;
+  browserView?: ReactNode;
+  onBrowserActivate?: () => void;
+  onBrowserClose?: () => void;
   revealTarget?: EditorRevealTarget | null;
   onSettingsActivate?: () => void;
   onSettingsClose?: () => void;
@@ -84,6 +89,11 @@ export function EditorPane({
   remoteView,
   onRemoteActivate,
   onRemoteClose,
+  browserOpen = false,
+  browserActive = false,
+  browserView,
+  onBrowserActivate,
+  onBrowserClose,
   revealTarget,
   onSettingsActivate,
   onSettingsClose,
@@ -117,13 +127,13 @@ export function EditorPane({
 
   const TAB_DRAG_THRESHOLD_PX = 6;
   const activeTab: EditorTab | undefined =
-    settingsActive || remoteActive ? undefined : tabs[activeIndex];
+    settingsActive || remoteActive || browserActive ? undefined : tabs[activeIndex];
   // Close the image context menu whenever the user switches tabs or
   // toggles into the settings / remote view, so it never lingers on the
   // wrong file.
   useEffect(() => {
     setImageMenu(null);
-  }, [activeIndex, settingsActive, remoteActive]);
+  }, [activeIndex, settingsActive, remoteActive, browserActive]);
 
   const activeIsMarkdown = activeTab
     ? isMarkdownPath(activeTab.relativePath)
@@ -503,7 +513,11 @@ export function EditorPane({
             key={tab.relativePath}
             className="tab"
             data-editor-tab="true"
-            data-active={!settingsActive && !remoteActive && index === activeIndex ? "true" : "false"}
+            data-active={
+              !settingsActive && !remoteActive && !browserActive && index === activeIndex
+                ? "true"
+                : "false"
+            }
             data-dragging={tabReorderFrom === index ? "true" : "false"}
             data-drop-before={tabDropSlot === index ? "true" : "false"}
             data-drop-after={tabDropSlot === index + 1 ? "true" : "false"}
@@ -573,6 +587,29 @@ export function EditorPane({
             </button>
           </div>
         )}
+        {browserOpen && (
+          <div
+            className="tab"
+            data-active={browserActive ? "true" : "false"}
+            onClick={onBrowserActivate}
+            title="Browser"
+          >
+            <span className="tab__icon">
+              <Icon icon="solar:global-linear" width={14} height={14} />
+            </span>
+            <span className="tab__name">Browser</span>
+            <button
+              className="tab__close"
+              onClick={(event) => {
+                event.stopPropagation();
+                onBrowserClose?.();
+              }}
+              title="Close tab"
+            >
+              <Icon icon="solar:close-circle-linear" width={13} height={13} />
+            </button>
+          </div>
+        )}
         <div className="tabs__spacer" />
         {activeIsMarkdown && (
           <button
@@ -617,7 +654,15 @@ export function EditorPane({
             {remoteView}
           </div>
         )}
-        {!settingsActive && !remoteActive &&
+        {browserOpen && (
+          <div
+            className="editor-settings-layer"
+            data-active={browserActive ? "true" : "false"}
+          >
+            {browserView}
+          </div>
+        )}
+        {!settingsActive && !remoteActive && !browserActive &&
           (!activeTab ? (
             <div className="editor-empty">
               <span className="editor-empty__mark">

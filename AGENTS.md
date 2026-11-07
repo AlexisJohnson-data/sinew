@@ -126,7 +126,8 @@ Code map:
 │   │       ├── observe.rs
 │   │       ├── recording.rs
 │   │       ├── session.rs
-│   │       └── snapshot.rs
+│   │       ├── snapshot.rs
+│   │       └── view.rs
 │   ├── sinew-core
 │   │   ├── Cargo.toml
 │   │   └── src
@@ -271,6 +272,7 @@ Code map:
 │   │       ├── AppIcon-76x76@2x.png
 │   │       └── AppIcon-83.5x83.5@2x.png
 │   └── src
+│       ├── browser_view.rs
 │       ├── context.rs
 │       ├── conversations.rs
 │       ├── git.rs
@@ -297,6 +299,7 @@ Code map:
     ├── types.ts
     ├── vite-env.d.ts
     ├── components
+    │   ├── BrowserPanel.tsx
     │   ├── ConversationList.tsx
     │   ├── EditorPane.tsx
     │   ├── FileTree.tsx

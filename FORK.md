@@ -151,6 +151,15 @@ Chrome DevTools MCP.
   files), `browser_network` (list, failed only, and per request: headers
   with secrets masked, request and response bodies), `browser_performance`
   (TTFB, FCP, LCP with its element, CLS, INP, long tasks, slowest requests).
+- **Browser panel.** The page shows live in a Browser tab next to the chat
+  (titlebar **Browser**, or on its own when the agent starts browsing): a
+  CDP screencast of the windowless Chrome, with clicks, typing, scrolling,
+  back/forward/reload and an address bar sent back as real input. **Pick**
+  highlights the element under the pointer; a click sends it to the chat as
+  a description, a CSS selector, the page URL and a picture of it. The
+  agent launches Chrome windowless by default now. Code:
+  `crates/sinew-browser/src/view.rs`, `src-tauri/src/browser_view.rs`,
+  `src/components/BrowserPanel.tsx`.
 - **Tabs, viewport, GIF.** `browser_tabs`, `browser_resize` for phone
   layouts, `browser_record` for an animated GIF. JS dialogs are
   auto-accepted and logged.

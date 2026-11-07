@@ -5,6 +5,8 @@ import type {
   ActiveTurnSummary,
   AgentMode,
   AnthropicProviderStatus,
+  BrowserPick,
+  BrowserViewTab,
   GithubRemoteChange,
   GithubRenameOutcome,
   ChatMessage,
@@ -338,6 +340,29 @@ export const api = {
       "update_skill_content_command",
       { input: { workspacePath, path, content } },
     );
+  },
+  browserViewStart(workspacePath: string) {
+    return invoke<number>("browser_view_start", { input: { workspacePath } });
+  },
+  browserViewStop(workspacePath: string, viewId: number) {
+    return invoke<void>("browser_view_stop", { input: { workspacePath, viewId } });
+  },
+  browserViewInput(workspacePath: string, event: Record<string, unknown>) {
+    return invoke<void>("browser_view_input", { input: { workspacePath, event } });
+  },
+  browserViewNavigate(workspacePath: string, target: string) {
+    return invoke<void>("browser_view_navigate", { input: { workspacePath, target } });
+  },
+  browserViewTabs(workspacePath: string) {
+    return invoke<BrowserViewTab[]>("browser_view_tabs", { input: { workspacePath } });
+  },
+  browserViewSwitchTab(workspacePath: string, tab: string) {
+    return invoke<void>("browser_view_switch_tab", { input: { workspacePath, tab } });
+  },
+  browserViewPick(workspacePath: string, x: number, y: number, capture: boolean) {
+    return invoke<BrowserPick | null>("browser_view_pick", {
+      input: { workspacePath, x, y, capture },
+    });
   },
   openExternalUrl(url: string) {
     return invoke<void>("open_external_url_command", {

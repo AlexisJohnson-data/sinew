@@ -47,6 +47,8 @@ pub(super) struct DesktopState {
     pub(super) remote: RemoteRuntime,
     pub(super) file_watchers: Arc<Mutex<HashMap<String, RecommendedWatcher>>>,
     pub(super) browser_sessions: sinew_browser::BrowserSessions,
+    /// Live views of the browser panel, by workspace.
+    pub(super) browser_views: crate::browser_view::BrowserViews,
     pub(super) terminal_sessions: Arc<Mutex<HashMap<String, TerminalProcess>>>,
     pub(super) openai_login: Arc<Mutex<Option<OpenAiLoginAttempt>>>,
     pub(super) anthropic_login: Arc<Mutex<Option<AnthropicLoginAttempt>>>,

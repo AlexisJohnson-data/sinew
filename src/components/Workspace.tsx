@@ -18,6 +18,7 @@ import { Splitter } from "./Splitter";
 import { FileTree, type FileTreeHandle } from "./FileTree";
 import { ConversationList } from "./ConversationList";
 import { GitPanel, GitMark } from "./GitPanel";
+import { BrowserPanel } from "./BrowserPanel";
 import { EditorPane } from "./EditorPane";
 import { SettingsPane } from "./SettingsPane";
 import { SettingsDialog } from "./SettingsDialog";
@@ -358,6 +359,8 @@ export function Workspace({
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [remoteActive, setRemoteActive] = useState(false);
   const [settingsActive, setSettingsActive] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserActive, setBrowserActive] = useState(false);
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
   const [fileTreeRefreshToken, setFileTreeRefreshToken] = useState(0);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
@@ -620,6 +623,7 @@ export function Workspace({
         setActiveTabIndex(existing);
         setSettingsActive(false);
         setRemoteActive(false);
+        setBrowserActive(false);
         queueReveal();
         return;
       }
@@ -639,12 +643,14 @@ export function Workspace({
             setActiveTabIndex(existingIndex);
             setSettingsActive(false);
             setRemoteActive(false);
+            setBrowserActive(false);
             return prev;
           }
           const next = [...prev, newTab];
           setActiveTabIndex(next.length - 1);
           setSettingsActive(false);
           setRemoteActive(false);
+          setBrowserActive(false);
           return next;
         });
         queueReveal();
@@ -659,6 +665,7 @@ export function Workspace({
     setActiveTabIndex(index);
     setSettingsActive(false);
     setRemoteActive(false);
+    setBrowserActive(false);
   }, []);
 
   const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
@@ -735,6 +742,7 @@ export function Workspace({
         setActiveTabIndex(existing);
         setSettingsActive(false);
         setRemoteActive(false);
+        setBrowserActive(false);
         queueReveal();
         return;
       }
@@ -755,12 +763,14 @@ export function Workspace({
             setActiveTabIndex(existingIndex);
             setSettingsActive(false);
             setRemoteActive(false);
+            setBrowserActive(false);
             return prev;
           }
           const next = [...prev, newTab];
           setActiveTabIndex(next.length - 1);
           setSettingsActive(false);
           setRemoteActive(false);
+          setBrowserActive(false);
           return next;
         });
         queueReveal();
@@ -845,12 +855,28 @@ export function Workspace({
     });
   }, []);
 
+  const openBrowser = useCallback(() => {
+    setBrowserOpen(true);
+    setBrowserActive(true);
+    setSettingsActive(false);
+    setRemoteActive(false);
+  }, []);
+
+  const closeBrowser = useCallback(() => {
+    setBrowserOpen(false);
+    setBrowserActive(false);
+  }, []);
+
   const closeRemote = useCallback(() => {
     setRemoteOpen(false);
     setRemoteActive(false);
   }, []);
 
   const closeActiveEditorTab = useCallback(() => {
+    if (browserActive) {
+      closeBrowser();
+      return;
+    }
     if (remoteActive) {
       closeRemote();
       return;
@@ -860,7 +886,16 @@ export function Workspace({
       return;
     }
     if (activeTabIndex >= 0) closeTab(activeTabIndex);
-  }, [activeTabIndex, closeRemote, closeSettings, closeTab, remoteActive, settingsActive]);
+  }, [
+    activeTabIndex,
+    browserActive,
+    closeBrowser,
+    closeRemote,
+    closeSettings,
+    closeTab,
+    remoteActive,
+    settingsActive,
+  ]);
 
   const handleTreeEntryRenamed = useCallback(
     (oldRelativePath: string, entry: WorkspaceEntry) => {
@@ -1212,6 +1247,26 @@ export function Workspace({
       if (unlisten) unlisten();
     };
   }, [selectConversation, createConversation]);
+
+  // When the agent starts using the browser, show it working.
+  useEffect(() => {
+    const handler = (_conversationId: string, event: AgentEvent) => {
+      if (event.type === "tool_started" && event.name.startsWith("browser_")) {
+        setBrowserOpen((open) => {
+          if (!open) {
+            setBrowserActive(true);
+            setSettingsActive(false);
+            setRemoteActive(false);
+          }
+          return true;
+        });
+      }
+    };
+    agentSubsRef.current.add(handler);
+    return () => {
+      agentSubsRef.current.delete(handler);
+    };
+  }, []);
 
   const subscribeEvents = useCallback(
     (
@@ -1920,6 +1975,8 @@ export function Workspace({
       setSettingsActive(false);
       setRemoteOpen(false);
       setRemoteActive(false);
+      setBrowserOpen(false);
+      setBrowserActive(false);
       setFileSearchOpen(false);
       setPendingRootCreate(null);
       setEditorRevealTarget(null);
@@ -2054,14 +2111,14 @@ export function Workspace({
   );
 
   const activeFilePath =
-    !settingsActive && !remoteActive && activeTabIndex >= 0 && tabs[activeTabIndex]
+    !settingsActive && !remoteActive && !browserActive && activeTabIndex >= 0 && tabs[activeTabIndex]
       ? tabs[activeTabIndex].relativePath
       : null;
   const terminalVisible = terminalAvailable && terminalOpen;
   // Center pane visibility: the editor + terminal area only shows up
   // when there is at least one file tab open, or the terminal is
   // toggled on. Otherwise the workbench is sidebar + chat only.
-  const editorShellVisible = tabs.length > 0 || terminalVisible;
+  const editorShellVisible = tabs.length > 0 || terminalVisible || browserOpen;
   const activeConversationIsStreaming = streamingConversationIds.has(
     activeConv.id,
   );
@@ -2101,6 +2158,15 @@ export function Workspace({
             {remoteStatus?.devices.some((device) => device.connected) && (
               <span className="titlebar__btn-dot" aria-hidden />
             )}
+          </button>
+          <button
+            className="titlebar__btn"
+            data-on={browserActive ? "true" : "false"}
+            onClick={() => (browserActive ? closeBrowser() : openBrowser())}
+            title={browserActive ? "Close the browser" : "Open the browser"}
+          >
+            <Icon icon="solar:global-linear" width={12} height={12} />
+            Browser
           </button>
           <button
             className="titlebar__btn"
@@ -2405,11 +2471,18 @@ export function Workspace({
               onRemoteActivate={() => {
                 setRemoteActive(true);
                 setSettingsActive(false);
+                setBrowserActive(false);
               }}
+              browserOpen={browserOpen}
+              browserActive={browserActive}
+              browserView={<BrowserPanel workspacePath={workspacePath} active={browserActive} />}
+              onBrowserActivate={openBrowser}
+              onBrowserClose={closeBrowser}
               onRemoteClose={closeRemote}
               revealTarget={editorRevealTarget}
               onSettingsActivate={() => {
                 setRemoteActive(false);
+                setBrowserActive(false);
                 setSettingsActive(true);
               }}
               onSettingsClose={closeSettings}

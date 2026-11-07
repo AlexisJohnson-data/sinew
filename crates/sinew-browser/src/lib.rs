@@ -4,6 +4,7 @@ pub mod observe;
 pub mod recording;
 mod session;
 pub mod snapshot;
+pub mod view;
 
 pub use observe::{ConsoleEntry, NetworkEntry, TabLog};
 pub use recording::{gif_to_base64, RecordingHandle};

@@ -70,7 +70,7 @@ impl BrowserSession {
     pub async fn launch(headless: bool) -> Result<Self> {
         let executable = find_browser_executable()
             .context("No Chrome or Edge found. Install Google Chrome or Microsoft Edge.")?;
-        let user_data_dir = std::env::temp_dir().join("sinew-browser-profile");
+        let user_data_dir = profile_dir();
         let mut builder = BrowserConfig::builder()
             .chrome_executable(executable)
             .user_data_dir(&user_data_dir)
@@ -399,6 +399,32 @@ impl Clone for BrowserSessions {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
+}
+
+/// The Chrome profile of this Sinew process. Chrome refuses a profile
+/// another Chrome is using (exit code 21), so each Sinew (the installed app,
+/// a dev build, a test) gets its own. Profiles of earlier runs are removed.
+fn profile_dir() -> std::path::PathBuf {
+    const PREFIX: &str = "sinew-browser-profile-";
+    const STALE_AFTER: Duration = Duration::from_secs(2 * 24 * 60 * 60);
+    let temp = std::env::temp_dir();
+    let own = format!("{PREFIX}{}", std::process::id());
+    if let Ok(entries) = std::fs::read_dir(&temp) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let stale = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age > STALE_AFTER);
+            let legacy = name == "sinew-browser-profile";
+            if name != own && (legacy || name.starts_with(PREFIX)) && stale {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    temp.join(own)
 }
 
 fn find_browser_executable() -> Option<std::path::PathBuf> {

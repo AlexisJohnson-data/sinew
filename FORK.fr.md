@@ -168,6 +168,16 @@ Chrome DevTools MCP.
   requête : en-têtes avec secrets masqués, corps de requête et de réponse),
   `browser_performance` (TTFB, FCP, LCP avec son élément, CLS, INP, tâches
   longues, requêtes les plus lentes).
+- **Panneau navigateur.** La page s'affiche en direct dans un onglet
+  Browser à côté du chat (bouton **Browser** de la barre de titre, ou tout
+  seul quand l'agent se met à naviguer) : un flux CDP du Chrome sans
+  fenêtre, avec clics, frappe, défilement, précédent/suivant/recharger et
+  barre d'adresse renvoyés comme de vraies saisies. **Pick** surligne
+  l'élément sous le pointeur ; un clic l'envoie au chat avec une
+  description, un sélecteur CSS, l'URL de la page et une image. L'agent
+  lance maintenant Chrome sans fenêtre par défaut. Code :
+  `crates/sinew-browser/src/view.rs`, `src-tauri/src/browser_view.rs`,
+  `src/components/BrowserPanel.tsx`.
 - **Onglets, taille, GIF.** `browser_tabs`, `browser_resize` pour les mises
   en page mobiles, `browser_record` pour un GIF animé. Les boîtes de
   dialogue JS sont acceptées automatiquement et notées.

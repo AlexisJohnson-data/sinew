@@ -109,6 +109,7 @@ use tokio::{
     sync::{mpsc, Mutex, Notify, RwLock},
 };
 
+mod browser_view;
 mod context;
 mod conversations;
 mod git;
@@ -235,6 +236,7 @@ pub fn run() {
         remote,
         file_watchers: Arc::new(Mutex::new(HashMap::new())),
         browser_sessions: sinew_browser::BrowserSessions::new(),
+        browser_views: Arc::new(Mutex::new(HashMap::new())),
         terminal_sessions: Arc::new(Mutex::new(HashMap::new())),
         openai_login: Arc::new(Mutex::new(None)),
         anthropic_login: Arc::new(Mutex::new(None)),
@@ -538,6 +540,13 @@ pub fn run() {
             terminal::kill_terminal,
             git::git_repository_snapshot_command,
             git::git_init_command,
+            browser_view::browser_view_start,
+            browser_view::browser_view_stop,
+            browser_view::browser_view_input,
+            browser_view::browser_view_navigate,
+            browser_view::browser_view_tabs,
+            browser_view::browser_view_switch_tab,
+            browser_view::browser_view_pick,
             git::git_find_github_remotes_command,
             git::git_apply_github_rename_command,
             git::git_create_worktree_command,

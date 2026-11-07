@@ -86,7 +86,7 @@ impl BrowserTools {
                 object(
                     json!({
                         "url": { "type": "string", "description": "URL, or \"back\", \"forward\", \"reload\"" },
-                        "headless": { "type": "boolean", "description": "Launch without a visible window (only when the browser is not open yet). Default false." }
+                        "headless": { "type": "boolean", "description": "Launch without a Chrome window (only when the browser is not open yet). Default true: the user watches the page live in Sinew's browser panel. Pass false only if the user asks for a real Chrome window." }
                     }),
                     &["url"],
                 ),
@@ -348,8 +348,13 @@ impl BrowserTools {
         #[derive(Deserialize)]
         struct Input {
             url: String,
-            #[serde(default)]
+            /// Windowless by default: the user watches in Sinew's browser
+            /// panel instead of a separate Chrome window.
+            #[serde(default = "windowless")]
             headless: bool,
+        }
+        fn windowless() -> bool {
+            true
         }
         let input: Input = parse(input)?;
         let mut sessions = self.sessions.0.lock().await;
